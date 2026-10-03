@@ -36,8 +36,18 @@ import makeWASocket, {
 import pino from "pino";
 import qrcode from "qrcode-terminal";
 
-export const description =
-  "My WhatsApp, as Baileys' socket (https://baileys.wiki): every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first. Every event of the socket lands on the account's stream (/integrations/whatsapp).";
+/** Where this account's messages land in the project: WHATSAPP_LOG_PATH for a second account lent
+ *  beside the first (`iterate provide whatsapp.ts --name whatsappPersonal` with its own
+ *  WHATSAPP_AUTH_FOLDER), each on a stream of its own. */
+const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
+
+/** Whose account this is, in the words an agent reads in its capability tree: WHATSAPP_ACCOUNT
+ *  ("The agents' own WhatsApp account, +44 7441 138737", "Jonas's own personal WhatsApp account,
+ *  +44 7477 472160: writing from it is writing as Jonas"). Two accounts lent from one file are
+ *  otherwise told apart by nothing but their name. */
+const ACCOUNT = process.env.WHATSAPP_ACCOUNT || "A WhatsApp account";
+
+export const description = `${ACCOUNT}, as Baileys' socket (https://baileys.wiki): every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first. Every event of the socket lands on the account's stream (${LOG_PATH}).`;
 
 /** The project, as `iterate provide` hands it over: the part this file uses. */
 export type Itx = {
@@ -370,7 +380,8 @@ export function provideWhatsApp(input: {
     lent.getLIDForPN = async (pn: string) => await lidMapping().getLIDForPN(pn);
     lent.__describe = () => ({
       instructions:
-        "My WhatsApp through Baileys (https://baileys.wiki), a linked device on my own computer. Every function is Baileys' socket function of the same name, so Baileys' documentation is this API's, e.g. sendMessage(jid, { text }), sendMessage(jid, { image: { url }, caption }), sendMessage(jid, { react: { text, key } }), groupMetadata(jid), onWhatsApp(...phones), updateProfilePicture(jid, { url }). A jid is <digits>@s.whatsapp.net (a person), …@g.us (a group) or …@lid. Bytes cross as { type: 'Buffer', data: <base64> }. Media: pass { url } — an https: URL (an itx.files URL works) or a data: URL; nothing else. Added to the socket's own: downloadMedia(message) answers the bytes of a received message's media (store them with itx.files); user() answers the linked account (Baileys' sock.user); getPNForLID(lid) and getLIDForPN(pn) translate between a …@lid and a phone number's jid. Every event of the socket lands on " +
+        ACCOUNT +
+        " through Baileys (https://baileys.wiki), a linked device on its owner's computer. Every function is Baileys' socket function of the same name, so Baileys' documentation is this API's, e.g. sendMessage(jid, { text }), sendMessage(jid, { image: { url }, caption }), sendMessage(jid, { react: { text, key } }), groupMetadata(jid), onWhatsApp(...phones), updateProfilePicture(jid, { url }). A jid is <digits>@s.whatsapp.net (a person), …@g.us (a group) or …@lid. Bytes cross as { type: 'Buffer', data: <base64> }. Media: pass { url } — an https: URL (an itx.files URL works) or a data: URL; nothing else. Added to the socket's own: downloadMedia(message) answers the bytes of a received message's media (store them with itx.files); user() answers the linked account (Baileys' sock.user); getPNForLID(lid) and getLIDForPN(pn) translate between a …@lid and a phone number's jid. Every event of the socket lands on " +
         input.logPath +
         " as whatsapp/<Baileys' event name> with Baileys' data in payload.data: whatsapp/messages.upsert (one event a message: payload.data.messages[0], payload.data.type), whatsapp/messages.update (delivery, read, edits), whatsapp/message-receipt.update, whatsapp/group-participants.update, whatsapp/presence.update, whatsapp/call, …; and what belongs to one chat lands again on " +
         input.logPath +
@@ -484,11 +495,6 @@ async function connectBaileys(onSocket: (socket: WASocket) => void): Promise<voi
   };
   open();
 }
-
-/** Where this account's messages land in the project: WHATSAPP_LOG_PATH for a second account lent
- *  beside the first (`iterate provide whatsapp.ts --name whatsappPersonal` with its own
- *  WHATSAPP_AUTH_FOLDER), each on a stream of its own. */
-const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
 
 export default provideWhatsApp({
   logPath: LOG_PATH,
