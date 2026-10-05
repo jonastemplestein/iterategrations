@@ -374,7 +374,7 @@ export interface FilterTag {
 export interface SearchQueryParams {
   /** Search term (for text search) */
   searchTerm?: string;
-  /** Category path (for browsing) */
+  /** Category ID (for browsing) */
   category?: string;
   /** Sort order */
   sortBy?: SearchSortBy;
@@ -386,7 +386,10 @@ export interface SearchQueryParams {
   searchTags?: SearchTag[];
   /** Filter tags for filtering */
   filterTags?: FilterTag[];
-  /** Branch ID for availability */
+  /**
+   * Branch ID for availability.
+   * Waitrose search and browse currently return no products when this is set.
+   */
   branchId?: string;
   /** Promotion ID to filter by promotion */
   promotionId?: string;
@@ -456,12 +459,24 @@ export interface FavouriteCategory {
   productCount: number;
 }
 
+/** Child category returned when browsing a category */
+export interface SubCategory {
+  /** Category ID to pass to browseProducts */
+  categoryId: string;
+  name: string;
+  /** Approximate number of products in the category */
+  expectedResults: number;
+  hiddenInNav: boolean;
+}
+
 /** Search results response */
 export interface SearchResponse {
   /** Products matching the search */
   products: SearchProduct[];
   /** Total number of matching products */
   totalMatches: number;
+  /** Child categories (browse only) */
+  subCategories?: SubCategory[];
   /** Favourite categories (for logged-in users) */
   favouriteCategories?: FavouriteCategory[];
   /** Personalisation information */
@@ -584,6 +599,7 @@ export class WaitroseApi {
       totalMatches: number;
       productsInResultset?: number;
       componentsAndProducts?: Array<{ searchProduct?: SearchProduct }>;
+      subCategories?: SubCategory[];
     };
 
     // Map the raw response to our cleaner SearchResponse type
@@ -599,6 +615,7 @@ export class WaitroseApi {
     return {
       products,
       totalMatches: raw.totalMatches,
+      ...(raw.subCategories && { subCategories: raw.subCategories }),
     };
   }
 
@@ -1071,26 +1088,27 @@ export class WaitroseApi {
       ...options,
     };
 
-    // Add branch ID if we have one
-    if (this.#defaultBranchId && !queryParams.branchId) {
-      queryParams.branchId = this.#defaultBranchId;
-    }
-
     return this.#restApi("search", {
       customerSearchRequest: { queryParams },
     });
   }
 
   /**
-   * Browse products by category
+   * Browse products by category ID (numeric, or a UUID for some curated categories).
+   *
+   * Waitrose no longer accepts path slugs such as "groceries/bakery" here; they
+   * return no results. Start from Groceries ("10051") and drill down via `subCategories`.
    *
    * @example
    * ```ts
-   * // Browse a category
-   * const results = await client.browseProducts("groceries/bakery/bread");
+   * // Browse the Groceries category
+   * const results = await client.browseProducts("10051");
+   *
+   * // Browse its first subcategory
+   * const sub = await client.browseProducts(results.subCategories![0]!.categoryId);
    *
    * // Browse with sorting
-   * const results = await client.browseProducts("groceries/dairy", {
+   * const results = await client.browseProducts("10051", {
    *   sortBy: "MOST_POPULAR"
    * });
    * ```
@@ -1106,11 +1124,6 @@ export class WaitroseApi {
       sortBy: options.sortBy ?? "RELEVANCE",
       ...options,
     };
-
-    // Add branch ID if we have one
-    if (this.#defaultBranchId && !queryParams.branchId) {
-      queryParams.branchId = this.#defaultBranchId;
-    }
 
     return this.#restApi("browse", {
       customerSearchRequest: { queryParams },
@@ -1182,10 +1195,6 @@ export class WaitroseApi {
       sortBy: options.sortBy ?? "RELEVANCE",
       ...options,
     };
-
-    if (this.#defaultBranchId && !queryParams.branchId) {
-      queryParams.branchId = this.#defaultBranchId;
-    }
 
     return this.#restApi("search", {
       customerSearchRequest: { queryParams },

@@ -63,11 +63,33 @@ test("every request carries the secret placeholder, never a token, and the shopp
   );
   assert.match(seen[0]!.body.query, /shoppingContext/);
   assert.ok(seen.every((request) => request.headers.Authorization === AUTHORIZATION));
-  // the trolley is the context's order, and the search is the context's customer at its branch
+  // the trolley is the context's order, and the search is the context's customer, with no branch:
+  // Waitrose answers zero products to a search or browse that names one
   assert.equal(seen[1]!.body.variables.orderId, "o-1");
   const search = seen.find((request) => request.url.includes("/productcontent/search/"))!;
   assert.match(search.url, /\/search\/c-1\?clientType=WEB_APP$/);
-  assert.equal(search.body.customerSearchRequest.queryParams.branchId, "b-1");
+  assert.equal(search.body.customerSearchRequest.queryParams.branchId, undefined);
+});
+
+test("browse takes a category ID, names no branch, and returns its subcategories", async () => {
+  const subCategories = [
+    { categoryId: "300119", name: "Bakery", expectedResults: 599, hiddenInNav: false },
+  ];
+  const { fetch, seen } = fakeWaitrose({
+    "https://www.waitrose.com/api/content-prod": () => ({
+      totalMatches: 16965,
+      componentsAndProducts: [{ searchProduct: { id: "p1", name: "Duchy Organic Carrots" } }],
+      subCategories,
+    }),
+  });
+  const api = new WaitroseApi({ fetch, authorization: AUTHORIZATION });
+
+  const groceries = await api.browseProducts("10051");
+
+  assert.deepEqual(groceries.subCategories, subCategories);
+  const browse = seen.find((request) => request.url.includes("/productcontent/browse/"))!;
+  assert.equal(browse.body.customerSearchRequest.queryParams.category, "10051");
+  assert.equal(browse.body.customerSearchRequest.queryParams.branchId, undefined);
 });
 
 test("a failed context read is not remembered: the next call tries again", async () => {
