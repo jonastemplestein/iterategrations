@@ -1,13 +1,10 @@
-// herdr.ts — Herdr (the terminal workspace manager for coding agents) lent to an iterate project
-// from the computer it runs on, with `iterate provide`:
-//   - CALLS: one function, `call(method, params)`, is Herdr's whole socket API
-//     (https://herdr.dev/docs/socket-api): `itx.jonas.herdr.call("agent.list")`.
-//   - EVENTS: what happens in Herdr lands on a stream of the project as `herdr/<kind>`. The
-//     structural ones (a pane, a worktree, an agent's status) are durable; the ones about where you
-//     look right now (focus, layout) are ephemeral, live subscribers only. Scroll positions and
-//     pane output are never subscribed to: they are most of the traffic and none of the news.
+// herdr.ts — Herdr (the terminal workspace manager for coding agents) lent to an iterate project from
+// the computer it runs on, with `iterate provide`:
+//   - CALLS: `itx.jonas.herdr.call(method, params)` is Herdr's whole socket API.
+//   - EVENTS: what happens in Herdr lands on a stream of the project as `herdr/<kind>`. News (panes,
+//     worktrees, an agent's status) is durable; focus and layout are ephemeral, live subscribers only.
 // Herdr's socket takes one JSON line a request and closes after the answer; `events.subscribe` is the
-// one connection that stays open. Nothing here depends on a Herdr client: the wire is the contract.
+// one connection that stays open. The wire is the contract, so there is no client library.
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -18,15 +15,7 @@ const LOG_PATH = process.env.HERDR_LOG_PATH || "/integrations/herdr/primary";
 /** Who this Herdr is, in the description a model reads: HERDR_LABEL="Jonas's Herdr on his Mac". */
 const LABEL = process.env.HERDR_LABEL || "Herdr";
 
-/** Event kinds never appended, by their name: HERDR_SKIP_EVENTS=pane_updated,layout_updated. */
-const SKIP = new Set(
-  (process.env.HERDR_SKIP_EVENTS || "")
-    .split(",")
-    .map((kind) => kind.trim())
-    .filter(Boolean),
-);
-
-/** Where Herdr listens: Herdr's own order, HERDR_SOCKET_PATH, then a named session, then the default. */
+/** Where Herdr listens, in Herdr's own order: HERDR_SOCKET_PATH, a named session, the default. */
 export function socketPath(env: NodeJS.ProcessEnv = process.env): string {
   if (env.HERDR_SOCKET_PATH) return env.HERDR_SOCKET_PATH;
   const config = join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "herdr");
@@ -37,18 +26,15 @@ export function socketPath(env: NodeJS.ProcessEnv = process.env): string {
 
 export type Itx = { cd(path: string): { append(...events: HerdrEvent[]): Promise<unknown> } };
 
-/** An event of Herdr as it lands: `herdr/<kind>`, Herdr's own data under `data`. A durable one has an
- *  idempotency key (what waited for the project and is appended again lands once); an ephemeral one
- *  has none, it is never kept. */
+/** An event as it lands: `herdr/<kind>`, Herdr's data under `data`. Ephemeral ones are never kept. */
 export type HerdrEvent = {
   type: `herdr/${string}`;
   payload: { event: string; data: unknown };
-  idempotencyKey?: string;
   ephemeral?: true;
 };
 
-/** Events that are news: the set of workspaces, tabs and panes, and what the agents in them are
- *  doing. Every other kind is "right now" state, which a snapshot rebuilds: ephemeral. */
+/** News: what exists, and what the agents in it are doing. Every other kind is "right now" state
+ *  (focus, layout, titles), which a snapshot rebuilds: ephemeral. */
 const DURABLE = new Set([
   "snapshot",
   "workspace_created",
@@ -67,8 +53,8 @@ const DURABLE = new Set([
   "pane_agent_status_changed",
 ]);
 
-/** What `events.subscribe` takes without a pane. `pane.agent_status_changed` needs a pane, so each
- *  pane has a connection of its own. `pane.scroll_changed` and `pane.output_matched` are left out. */
+/** What `events.subscribe` takes without a pane. Left out on purpose: `pane.scroll_changed` (four fifths
+ *  of Herdr's events, and no news) and `pane.output_matched`; read output with `pane.read`. */
 const SUBSCRIPTIONS = [
   "workspace.created",
   "workspace.updated",
@@ -96,12 +82,6 @@ const SUBSCRIPTIONS = [
   "layout.updated",
 ];
 
-/** A durable event waits for the project, up to this many; the oldest is dropped past it. */
-const PENDING_LIMIT = 1000;
-
-/** The wait before the watch dials Herdr again, by the failures in a row. */
-const RETRY_MS = [1_000, 2_000, 5_000, 15_000, 30_000];
-
 export class HerdrError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -109,8 +89,6 @@ export class HerdrError extends Error {
     this.code = code;
   }
 }
-
-let requestCount = 0;
 
 /** Read a socket's newline-delimited lines. */
 function lines(socket: Socket, onLine: (line: string) => void): void {
@@ -126,6 +104,8 @@ function lines(socket: Socket, onLine: (line: string) => void): void {
   });
 }
 
+let requests = 0;
+
 /** One request, its own connection: Herdr answers once and closes. A Herdr error rejects with its
  *  code and message. */
 export function request(
@@ -136,16 +116,12 @@ export function request(
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let done = false;
     const finish = (settle: () => void) => {
-      if (done) return;
-      done = true;
       clearTimeout(timer);
       socket.destroy();
       settle();
     };
-    timer = setTimeout(
+    const timer = setTimeout(
       () =>
         finish(() =>
           reject(new HerdrError("timeout", `${method} did not answer in ${timeoutMs} ms`)),
@@ -154,9 +130,7 @@ export function request(
     );
     socket.on("error", (error) =>
       finish(() =>
-        reject(
-          new HerdrError("unreachable", `no answer from Herdr's socket ${path}: ${error.message}`),
-        ),
+        reject(new HerdrError("unreachable", `Herdr's socket ${path}: ${error.message}`)),
       ),
     );
     socket.on("close", () =>
@@ -164,32 +138,23 @@ export function request(
     );
     lines(socket, (line) =>
       finish(() => {
-        try {
-          const reply = JSON.parse(line);
-          if (reply.error) reject(new HerdrError(reply.error.code, reply.error.message));
-          else resolve(reply.result);
-        } catch (error) {
-          reject(error);
-        }
+        const reply = JSON.parse(line);
+        if (reply.error) reject(new HerdrError(reply.error.code, reply.error.message));
+        else resolve(reply.result);
       }),
     );
     socket.on("connect", () =>
-      socket.write(`${JSON.stringify({ id: `r${++requestCount}`, method, params })}\n`),
+      socket.write(`${JSON.stringify({ id: `r${++requests}`, method, params })}\n`),
     );
   });
 }
 
 type Frame = { event: string; data?: Record<string, unknown> };
-type Stream = { closed: Promise<string>; close(): void };
 
-/** `events.subscribe`: resolves once Herdr says `subscription_started`, then hands each frame over
- *  until the connection ends; `closed` says why it ended. A refused subscription rejects. */
-function subscribe(
-  path: string,
-  subscriptions: unknown[],
-  onFrame: (frame: Frame) => void,
-): Promise<Stream> {
-  return new Promise((resolve, reject) => {
+/** `events.subscribe`: resolves, with a way to close it, once Herdr says `subscription_started`; each
+ *  frame goes to `onFrame`; `closed` says why the connection ended. A refused subscription rejects. */
+function subscribe(path: string, subscriptions: unknown[], onFrame: (frame: Frame) => void) {
+  return new Promise<{ closed: Promise<string>; close(): void }>((resolve, reject) => {
     const socket = createConnection(path);
     let started = false;
     let end: (reason: string) => void = () => {};
@@ -204,23 +169,15 @@ function subscribe(
       end("closed");
     });
     lines(socket, (line) => {
-      let message: any;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        return;
+      const message = JSON.parse(line);
+      if (started) return onFrame(message);
+      if (message.error) {
+        reject(new HerdrError(message.error.code, message.error.message));
+        socket.destroy();
+      } else {
+        started = true;
+        resolve({ closed, close: () => socket.destroy() });
       }
-      if (!started) {
-        if (message.error) {
-          reject(new HerdrError(message.error.code, message.error.message));
-          socket.destroy();
-        } else if (message.result?.type === "subscription_started") {
-          started = true;
-          resolve({ closed, close: () => socket.destroy() });
-        }
-        return;
-      }
-      if (typeof message.event === "string") onFrame(message);
     });
     socket.on("connect", () =>
       socket.write(
@@ -234,169 +191,74 @@ function subscribe(
  *  answers a subscription of that name: one spelling, Herdr's own `EventKind`, underscores. */
 const kindOf = (event: string) => event.replaceAll(".", "_");
 
-/** The lend. `socket` is Herdr's; `input.retryMs` is the tests'. */
-export function createBridge(input: {
-  logPath: string;
-  socket: string;
-  skip?: ReadonlySet<string>;
-  retryMs?: number[];
-}) {
-  const skip = input.skip ?? new Set<string>();
-  const retryMs = input.retryMs ?? RETRY_MS;
+/** The lend. `socket` is Herdr's; `retryMs` is the wait before dialing Herdr again, the tests' to shorten. */
+export function createBridge(input: { logPath: string; socket: string; retryMs?: number }) {
   let itx: Itx | undefined;
-  let stopping = false;
   let watching: Promise<void> | undefined;
-  /** An event's key says which run of this process appended it, and in what order. */
-  const run = Date.now().toString(36);
-  let count = 0;
-  const pending: HerdrEvent[] = [];
-  let flushing: Promise<void> | undefined;
-  let ephemeralRefused = false;
+  let stopping = false;
+  /** Appends go one after another, so events land in the order Herdr said them. */
+  let appended: Promise<unknown> = Promise.resolve();
   const log = (line: string) => console.error(`Herdr: ${line}`);
 
-  /** Append what waits, in order, over the newest connection, one flush at a time; a failure leaves
-   *  it waiting for the next connection or the next event. */
-  const flush = (): Promise<void> =>
-    (flushing ??= (async () => {
-      try {
-        while (itx && pending.length > 0) {
-          const batch = pending.slice(0, 50);
-          await itx.cd(input.logPath).append(...batch);
-          pending.splice(0, batch.length);
-        }
-        return true;
-      } catch (error) {
-        log(
-          `${pending.length} event(s) wait for the project (${error instanceof Error ? error.message : String(error)})`,
-        );
-        return false;
-      }
-    })().then((appended) => {
-      flushing = undefined;
-      if (appended && itx && pending.length > 0) void flush(); // arrived as it finished
-    }));
-
+  /** A failed append is lost, and says so: the next `herdr/snapshot` is where to start again. */
   const emit = (kind: string, data: unknown) => {
-    if (skip.has(kind)) return;
-    const payload = { event: kind, data };
-    if (DURABLE.has(kind)) {
-      pending.push({
-        type: `herdr/${kind}`,
-        payload,
-        idempotencyKey: `herdr/${kind}:${run}:${++count}`,
-      });
-      if (pending.length > PENDING_LIMIT) {
-        const dropped = pending.splice(0, pending.length - PENDING_LIMIT);
-        log(`dropped ${dropped.length} event(s) the project never took`);
-      }
-      void flush();
-    } else if (itx && !ephemeralRefused) {
-      // live only: nobody listening (no connection) is the end of it
-      itx
-        .cd(input.logPath)
-        .append({ type: `herdr/${kind}`, payload, ephemeral: true })
-        .catch((error: unknown) => {
-          // the platform may take no ephemeral from a session: say so once, and stop trying
-          ephemeralRefused = true;
-          log(
-            `ephemeral events are refused, so they are dropped (${error instanceof Error ? error.message : String(error)})`,
-          );
-        });
-    }
+    const event: HerdrEvent = { type: `herdr/${kind}`, payload: { event: kind, data } };
+    if (!DURABLE.has(kind)) event.ephemeral = true;
+    appended = appended
+      .then(() => itx?.cd(input.logPath).append(event))
+      .catch((error: unknown) =>
+        log(`${kind} was not appended (${error instanceof Error ? error.message : String(error)})`),
+      );
   };
 
-  const onFrame = (frame: Frame) => {
-    const { type: _type, ...data } = frame.data ?? {};
-    emit(kindOf(frame.event), data);
-  };
+  const snapshot = async () => emit("snapshot", await request(input.socket, "session.snapshot"));
 
-  const paneExists = async (paneId: string) => {
-    try {
-      const { panes } = await request(input.socket, "pane.list");
-      return (panes as { pane_id: string }[]).some((pane) => pane.pane_id === paneId);
-    } catch {
-      return true; // cannot tell: let the session end and start again
-    }
-  };
-
-  /** One connection to Herdr: events from now on, then a snapshot (what is true now), and the
-   *  agent status of each pane; ends, saying why, when anything it holds drops. */
+  /** One connection of events. Panes are subscribed to when it opens (`pane.agent_status_changed`
+   *  needs a pane), so a pane that appears or goes ends it and the next one starts with the new set.
+   *  Subscribed first, then the snapshot: Herdr's own rule, since events cannot be replayed over one. */
   const session = async (): Promise<string> => {
-    const panes = new Map<string, Stream | null>(); // null: being opened
-    let end: (reason: string) => void = () => {};
-    const ended = new Promise<string>((done) => (end = done));
-    const watchPane = async (paneId: string) => {
-      if (panes.has(paneId)) return;
-      panes.set(paneId, null);
-      try {
-        const stream = await subscribe(
-          input.socket,
-          [{ type: "pane.agent_status_changed", pane_id: paneId }],
-          onFrame,
-        );
-        panes.set(paneId, stream);
-        void stream.closed.then(async (reason) => {
-          if (panes.get(paneId) !== stream) return; // closed on purpose
-          panes.delete(paneId);
-          if (await paneExists(paneId)) end(`the status stream of ${paneId} closed (${reason})`);
-        });
-      } catch (error) {
-        panes.delete(paneId);
-        if (await paneExists(paneId))
-          end(
-            `no status stream for ${paneId} (${error instanceof Error ? error.message : String(error)})`,
-          );
-      }
-    };
-    const unwatchPane = (paneId: string) => {
-      const stream = panes.get(paneId);
-      panes.delete(paneId);
-      stream?.close();
-    };
-    const main = await subscribe(
+    const { panes } = await request(input.socket, "pane.list");
+    const known = new Set<string>(panes.map((pane: { pane_id: string }) => pane.pane_id));
+    let again = false;
+    let close = () => {};
+    const stream = await subscribe(
       input.socket,
-      SUBSCRIPTIONS.map((type) => ({ type })),
+      [
+        ...SUBSCRIPTIONS.map((type) => ({ type })),
+        ...[...known].map((pane_id) => ({ type: "pane.agent_status_changed", pane_id })),
+      ],
       (frame) => {
-        onFrame(frame);
+        const { type: _type, ...data } = frame.data ?? {};
         const kind = kindOf(frame.event);
-        const data = frame.data ?? {};
-        if (kind === "pane_created") {
-          const paneId = (data.pane as { pane_id?: string } | undefined)?.pane_id;
-          if (paneId) void watchPane(paneId);
-        } else if (kind === "pane_closed" || kind === "pane_exited") {
-          if (typeof data.pane_id === "string") unwatchPane(data.pane_id);
+        emit(kind, data);
+        if (["pane_created", "pane_closed", "pane_exited"].includes(kind)) {
+          again = true;
+          close();
         }
       },
     );
-    void main.closed.then((reason) => end(`the event stream closed (${reason})`));
-    try {
-      const snapshot = await request(input.socket, "session.snapshot");
-      emit("snapshot", snapshot);
-      const { panes: listed } = await request(input.socket, "pane.list");
-      for (const pane of listed as { pane_id: string }[]) void watchPane(pane.pane_id);
-      return await ended;
-    } finally {
-      main.close();
-      for (const stream of panes.values()) stream?.close();
-      panes.clear();
-    }
+    close = () => stream.close();
+    await snapshot();
+    // a pane that came between the list and the subscription is one the status streams miss
+    const now = await request(input.socket, "pane.list");
+    if (now.panes.some((pane: { pane_id: string }) => !known.has(pane.pane_id))) again = true;
+    if (again) close();
+    const reason = await stream.closed;
+    return again ? "again" : reason;
   };
 
-  /** Keep a session going until `stop`. */
+  /** Keep a session going until `stop`: Herdr restarting, a handoff, or a pane coming or going ends one. */
   const watch = async () => {
-    for (let failures = 0; !stopping;) {
-      const started = Date.now();
+    while (!stopping) {
       let reason: string;
       try {
         reason = await session();
       } catch (error) {
         reason = error instanceof Error ? error.message : String(error);
       }
-      if (stopping) return;
-      if (Date.now() - started > 10_000) failures = 0; // it served: a fresh round of attempts
-      const wait = retryMs[Math.min(failures++, retryMs.length - 1)]!;
-      log(`${reason}; dialing again in ${wait / 1000} s`);
-      await new Promise((resolve) => setTimeout(resolve, wait));
+      if (stopping || reason === "again") continue;
+      log(`${reason}; dialing again`);
+      await new Promise((resolve) => setTimeout(resolve, input.retryMs ?? 2_000));
     }
   };
 
@@ -424,21 +286,21 @@ export function createBridge(input: {
   };
 
   return {
-    /** `iterate provide`'s default export: called on every connection to the project. */
+    /** `iterate provide`'s default export: called on every connection to the project. Events that
+     *  came while it was away are lost; a snapshot says where things stand now. */
     provide: async ({ itx: next }: { itx: Itx }) => {
       itx = next;
-      watching ??= watch();
-      void flush();
+      if (watching) void snapshot().catch((error) => log(`no snapshot (${error.message})`));
+      else watching = watch();
       return lent;
     },
     stop: () => {
       stopping = true;
     },
-    waiting: () => pending.length,
   };
 }
 
-/** One line of at most 500 characters: what the platform takes of a lend's description. */
-export const description = `${LABEL}, the workspace manager for coding agents. call(method, params) is Herdr's socket API (https://herdr.dev/docs/socket-api), answering its result: call("agent.list"), ("agent.prompt", { target, text }), ("agent.wait", { target, until: ["idle"], timeout_ms }), ("pane.read", { pane_id, source: "recent" }), ("workspace.list"), ("session.snapshot"); also tab.*, worktree.*, layout.*. Events land on ${LOG_PATH} as herdr/<kind>.`;
+/** One line of at most 500 characters, which is what the platform takes of a lend's description. */
+export const description = `${LABEL}. call(method, params) is Herdr's socket API, documented at https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/docs/next/website/src/content/docs/socket-api.mdx : call("agent.list"), call("agent.prompt", { target, text }), call("pane.read", { pane_id, source: "recent" }), call("session.snapshot"). Events land on ${LOG_PATH} as herdr/<kind>: news is durable, focus and layout are ephemeral (name the type to get one).`;
 
-export default createBridge({ logPath: LOG_PATH, socket: socketPath(), skip: SKIP }).provide;
+export default createBridge({ logPath: LOG_PATH, socket: socketPath() }).provide;
