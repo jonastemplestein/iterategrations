@@ -1,10 +1,9 @@
 // herdr.test.ts — the lend over a pretend Herdr (a Unix socket that speaks Herdr's wire: one JSON line
 // a request, closed after the answer, `events.subscribe` the one connection that stays open) and a
-// pretend project: a call reaches the socket and answers its result, Herdr's events land as
-// herdr/<kind> (the structural ones durable with a key, focus and layout ephemeral), each pane has a
-// status stream that follows panes as they come and go, a dropped connection is dialed again with a
-// fresh snapshot, and durable events that could not reach the project wait for its next connection.
-// The same lend through a real Herdr and project is the README's walkthrough.
+// pretend project: a call reaches the socket and answers its result; Herdr's events land as herdr/<kind>
+// (the news durable, focus ephemeral, scroll never asked for); a pane that appears ends the connection
+// and the next one subscribes to it; a dropped connection is dialed again; and a project that comes
+// back is given a fresh snapshot, since what happened while it was away is lost.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
@@ -81,15 +80,13 @@ function pretendProject() {
   const events: HerdrEvent[] = [];
   let failures = 0;
   const itx: Itx = {
-    cd: (path) => ({
+    cd: () => ({
       append: async (...batch) => {
         if (failures > 0) {
           failures--;
           throw new Error("the project is unreachable");
         }
-        events.push(
-          ...batch.map((event) => ({ ...event, payload: { ...event.payload, path } as any })),
-        );
+        events.push(...batch);
         return {};
       },
     }),
@@ -110,15 +107,14 @@ afterEach(() => {
   while (cleanups.length) cleanups.pop()!();
 });
 
-async function started(options: { skip?: string[] } = {}) {
+async function started() {
   const herdr = pretendHerdr();
   await herdr.listening;
   const project = pretendProject();
   const bridge = createBridge({
     logPath: "/integrations/herdr/test",
     socket: herdr.path,
-    skip: new Set(options.skip),
-    retryMs: [10],
+    retryMs: 10,
   });
   cleanups.push(() => {
     bridge.stop();
@@ -133,9 +129,11 @@ async function started(options: { skip?: string[] } = {}) {
 test("the real lend imports without connecting: a default export and a description", () => {
   assert.equal(typeof provideHerdr, "function");
   assert.match(description, /call\(method, params\)/);
-  // the platform refuses a lend whose description is not one line of at most 500 characters
+  assert.match(description, /socket-api\.mdx/);
+  // the platform refuses a lend whose description is not one line of at most 500 characters; a label
+  // (HERDR_LABEL) is up to 40 more
   assert.ok(
-    description.length <= 500 && !description.includes("\n"),
+    description.length <= 460 && !description.includes("\n"),
     `${description.length} chars`,
   );
 });
@@ -151,46 +149,44 @@ test("the socket is found in Herdr's own order", () => {
 
 test("call answers Herdr's result, and refuses what a call cannot carry", async () => {
   const { lent } = await started();
-  assert.deepEqual(await lent.call("agent.list"), {
-    type: "agent_list",
-    agents: [{ name: "a" }],
-  });
+  assert.deepEqual(await lent.call("agent.list"), { type: "agent_list", agents: [{ name: "a" }] });
   await assert.rejects(lent.call("no.such"), /method_not_found: no no.such/);
   await assert.rejects(lent.call("events.subscribe", { subscriptions: [] }), /streams/);
   await assert.rejects(lent.call("rm -rf"), /not "rm -rf"|not \\?"rm -rf\\?"/);
 });
 
-test("events land as herdr/<kind>: news durable with a key, focus ephemeral, scroll never asked for", async () => {
+test("events land as herdr/<kind>: news durable, focus ephemeral, scroll never asked for", async () => {
   const { herdr, project } = await started();
-  await until(() => herdr.live().length === 2, "the event stream and one pane's status stream");
-  const eventStream = herdr
-    .live()
-    .find((s) => s.subscriptions.some((sub) => sub.type === "pane.created"))!;
-  assert.ok(!eventStream.subscriptions.some((sub) => /scroll|output/.test(sub.type)));
-  assert.equal(eventStream.subscriptions.length, 24);
+  await until(
+    () => herdr.live().length === 1 && project.events.length === 1,
+    "the connection and the snapshot",
+  );
 
-  // the snapshot is the first durable event: what is true now
-  await until(() => project.events.length === 1, "the snapshot");
+  // one connection: Herdr's 24 kinds and the status of the one pane; no scroll, no output
+  const { subscriptions } = herdr.live()[0]!;
+  assert.equal(subscriptions.length, 25);
+  assert.ok(!subscriptions.some((sub) => /scroll|output/.test(sub.type)));
+  assert.deepEqual(subscriptions.at(-1), { type: "pane.agent_status_changed", pane_id: "w1:p1" });
+
+  // the snapshot comes first: what is true now
   assert.equal(project.events[0]!.type, "herdr/snapshot");
+  assert.equal(project.events[0]!.ephemeral, undefined);
   assert.deepEqual((project.events[0]!.payload.data as any).snapshot.workspaces, [
     { workspace_id: "w1" },
   ]);
-  assert.match(project.events[0]!.idempotencyKey!, /^herdr\/snapshot:/);
 
-  // a status answers the subscription's dotted name and lands as Herdr's EventKind
-  herdr.pushStatus("w1:p1", {
+  // a status answers the subscription's dotted name and lands under Herdr's EventKind
+  herdr.pushEvent({
     event: "pane.agent_status_changed",
     data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
   });
   await until(() => project.events.length === 2, "the status");
   assert.equal(project.events[1]!.type, "herdr/pane_agent_status_changed");
-  assert.deepEqual((project.events[1]!.payload as any).data, {
-    pane_id: "w1:p1",
-    workspace_id: "w1",
-    agent_status: "done",
-    agent: "claude",
+  assert.equal(project.events[1]!.ephemeral, undefined);
+  assert.deepEqual(project.events[1]!.payload, {
+    event: "pane_agent_status_changed",
+    data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
   });
-  assert.ok(project.events[1]!.idempotencyKey && !project.events[1]!.ephemeral);
 
   // focus arrives with its own `type` in data, which is dropped, and is never kept
   herdr.pushEvent({
@@ -200,30 +196,24 @@ test("events land as herdr/<kind>: news durable with a key, focus ephemeral, scr
   await until(() => project.events.length === 3, "the focus");
   assert.equal(project.events[2]!.type, "herdr/workspace_focused");
   assert.equal(project.events[2]!.ephemeral, true);
-  assert.equal(project.events[2]!.idempotencyKey, undefined);
-  assert.deepEqual((project.events[2]!.payload as any).data, { workspace_id: "w1" });
+  assert.deepEqual(project.events[2]!.payload.data, { workspace_id: "w1" });
 });
 
-test("a pane that appears gets a status stream, and loses it when it closes", async () => {
-  const { herdr } = await started();
-  await until(() => herdr.live().length === 2, "the first streams");
+test("a pane that appears ends the connection, and the next one subscribes to it", async () => {
+  const { herdr, project } = await started();
+  await until(() => herdr.live().length === 1, "the first connection");
+  herdr.setPanes([{ pane_id: "w1:p1" }, { pane_id: "w1:p2" }]);
   herdr.pushEvent({
     event: "pane_created",
     data: { type: "pane_created", pane: { pane_id: "w1:p2" } },
   });
   await until(
     () => herdr.live().some((s) => s.subscriptions.some((sub) => sub.pane_id === "w1:p2")),
-    "the new pane's status stream",
+    "a connection that follows the new pane",
   );
-  herdr.pushEvent({
-    event: "pane_closed",
-    data: { type: "pane_closed", pane_id: "w1:p2", workspace_id: "w1" },
-  });
-  await until(
-    () => !herdr.live().some((s) => s.subscriptions.some((sub) => sub.pane_id === "w1:p2")),
-    "the closed pane's stream ended",
-  );
-  assert.equal(herdr.live().length, 2); // the event stream and w1:p1's
+  assert.equal(herdr.live().length, 1);
+  assert.ok(project.events.some((e) => e.type === "herdr/pane_created"));
+  assert.equal(project.events.filter((e) => e.type === "herdr/snapshot").length, 2);
 });
 
 test("a dropped connection is dialed again, with a fresh snapshot", async () => {
@@ -237,10 +227,10 @@ test("a dropped connection is dialed again, with a fresh snapshot", async () => 
     () => project.events.filter((e) => e.type === "herdr/snapshot").length === 2,
     "a second snapshot",
   );
-  await until(() => herdr.live().length === 2, "the streams again");
+  await until(() => herdr.live().length === 1, "the connection again");
 });
 
-test("durable events that could not reach the project wait for its next connection", async () => {
+test("a project that comes back is given a fresh snapshot, and what it missed is lost", async () => {
   const herdr = pretendHerdr();
   await herdr.listening;
   const project = pretendProject();
@@ -248,32 +238,22 @@ test("durable events that could not reach the project wait for its next connecti
   const bridge = createBridge({
     logPath: "/integrations/herdr/test",
     socket: herdr.path,
-    retryMs: [10],
+    retryMs: 10,
   });
   cleanups.push(() => {
     bridge.stop();
     herdr.close();
   });
   await bridge.provide({ itx: project.itx });
-  await until(() => bridge.waiting() === 1, "the snapshot waits");
-  assert.equal(project.events.length, 0);
-  project.failNext(0);
-  await bridge.provide({ itx: project.itx }); // the project's next connection
-  await until(() => project.events.length === 1 && bridge.waiting() === 0, "the snapshot lands");
-  assert.equal(project.events[0]!.type, "herdr/snapshot");
-});
-
-test("a skipped kind is not appended", async () => {
-  const { herdr, project } = await started({ skip: ["workspace_focused"] });
-  await until(() => herdr.live().length === 2, "the streams");
-  herdr.pushEvent({
-    event: "workspace_focused",
-    data: { type: "workspace_focused", workspace_id: "w1" },
-  });
+  await until(() => herdr.live().length === 1, "the connection");
   herdr.pushEvent({
     event: "tab_renamed",
     data: { type: "tab_renamed", tab_id: "w1:t1", label: "x" },
   });
-  await until(() => project.events.some((e) => e.type === "herdr/tab_renamed"), "the rename");
-  assert.ok(!project.events.some((e) => e.type === "herdr/workspace_focused"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(project.events.length, 0);
+  project.failNext(0);
+  await bridge.provide({ itx: project.itx }); // the project's next connection
+  await until(() => project.events.length === 1, "the snapshot");
+  assert.equal(project.events[0]!.type, "herdr/snapshot");
 });
