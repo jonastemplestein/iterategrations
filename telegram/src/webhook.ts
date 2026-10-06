@@ -7,6 +7,7 @@ import {
   readJson,
   say,
   spendInvite,
+  keyOf,
   streamOf,
   WELCOME,
   type BotInfo,
@@ -73,7 +74,6 @@ async function route(itx: TelegramItx, bot: string, id: number, message: Message
   const from = message.from;
   const info = await readJson<BotInfo>(itx, bot, "bot");
   if (!from || from.is_bot || !info) return;
-  const stream = itx.cd(streamOf(bot));
   const group = message.chat.type !== "private";
   const person = {
     name: from.first_name ?? String(from.id),
@@ -90,19 +90,19 @@ async function route(itx: TelegramItx, bot: string, id: number, message: Message
     return;
   }
 
-  const allowed = await stream.kv.get(`allowed/${from.id}`);
+  const allowed = await itx.kv.get(keyOf(bot, `allowed/${from.id}`));
   const addressed = !group || isAddressed(message, info);
   if (!allowed) {
     // Only what is meant for the bot counts, so a group's chatter fills no list. A person is told
     // once, in private; the owner sees them on the Telegram page and lets them in.
     if (!addressed) return;
-    const known = await stream.kv.get(`pending/${from.id}`);
+    const known = await itx.kv.get(keyOf(bot, `pending/${from.id}`));
     const pending: Pending = {
       ...person,
       chatId: message.chat.id,
       ...(message.chat.title ? { chatTitle: message.chat.title } : {}),
     };
-    await stream.kv.put(`pending/${from.id}`, JSON.stringify(pending));
+    await itx.kv.put(keyOf(bot, `pending/${from.id}`), JSON.stringify(pending));
     if (!known && !group) await say(itx, bot, message.chat.id, PRIVATE);
     return;
   }
