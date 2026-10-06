@@ -76,6 +76,9 @@ const full = await mail.getEmail(recent[0].id, { bodies: true }); // text, html,
 - `send` takes `cc`, `bcc`, `html`, `references` and `attachments` (`{ name, type, data }`), and
   answers `{ emailId, submissionId, filedInSent }`. It refuses a `from` no identity covers, naming
   the identities the account has.
+- Every request goes to the session URL's own origin (`sessionOrigin`, default on). Fastmail's
+  session names a regional host (`ams.api.fastmail.com`), which also answers on `api.fastmail.com`,
+  and a secret is sent only to the exact origins it is pinned to: one pin covers every call.
 - Another JMAP server: `connectJmap({ sessionUrl, fetch })`. Another secret:
   `secret: { path, field }`. Outside iterate: `token` (sent as `Bearer <token>`).
 - `mail.call(using, methodCalls)` makes any JMAP method calls in one request.

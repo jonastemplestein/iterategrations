@@ -17,6 +17,8 @@ function fakeJmap(
     emails?: Email[];
     capabilities?: string[];
     apiProblem?: { status: number; type: string };
+    /** The session names another host for the API, as Fastmail's names a regional one. */
+    regional?: boolean;
   } = {},
 ) {
   const seen: { url: string; method: string; headers: Record<string, string>; body: any }[] = [];
@@ -25,8 +27,8 @@ function fakeJmap(
   const capabilities = options.capabilities ?? [MAIL, SUBMISSION, MASKED];
   let next = 0;
   const session = {
-    apiUrl: "https://jmap.test/api/",
-    uploadUrl: "https://jmap.test/upload/{accountId}/",
+    apiUrl: `${options.regional ? "https://regional.jmap.test" : "https://jmap.test"}/api/`,
+    uploadUrl: `${options.regional ? "https://regional.jmap.test" : "https://jmap.test"}/upload/{accountId}/`,
     downloadUrl: "https://jmap.test/download/{accountId}/{blobId}/{name}",
     username: "agent@example.com",
     primaryAccounts: Object.fromEntries(capabilities.map((capability) => [capability, "acc-1"])),
@@ -167,14 +169,14 @@ function fakeJmap(
         : init.body;
     seen.push({ url: input, method: init.method ?? "GET", headers, body });
     if (input === SESSION_URL) return Response.json(session);
-    if (input.startsWith("https://jmap.test/upload/acc-1/"))
+    if (/^https:\/\/(regional\.)?jmap\.test\/upload\/acc-1\//.test(input))
       return Response.json({
         accountId: "acc-1",
         blobId: `upload-${++next}`,
         type: headers["content-type"],
         size: 5,
       });
-    if (input === session.apiUrl) {
+    if (input === "https://jmap.test/api/" || input === "https://regional.jmap.test/api/") {
       if (options.apiProblem)
         return Response.json(
           { type: options.apiProblem.type, detail: "nope" },
@@ -414,4 +416,24 @@ test("masked email: create (enabled by default), list, and switch off or delete;
   assert.equal(server.seen.length, requests);
   const plain = maskedEmails(await connect(fakeJmap({ capabilities: [MAIL, SUBMISSION] })));
   await assert.rejects(plain.list(), /capabilityNotSupported/);
+});
+
+test("every request goes to the session URL's own origin, though the session names a regional host; sessionOrigin: false keeps the session's hosts", async () => {
+  const server = fakeJmap({ regional: true });
+  const jmap = await connect(server);
+  await jmap.mailboxes();
+  await jmap.upload("hello", "text/plain");
+  assert.deepEqual(
+    server.seen.slice(1).map((request) => new URL(request.url).host),
+    ["jmap.test", "jmap.test"],
+  );
+  assert.equal(server.seen[2]!.url, "https://jmap.test/upload/acc-1/");
+  const asGiven = fakeJmap({ regional: true });
+  const direct = await connectJmap({
+    sessionUrl: SESSION_URL,
+    fetch: asGiven.fetch,
+    sessionOrigin: false,
+  });
+  await direct.mailboxes();
+  assert.equal(asGiven.seen.at(-1)!.url, "https://regional.jmap.test/api/");
 });

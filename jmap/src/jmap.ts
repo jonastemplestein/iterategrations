@@ -28,6 +28,11 @@ export type JmapOptions = {
   token?: string;
   /** The secret holding the token, for the egress placeholder. Default: `/secrets/fastmail`, field `token`. */
   secret?: { path: string; field?: string };
+  /** Send every request to the session URL's own origin, not the hosts the session names. Default:
+   *  true. Fastmail's session names a regional host (`ams.api.fastmail.com`) that also answers on
+   *  `api.fastmail.com`, and an iterate secret is sent only to the exact origins it is pinned to, so
+   *  one pin covers every call. `false` uses the session's URLs as given. */
+  sessionOrigin?: boolean;
 };
 
 /** A JMAP failure, named by where it happened: `request` (the whole call) or a method
@@ -540,7 +545,8 @@ export async function connectJmap(options: JmapOptions = {}): Promise<Jmap> {
   const authorization = options.token
     ? `Bearer ${options.token}`
     : `Bearer getSecret(${JSON.stringify(secret.path)}${secret.field ? `, { field: ${JSON.stringify(secret.field)} }` : ""})`;
-  const response = await fetch(options.sessionUrl ?? FASTMAIL_SESSION_URL, {
+  const sessionUrl = options.sessionUrl ?? FASTMAIL_SESSION_URL;
+  const response = await fetch(sessionUrl, {
     headers: { authorization, accept: "application/json" },
   });
   if (!response.ok) {
@@ -551,5 +557,14 @@ export async function connectJmap(options: JmapOptions = {}): Promise<Jmap> {
       problem.success ? problem.data.detail || problem.data.description : undefined,
     );
   }
-  return new Jmap(await response.json(), fetch, authorization);
+  const session = SessionSchema.parse(await response.json());
+  if (options.sessionOrigin !== false) {
+    // a string swap, not `new URL`: the upload and download URLs are templates (`{accountId}`)
+    const origin = new URL(sessionUrl).origin;
+    const onOrigin = (url: string) => url.replace(/^https?:\/\/[^/]+/i, origin);
+    session.apiUrl = onOrigin(session.apiUrl);
+    session.uploadUrl = onOrigin(session.uploadUrl);
+    session.downloadUrl = onOrigin(session.downloadUrl);
+  }
+  return new Jmap(session, fetch, authorization);
 }
