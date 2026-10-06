@@ -2,13 +2,14 @@ import { AmazonWebApi } from "./web.js";
 import { createSessionFetch } from "./node-session.js";
 
 export const description =
-  "Amazon UK shopping by direct HTTP after Chrome login: searchProducts, getProduct, getBasket, addToBasket, setQuantity, selectBasketItem, removeFromBasket, startCheckout, getCheckout, continueCheckout, placeOrder. Call __describe() first. A person handles login challenges. Purchases need an owner-configured GBP cap and an exact reviewed total. Experimental website protocol.";
+  "Amazon UK shopping by direct HTTP after Chrome login: searchProducts, getProduct, getBasket, getOrders, addToBasket, setQuantity, selectBasketItem, removeFromBasket, startCheckout, getCheckout, continueCheckout, placeOrder. Call __describe() first. A person handles login challenges. Purchases need an owner-configured GBP cap and an exact reviewed total. Experimental website protocol.";
 type Methods = Pick<
   AmazonWebApi,
   | "__describe"
   | "searchProducts"
   | "getProduct"
   | "getBasket"
+  | "getOrders"
   | "addToBasket"
   | "setQuantity"
   | "selectBasketItem"
@@ -36,6 +37,7 @@ export default function provide(): Methods {
     searchProducts: (...args) => target.searchProducts(...args),
     getProduct: (...args) => target.getProduct(...args),
     getBasket: () => target.getBasket(),
+    getOrders: (...args) => target.getOrders(...args),
     addToBasket: (...args) => target.addToBasket(...args),
     setQuantity: (...args) => target.setQuantity(...args),
     selectBasketItem: (...args) => target.selectBasketItem(...args),
