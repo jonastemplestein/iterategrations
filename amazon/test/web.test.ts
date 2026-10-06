@@ -127,6 +127,28 @@ test("purchase checks cap, exact total and a freshly unchanged review", async ()
   );
   assert(!calls.some((c) => c.method === "POST"));
 });
+
+test("purchase compares all review content even after a long item list", async () => {
+  let changed = false;
+  const { api, calls } = fake(
+    (request) =>
+      new Response(
+        request.url.includes("/checkout")
+          ? review("10.89", "Item details ".repeat(2000) + (changed ? "Address B" : "Address A"))
+          : basket,
+      ),
+    2000,
+  );
+  const checkout = await api.startCheckout();
+  assert(checkout.summary.length > 16000);
+  assert(checkout.summary.includes("Address A"));
+  changed = true;
+  await assert.rejects(
+    api.placeOrder({ checkoutId: checkout.id, expectedTotalPence: 1089 }),
+    /changed_review_again/,
+  );
+  assert(!calls.some((c) => c.method === "POST"));
+});
 test("a lost purchase response consumes the review and never retries the POST", async () => {
   const { api, calls } = fake((request) => {
     if (request.method === "POST") throw new Error("secret vendor data");

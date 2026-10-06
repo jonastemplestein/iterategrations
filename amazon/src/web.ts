@@ -63,7 +63,7 @@ function pence(value: string): number | null {
 function summary($: CheerioAPI): string {
   const copy = load($.html());
   copy("script,style,nav,header,footer,input,select,textarea,[hidden],.a-popover-preload").remove();
-  return copy("body").text().replace(/\s+/g, " ").trim().slice(0, 16000);
+  return copy("body").text().replace(/\s+/g, " ").trim();
 }
 function forms(doc: Document, selector: string): Form[] {
   const $ = doc.$;
