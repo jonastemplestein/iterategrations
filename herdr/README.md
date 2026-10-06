@@ -57,25 +57,35 @@ node "$(dirname "$(readlink -f "$(command -v iterate)")")/../bin/iterate.js" pro
 `itx.jonas`. It finds Herdr's socket the way Herdr does (`HERDR_SOCKET_PATH`, then `HERDR_SESSION`, then
 the default session). Stop with Ctrl-C.
 
-## Unattended
+## As a Herdr plugin
 
-`herdr/launchd/` holds a LaunchAgent for a Mac.
+`herdr-plugin.toml` makes this a Herdr plugin, `iterate-bridge`: Herdr starts the lends itself, at every
+server start and live handoff, and nothing else needs to run. A startup hook is one-shot, so
+`plugin/bridge.sh start` starts one `iterate provide` for each line of the plugin's `targets` file in
+the background, each redialing until stopped, and exits.
 
-1. A key of its own, because `iterate login` lasts 30 days at most:
-   `iterate tokens create --name herdr-bridge --project <your project> --never-expires` (it signs in
-   in the browser and prints the key once). Put it in `~/.config/herdr-iterate-bridge/token`, mode `600`.
-2. Link and load it:
+```sh
+herdr plugin link "$PWD/herdr"                  # from this repository
+cp herdr/plugin/targets.example "$(herdr plugin config-dir iterate-bridge)/targets"   # then edit it
+herdr plugin action invoke iterate-bridge.restart     # start now, without restarting Herdr
+```
 
-   ```sh
-   ln -sf "$PWD/herdr/launchd/com.jonas.herdr-iterate-bridge.plist" ~/Library/LaunchAgents/
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jonas.herdr-iterate-bridge.plist
-   ```
-
-   Its log is `~/Library/Logs/herdr-iterate-bridge.log`. `launchctl kickstart -k gui/$(id -u)/com.jonas.herdr-iterate-bridge` restarts it.
-
-`iterate provide` reconnects on its own, but gives up after about five minutes without the project;
-`KeepAlive` starts it again. **A second host** is the same file with its own
-`HERDR_LOG_PATH=/integrations/herdr/beelink` and `--name jonas.herdrBeelink`.
+- **`targets`**: one line a project, `<iterate config> <project> [name]`. An iterate config is a name from
+  `iterate config list`; each is a deployment (`prd` is `os.iterate.com`; add your own with
+  `iterate config set --name <name> --os-base-url <url>`).
+- **Signing in.** Each target uses its config's stored login: `iterate --config <config> login` (30 days
+  at most; the lend shows `Not logged in` in its log until then, and starts by itself once you are). For
+  a lend that outlives that, put a key in `<plugin config dir>/<config>.key` (mode 600):
+  `iterate --config <config> tokens create --project <project> --never-expires`.
+- **`config.sh`** in the plugin's config dir is sourced when present: `HERDR_LABEL` (the name a model
+  reads in the description), `HERDR_LOG_PATH`, and `NODE` / `CLI` if they are not found.
+- **Actions**: `iterate-bridge.status`, `.restart`, `.stop` (the qualified id: `main-sync` also has a
+  `status`). Logs are in `~/.local/state/herdr/plugins/iterate-bridge/<config>-<project>.log`, and
+  `herdr plugin log list --plugin iterate-bridge` has what each action printed.
+- **A second host** is the same plugin there, with its own `HERDR_LOG_PATH=/integrations/herdr/beelink`
+  and `name` (`jonas.herdrBeelink`) in `targets`.
+- Herdr's docs say plugins "must stop detached background processes before their parent command or pane
+  exits" when an installation is replaced; a linked checkout is left alone, and `stop` ends them.
 
 ## Good to know
 
@@ -85,7 +95,7 @@ the default session). Stop with Ctrl-C.
 - **The description is one line of at most 500 characters.** The platform refuses a longer one when it
   lends (`a rewrite rule's description is one line`). The test checks it.
 - **Node.** `iterate`'s pnpm shim runs pnpm's own Node (22.14 here), which cannot load a `.ts` file.
-  `launchd/run.sh` runs the CLI's entry point with Homebrew's Node instead (`HERDR_BRIDGE_NODE`).
+  `plugin/bridge.sh` runs the CLI's entry point with a Node that can (`NODE`).
 - **Offline.** While the computer sleeps or Herdr is down, the project's calls fail and no events
   land; a `herdr/snapshot` marks every reconnection.
 - **The docs link** in the description is Herdr's `socket-api.mdx` at the tag of the installed version
