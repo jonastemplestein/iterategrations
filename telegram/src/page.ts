@@ -8,7 +8,7 @@ import {
   makeInvite,
   readJson,
   say,
-  streamOf,
+  keyOf,
   WELCOME,
   type BotInfo,
   type Pending,
@@ -123,7 +123,7 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
       const bots = await listBots(itx);
       let live: string | null = null; // an invite is shown only if it exists, for a bot that does
       if (invite && inviteBot && bots.includes(inviteBot) && /^[0-9a-f]{32}$/.test(invite))
-        live = (await itx.cd(streamOf(inviteBot)).kv.get(`invite/${invite}`)) ? invite : null;
+        live = (await itx.kv.get(keyOf(inviteBot, `invite/${invite}`))) ? invite : null;
       const cards = await Promise.all(
         bots.map((bot) => botCard(itx, bot, bot === inviteBot ? live : null)),
       );
@@ -177,7 +177,7 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
         await say(itx, bot, chatId, chatId === Number(id) ? WELCOME : `You're in, ${person.name}.`);
       });
     else if (/^-?\d+$/.test(id) && path === "remove")
-      await withItx((itx) => itx.cd(streamOf(bot)).kv.delete(`allowed/${id}`));
+      await withItx((itx) => itx.kv.delete(keyOf(bot, `allowed/${id}`)));
     else return new Response("Not found\n", { status: 404 });
     return redirect();
   } catch (error) {

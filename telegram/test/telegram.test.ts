@@ -1,23 +1,25 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: secrets, streams with a kv
-// each, agents, appends that refuse a key used twice (as the platform does), and an egress to a
-// pretend Telegram that records every Bot API call.
+// at the root only (a sub-context has `append` and nothing else, as the platform's default-deny
+// rewrite rules make it), agents, appends that refuse a key used twice (as the platform does), and an
+// egress to a pretend Telegram that records every Bot API call.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import { serveTelegram } from "../dist/telegram.js";
 
 const BOT = "iterate-bot";
 const STREAM = `/integrations/telegram/${BOT}`;
+/** A key of the bot's state in the project's kv. */
+const K = (key: string): string => `telegram/${BOT}/${key}`;
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdef";
 
 type Call = { method: string; credential: string; body: any };
 
 function fakeProject() {
   const secrets: Record<string, unknown> = {};
-  const kv: Record<string, Record<string, string>> = {};
+  const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
   const agents: string[] = [];
   const calls: Call[] = [];
-  const store = (path: string) => (kv[path] ??= {});
   const itx: any = {
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
@@ -27,15 +29,15 @@ function fakeProject() {
         (secrets[path] as any)?.material === value,
     },
     agents: { create: async (path: string) => void agents.push(path) },
+    kv: {
+      get: async (key: string) => kv[key] ?? null,
+      put: async (key: string, value: string) => void (kv[key] = value),
+      delete: async (key: string) => void delete kv[key],
+      list: async (prefix = "") => ({
+        keys: Object.keys(kv).filter((key) => key.startsWith(prefix)),
+      }),
+    },
     cd: (path: string) => ({
-      kv: {
-        get: async (key: string) => store(path)[key] ?? null,
-        put: async (key: string, value: string) => void (store(path)[key] = value),
-        delete: async (key: string) => void delete store(path)[key],
-        list: async (prefix = "") => ({
-          keys: Object.keys(store(path)).filter((key) => key.startsWith(prefix)),
-        }),
-      },
       append: async (event: any) => {
         if (
           appended.some((a) => a.path === path && a.event.idempotencyKey === event.idempotencyKey)
@@ -77,10 +79,10 @@ function fakeProject() {
     );
   const connected = async (allowed: Record<string, object> = {}) => {
     secrets[`/secrets/telegram-webhook-${BOT}`] = { material: "s3cret" };
-    store(STREAM).bot = JSON.stringify({ id: 1001, username: "Iterate_Bot" });
-    store("/integrations/telegram")[`bots/${BOT}`] = "Iterate_Bot";
+    kv[K("bot")] = JSON.stringify({ id: 1001, username: "Iterate_Bot" });
+    kv[`telegram/bots/${BOT}`] = "Iterate_Bot";
     for (const [id, person] of Object.entries(allowed))
-      store(STREAM)[`allowed/${id}`] = JSON.stringify(person);
+      kv[K(`allowed/${id}`)] = JSON.stringify(person);
   };
   const page = async (
     path: string,
@@ -99,7 +101,7 @@ function fakeProject() {
       }),
       requireMember,
     );
-  return { secrets, kv: store, appended, agents, calls, hook, connected, page };
+  return { secrets, kv, appended, agents, calls, hook, connected, page };
 }
 
 const message = (over: Record<string, unknown> = {}, from: Record<string, unknown> = {}) => ({
@@ -252,7 +254,7 @@ test("a stranger is told once that the bot is private, waits on the page, and re
   assert.match(sent(project)[0]!.body.text, /private/);
   assert.equal(sent(project)[0]!.body.chat_id, 42);
   assert.deepEqual(agentEvents(project), []);
-  assert.equal(JSON.parse(project.kv(STREAM)["pending/555"]!).name, "Eve");
+  assert.equal(JSON.parse(project.kv[K("pending/555")]!).name, "Eve");
 });
 
 test("an invite lets in whoever opens it, once, and welcomes them; a spent, expired or wrong one does not", async () => {
@@ -268,26 +270,26 @@ test("an invite lets in whoever opens it, once, and welcomes them; a spent, expi
     update_id: 30,
     message: message({ text: `/start ${code}` }, { id: 77, first_name: "Wife" }),
   });
-  assert.equal(JSON.parse(project.kv(STREAM)["allowed/77"]!).name, "Wife");
+  assert.equal(JSON.parse(project.kv[K("allowed/77")]!).name, "Wife");
   assert.match(sent(project).at(-1)!.body.text, /You're in/);
-  assert.equal(project.kv(STREAM)[`invite/${code}`], undefined);
+  assert.equal(project.kv[K(`invite/${code}`)], undefined);
 
   // spent: the next person with the link is a stranger
   await project.hook(`/${BOT}`, {
     update_id: 31,
     message: message({ text: `/start ${code}` }, { id: 88 }),
   });
-  assert.equal(project.kv(STREAM)["allowed/88"], undefined);
+  assert.equal(project.kv[K("allowed/88")], undefined);
   assert.match(sent(project).at(-1)!.body.text, /private/);
 
   // expired
-  project.kv(STREAM)["invite/aaaa"] = String(Date.now() - 1000);
+  project.kv[K("invite/aaaa")] = String(Date.now() - 1000);
   await project.hook(`/${BOT}`, {
     update_id: 32,
     message: message({ text: "/start aaaa" }, { id: 99 }),
   });
-  assert.equal(project.kv(STREAM)["allowed/99"], undefined);
-  assert.equal(project.kv(STREAM)["invite/aaaa"], undefined);
+  assert.equal(project.kv[K("allowed/99")], undefined);
+  assert.equal(project.kv[K("invite/aaaa")], undefined);
 });
 
 test("an allowed person who taps Start again is welcomed, and it wakes no agent", async () => {
@@ -348,10 +350,10 @@ test("in a group a stranger who addresses the bot waits on the page and gets no 
     message: group({ text: "@iterate_bot hi" }, { id: 557, is_bot: true }),
   });
   assert.deepEqual(
-    Object.keys(project.kv(STREAM)).filter((k) => k.startsWith("pending/")),
-    ["pending/555"],
+    Object.keys(project.kv).filter((k) => k.startsWith(K("pending/"))),
+    [K("pending/555")],
   );
-  assert.equal(JSON.parse(project.kv(STREAM)["pending/555"]!).chatTitle, "Home");
+  assert.equal(JSON.parse(project.kv[K("pending/555")]!).chatTitle, "Home");
   assert.deepEqual(project.calls, []);
   assert.deepEqual(agentEvents(project), []);
 });
@@ -452,8 +454,8 @@ test("the owner lets a waiting person in from the page, and the person is welcom
   assert.match(await (await project.page("/_/")).text(), /Waiting to be let in[\s\S]*Eve/);
 
   await project.page("/_/allow", { form: { bot: BOT, id: "555" } });
-  assert.equal(JSON.parse(project.kv(STREAM)["allowed/555"]!).name, "Eve");
-  assert.equal(project.kv(STREAM)["pending/555"], undefined);
+  assert.equal(JSON.parse(project.kv[K("allowed/555")]!).name, "Eve");
+  assert.equal(project.kv[K("pending/555")], undefined);
   assert.match(sent(project).at(-1)!.body.text, /You're in/);
   assert.equal(sent(project).at(-1)!.body.chat_id, 42);
 
@@ -461,7 +463,7 @@ test("the owner lets a waiting person in from the page, and the person is welcom
   assert.equal(agentEvents(project).length, 1);
 
   await project.page("/_/remove", { form: { bot: BOT, id: "555" } });
-  assert.equal(project.kv(STREAM)["allowed/555"], undefined);
+  assert.equal(project.kv[K("allowed/555")], undefined);
 });
 
 test("an invite link is shown on the page only for a code that exists, for a bot that exists", async () => {
@@ -493,5 +495,5 @@ test("a form for a bot that is not connected, or with a bad id, changes nothing"
   assert.match(decodeURIComponent(unknown.headers.get("location")!), /Unknown bot/);
   const bad = await project.page("/_/allow", { form: { bot: BOT, id: "x; drop" } });
   assert.equal(bad.status, 404);
-  assert.deepEqual(Object.keys(project.kv(STREAM)), ["bot"]);
+  assert.deepEqual(Object.keys(project.kv).sort(), [`telegram/bots/${BOT}`, K("bot")].sort());
 });

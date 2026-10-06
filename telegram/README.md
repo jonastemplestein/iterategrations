@@ -104,7 +104,9 @@ reads it on its next turn but does not wake for it.
 
 Every update of every kind, from everyone, is also recorded as `telegram/update` on
 `/integrations/telegram/<bot>` (`payload.update` is Telegram's `Update`, untouched). The bot's other
-state is in that stream's `kv`: `bot`, `allowed/<user id>`, `pending/<user id>`, `invite/<code>`.
+state is in the project's own `kv` (the root's; a sub-context has none): `telegram/<bot>/bot`,
+`telegram/<bot>/allowed/<user id>`, `telegram/<bot>/pending/<user id>`, `telegram/<bot>/invite/<code>`,
+and `telegram/bots/<bot>` for each connected bot.
 
 ## Good to know
 
