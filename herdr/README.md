@@ -81,15 +81,17 @@ the background, each redialing until stopped, and exits.
 **What goes wrong shows on screen.** A startup hook's output is only in the plugin log, so the plugin
 also raises a notification (by Herdr's own `ui.toast.delivery`: a macOS banner on a Mac) for: no `targets`
 file (first run), no Node 22.18, no `npx` and no CLI, an iterate config name that does not exist, and a
-config that is not signed in.
+config that is not signed in, and a sign-in that has ended (see below).
 
 - **`targets`**: one line a project. An iterate config is a name from `iterate config list`; each is a
   deployment (`prd` is `os.iterate.com`; add your own with
   `iterate config set --name <name> --os-base-url <url>`).
 - **How long a sign-in lasts.** `iterate login` gives an access token for an hour, renewed from a grant
   that dies after a week unused and in 30 days at most. A running lend renews itself, then stops when the
-  grant ends (the log says `Not logged in`; nothing is shown yet): sign in again. For a lend that
-  outlives that, put a personal access token in `<plugin config dir>/<config>.key` (mode 600):
+  grant ends. The plugin then shows a notification, at most once in 12 hours for a target (it reads the
+  failed run's output: every sign-in error ends in "Run `iterate login` again"): sign in again, and the
+  lend starts by itself. There is no warning in advance, because the CLI does not record when a grant
+  ends. For a lend that outlives that, put a personal access token in `<plugin config dir>/<config>.key` (mode 600):
   `iterate --config <config> tokens create --project <project> --never-expires`. It acts as you on that
   project until you revoke it (`iterate tokens revoke`), and sits in that file in plain text.
 - **`config.sh`** in the plugin's config dir is sourced when present: `HERDR_LABEL` (the name a model
