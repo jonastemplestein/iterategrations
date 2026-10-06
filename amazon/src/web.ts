@@ -63,7 +63,8 @@ function pence(value: string): number | null {
 function summary($: CheerioAPI): string {
   const copy = load($.html());
   copy("script,style,nav,header,footer,input,select,textarea,[hidden],.a-popover-preload").remove();
-  return copy("body").text().replace(/\s+/g, " ").trim();
+  const text = copy("body").length ? copy("body").text() : copy.root().text();
+  return text.replace(/\s+/g, " ").trim();
 }
 function forms(doc: Document, selector: string): Form[] {
   const $ = doc.$;
@@ -142,6 +143,7 @@ export class AmazonWebApi {
         "searchProducts",
         "getProduct",
         "getBasket",
+        "getOrders",
         "addToBasket",
         "setQuantity",
         "selectBasketItem",
@@ -239,6 +241,10 @@ export class AmazonWebApi {
             if (target.length) target.html(panel.content);
             else parsed("body").append(`<section id="${panel.id}">${panel.content}</section>`);
           }
+          html = parsed.html();
+        } else {
+          // Unknown JSON may contain private tokens. It is not visible page text.
+          parsed = load("<html><body></body></html>");
           html = parsed.html();
         }
       }
@@ -348,6 +354,76 @@ export class AmazonWebApi {
   }
   getBasket(): Promise<BasketItem[]> {
     return this.#serial(async () => (await this.#basket()).items);
+  }
+  /** Read Amazon's order history after submission, including uncertain purchase responses. */
+  getOrders(options: { search?: string } = {}): Promise<{ summary: string }> {
+    if (
+      options.search !== undefined &&
+      (typeof options.search !== "string" || options.search.length > 200)
+    )
+      throw new AmazonWebError("invalid_order_search");
+    return this.#serial(async () => {
+      let doc = await this.#request("/gp/css/order-history");
+      const csrf = doc.$("#ab-your-orders-anticsrf-token").attr("content");
+      if (csrf) {
+        const raw = doc
+          .$("script[data-a-state]")
+          .filter(
+            (_, el) => doc.$(el).attr("data-a-state")?.includes('"yourOrdersStateData"') ?? false,
+          )
+          .first()
+          .text();
+        let state: Record<string, string>;
+        try {
+          state = JSON.parse(raw) as typeof state;
+        } catch {
+          throw new AmazonWebError("order_history_markup_changed");
+        }
+        if (
+          !state ||
+          !["marketplaceId", "sessionId", "businessId"].every(
+            (key) => typeof state[key] === "string",
+          )
+        )
+          throw new AmazonWebError("order_history_markup_changed");
+        const filters = {
+          sortBy: { id: "yoOrderDate", displayText: "Order Date" },
+          time: { id: "yoPast3months", displayText: "past 3 months" },
+          users: { id: "yoOrderedByYou", displayText: "Ordered by you" },
+          paymentType: { id: "yoPaidByYou", displayText: "Paid by you" },
+          legalEntities: { id: "yoAllOrganizations", displayText: "All organizations" },
+          orderCondition: { id: "yoAllOrders", displayText: "All Orders" },
+        };
+        const query = {
+          customerId: state.customerId ?? state.loggedInCustomerId,
+          marketplaceId: state.marketplaceId,
+          sessionId: state.sessionId,
+          businessId: state.businessId,
+          pageNumber: 0,
+          searchKeyword: options.search ?? null,
+          legalEntities: [],
+          timeFilterOptions: [],
+          filters,
+          isDefaultFilterSelected: true,
+          originalRequestId: doc.$("#originalRequestId").val(),
+        };
+        doc = await this.#request("/ab/your-orders/orderHistory", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "anti-csrftoken-a2z": csrf,
+            "x-requested-with": "XMLHttpRequest",
+            origin: ORIGIN,
+            referer: doc.url,
+          },
+          body: new URLSearchParams({
+            orderHistoryRequestString: JSON.stringify(query),
+            refMarker: "ab_ppx_yo_dt_default",
+          }).toString(),
+        });
+      }
+      return { summary: summary(doc.$) };
+    });
   }
   addToBasket(value: string, quantity: number = 1): Promise<BasketItem[]> {
     const asin = asinOf(value);

@@ -30,7 +30,7 @@ Amazon documents a complete direct purchase API for Amazon Business in the UK. I
 
 ### Takeaway
 
-A browser can automate the ordinary consumer web flow after an interactive sign-in, but Amazon can demand MFA, a passkey, device verification, or a visual challenge. The later live experiment verified direct HTTP search, basket changes, address selection and checkout review on an Amazon Business account. See [the current report](../../reports/Amazon%20UK%20agent%20shopping.md) and [HTTP trace](http_trace.json). Final order submission remains untested. The website protocol has no documented public support commitment.
+A browser can automate the ordinary consumer web flow after an interactive sign-in, but Amazon can demand MFA, a passkey, device verification, or a visual challenge. The later live experiment verified direct HTTP search, basket changes, address selection and checkout review on an Amazon Business account. A subsequent approved purchase ran through a self-hosted Iterate MCP server; Amazon order history confirmed it. See [the current report](../../reports/Amazon%20UK%20agent%20shopping.md) and [HTTP trace](http_trace.json). The website protocol has no documented public support commitment.
 
 ### Cited Findings
 
@@ -46,7 +46,7 @@ A browser can automate the ordinary consumer web flow after an interactive sign-
 - Use the authorized real Chrome profile and a task tab. Let a human complete first sign-in, MFA, passkey, and any visual challenge. Treat the saved browser state as an account credential: encrypt it, give it account-scoped access, and rotate it after invalidation.
 - Do not give model workers the Amazon password or raw cookies. A shopping service should own both. It should return narrow, typed results to the agent and perform browser actions only through its own policy checks.
 - Avoid CAPTCHA/WAF-solving services. They do not make the consumer route stable or authorised, and a human-visible challenge hand-off is the evidence-backed fallback.
-- The direct client must load current forms and CSRF values. The live capture established working basket and checkout-review requests. Treat final submission and other account variants as unverified until tested.
+- The direct client must load current forms and CSRF values. The live capture established working basket and checkout-review requests. One stored-address, stored-card order was then verified through MCP and order history. Other account and checkout variants remain unverified.
 
 ### Gaps
 

@@ -9,23 +9,30 @@ endpoints directly.
 I captured requests while navigating Amazon UK in Jonas's real Chrome through Playwriter.
 The session was already signed into Amazon Business. I searched for pens, opened a product,
 added it to the basket, changed its quantity and selection, chose a stored delivery address,
-and reached the final order review. I did not submit an order.
+and reached the final order review. That initial probe did not submit an order.
+
+A later, explicitly approved purchase used the self-hosted Iterate MCP server. Every shopping
+call ran through `itx.amazon`, lent by the local HTTP bridge. It ordered one pack of vanilla
+Huel Black Edition ready-to-drink bottles for the reviewed total. An exact order-number search
+in Amazon's order history confirmed a new order, the total and the delivery status.
+The receipt and account details remain in the private project. The original basket was restored.
 
 The website uses a mix of JSON resources, HTML pages and form submissions. The captured routes
 include:
 
-| Function                    | Website route                                                            | Format                                                              |
-| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| Search                      | `GET /s`                                                                 | HTML result rows, ASINs and displayed prices                        |
-| Product                     | `GET /dp/{ASIN}`                                                         | HTML offer form and page token                                      |
-| Product resources           | `GET /api/marketplaces/A1F83G8C2ARO7P/products/{ASIN}`                   | JSON resource envelopes                                             |
-| Basket read                 | `GET /cart/add-to-cart/get-cart-items?clientName=SiteWideActionExecutor` | JSON ASINs, sellers and quantities                                  |
-| Add item                    | `POST /cart/add-to-cart`                                                 | Form data with offer, quantity and CSRF token                       |
-| Quantity, selection, delete | `POST /cart/ref=ox_sc_cart_actions_1`                                    | Form data with an action payload and CSRF header                    |
-| Start purchase view         | `GET /checkout/entry/cart?isPreinit=1&partialCheckoutCart=1&…`           | Checkout HTML                                                       |
-| Business address            | `POST /checkout/p/{purchase}/business-address/continue`                  | Stored address choice and request token                             |
-| Review                      | `GET /checkout/p/{purchase}/spc`                                         | Delivery, payment, items and final total                            |
-| Final purchase form         | `POST /checkout/p/{purchase}/spc/place-order`                            | CSRF token, consistency token and submit field; submission untested |
+| Function                    | Website route                                                            | Format                                           |
+| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| Search                      | `GET /s`                                                                 | HTML result rows, ASINs and displayed prices     |
+| Product                     | `GET /dp/{ASIN}`                                                         | HTML offer form and page token                   |
+| Product resources           | `GET /api/marketplaces/A1F83G8C2ARO7P/products/{ASIN}`                   | JSON resource envelopes                          |
+| Basket read                 | `GET /cart/add-to-cart/get-cart-items?clientName=SiteWideActionExecutor` | JSON ASINs, sellers and quantities               |
+| Add item                    | `POST /cart/add-to-cart`                                                 | Form data with offer, quantity and CSRF token    |
+| Quantity, selection, delete | `POST /cart/ref=ox_sc_cart_actions_1`                                    | Form data with an action payload and CSRF header |
+| Start purchase view         | `GET /checkout/entry/cart?isPreinit=1&partialCheckoutCart=1&…`           | Checkout HTML                                    |
+| Business address            | `POST /checkout/p/{purchase}/business-address/continue`                  | Stored address choice and request token          |
+| Review                      | `GET /checkout/p/{purchase}/spc`                                         | Delivery, payment, items and final total         |
+| Final purchase form         | `POST /checkout/p/{purchase}/spc/place-order`                            | Guarded POST; one approved order confirmed       |
+| Business order history      | `POST /ab/your-orders/orderHistory`                                      | Read-only HTML results with a page CSRF token    |
 
 I replayed authenticated reads from Node with cookies exported from the task tab. Search,
 product and basket pages returned HTTP 200. Basket JSON also returned valid items. This proves
@@ -51,10 +58,13 @@ values, addresses or payment details. Raw capture data remains private and outsi
 
 ## What remains unverified
 
-Final order submission has not been tested. Its form action and required fields were observed,
-and the client implements a single guarded POST. Purchases are disabled unless the owner sets
+The client implements a single guarded order POST. Purchases are disabled unless the owner sets
 a GBP cap. The caller must pass the exact total and current review ID. The client checks a fresh
 review before it submits. It consumes the review before the request and never retries it.
+The first live submission returned no readable confirmation text. The item left the basket,
+but that alone was not treated as proof. The client now reads Business order-history results
+and handles HTML fragments that have no `body` element. An exact order-number search verified
+the live order. Future callers must also verify an order record after submission.
 
 The live account is Amazon Business. A fresh ordinary-account login, new-address entry, new-card
 entry, MFA flows and other checkout variants need further testing. The credentials-file login

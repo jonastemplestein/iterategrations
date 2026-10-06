@@ -44,7 +44,13 @@ Bootstrap stops when login does not complete. Never put the credential file in t
 The file must have mode `600`. If Chrome already has an Amazon login, the helper refuses a
 credentials file. Omit that file to use the existing login, or switch accounts yourself first.
 
-A session file grants account access. Keep it private and use a separate experimental account
+A session file grants account access. It is plain JSON with owner-only file permissions, not
+application encryption. The bridge reads it once, holds the cookie jar in memory, and saves
+Amazon's `Set-Cookie` updates. It has no automatic reauthentication or OAuth refresh token.
+To renew a session, stop the bridge, complete login in Chrome, run bootstrap again, and restart
+the bridge. Replacing the file while the bridge runs does not reload its in-memory cookies.
+
+Keep it private and use a separate experimental account
 when you want agents to have a separate basket.
 
 ## Lend the HTTP API to iterate
@@ -113,6 +119,18 @@ inspect Amazon orders before attempting another purchase. Amazon's website does 
 a documented idempotency key for this request. A `submitted` result includes Amazon's response
 summary; inspect it for confirmation or further required action.
 
+Verify the order through Amazon's order history. A submitted request is not an order confirmation:
+
+```js
+await itx.amazon.getOrders({ search: "the product name" });
+await itx.amazon.getOrders({ search: "the order number from those results" });
+```
+
+On the tested Business account, an exact order-number search returns the total and delivery
+status. The Business history page loads its results through a read-only POST with a fresh page
+token. Hidden tokens and customer identifiers stay inside the bridge. A search without a keyword
+uses the account's default paid-by-you filters; it can omit orders paid by the organization.
+
 ## Validation and limits
 
 Run contract tests with `pnpm --filter iterate-amazon test`. They cover token handling, hidden
@@ -129,7 +147,11 @@ AMAZON_PROBE_ASIN=<ASIN> node amazon/test/live-web.ts
 It excludes cookies, token values, addresses and payment data. Do not publish raw HAR files.
 
 See the [research report](../reports/Amazon%20UK%20agent%20shopping.md) for the exact live evidence.
-Final order submission remains untested. Website changes or renewed authentication can stop calls.
+On 6 October 2026, one explicitly approved order completed through a self-hosted Iterate MCP
+server and this local HTTP bridge. Amazon's order history confirmed the product, exact total
+and delivery status. The original basket was restored. The proof used a stored address and card
+on an Amazon Business account. Other account and checkout variants remain untested.
+Website changes or renewed authentication can stop calls.
 The adapter returns `human_login_required` when it sees an authentication challenge.
 
 ## Other access routes

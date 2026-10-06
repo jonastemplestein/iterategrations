@@ -49,6 +49,39 @@ test("basket actions obtain a fresh page token and address only the named item",
   await assert.rejects(api.removeFromBasket("someone-elses-item"), /not_found/);
   assert.equal(calls.filter((c) => c.method === "POST").length, 1);
 });
+test("order history uses a read-only request and excludes hidden authentication fields", async () => {
+  const { api, calls } = fake(
+    () =>
+      new Response(
+        '<html><body><p>Order 123-1234567-1234567: Arriving Thursday</p><input type="hidden" value="private-order-token"><script>private-script-token</script></body></html>',
+      ),
+  );
+  const orders = await api.getOrders();
+  assert.equal(orders.summary, "Order 123-1234567-1234567: Arriving Thursday");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.method, "GET");
+  assert.equal(new URL(calls[0]!.url).pathname, "/gp/css/order-history");
+});
+test("Business order history loads the read-only panel with a private page token", async () => {
+  const page =
+    '<html><head><meta id="ab-your-orders-anticsrf-token" content="private-history-csrf"></head><body><script data-a-state=\'{"key":"yourOrdersStateData"}\'>{"loggedInCustomerId":"private-customer","marketplaceId":"market","sessionId":"private-session","businessId":"business"}</script><input id="originalRequestId" value="private-request"></body></html>';
+  const { api, calls } = fake(async (request) => {
+    if (request.method === "GET") return new Response(page);
+    assert.equal(new URL(request.url).pathname, "/ab/your-orders/orderHistory");
+    assert.equal(request.headers.get("anti-csrftoken-a2z"), "private-history-csrf");
+    const params = new URLSearchParams(await request.text());
+    const query = JSON.parse(params.get("orderHistoryRequestString")!);
+    assert.equal(query.searchKeyword, "Huel");
+    assert.equal(query.customerId, "private-customer");
+    return new Response(
+      '<section>Order 123-1234567-1234567: Huel arriving Thursday<input type="hidden" value="private-token"></section>',
+    );
+  });
+  const orders = await api.getOrders({ search: "Huel" });
+  assert.equal(orders.summary, "Order 123-1234567-1234567: Huel arriving Thursday");
+  assert.equal(calls.length, 2);
+  assert(!JSON.stringify(orders).includes("private-"));
+});
 test("checkout uses only selected items and keeps hidden tokens out of RPC results", async () => {
   const { api, calls } = fake(
     (request) =>
@@ -168,6 +201,23 @@ test("a lost purchase response consumes the review and never retries the POST", 
   );
   assert.equal(calls.filter((c) => c.method === "POST").length, 1);
 });
+test("unknown purchase JSON stays private and consumes the submitted review", async () => {
+  const { api, calls } = fake(
+    (request) =>
+      request.method === "POST"
+        ? Response.json({ csrfToken: "private-response-token", result: "pending" })
+        : new Response(request.url.includes("/checkout") ? review() : basket),
+    2000,
+  );
+  const checkout = await api.startCheckout();
+  const result = await api.placeOrder({ checkoutId: checkout.id, expectedTotalPence: 1089 });
+  assert.deepEqual(result, { outcome: "submitted", summary: "" });
+  await assert.rejects(
+    api.placeOrder({ checkoutId: checkout.id, expectedTotalPence: 1089 }),
+    /stale_or_incomplete/,
+  );
+  assert.equal(calls.filter((request) => request.method === "POST").length, 1);
+});
 test("redirects never forward session access to another host; login challenges stop calls", async () => {
   const bad = fake(
     () => new Response("", { status: 302, headers: { location: "https://evil.example/steal" } }),
@@ -198,16 +248,15 @@ test("checkout AJAX panels refresh private tokens before one guarded order POST"
       const body = new URLSearchParams(await request.text());
       assert.equal(body.get("anti-csrftoken-a2z"), "updated-csrf");
       assert.equal(body.get("placeYourOrder1"), "1");
-      return new Response("<html><body>Thank you</body></html>");
+      return new Response("<section>Thank you</section>");
     }
     return Response.json({ panels: [{ id: "checkout-subtotals-section", content }] });
   }, 2000);
   await api.startCheckout();
   const current = await api.getCheckout();
   assert(!JSON.stringify(current).includes("updated-csrf"));
-  assert.equal(
-    (await api.placeOrder({ checkoutId: current.id, expectedTotalPence: 1089 })).outcome,
-    "submitted",
-  );
+  const placed = await api.placeOrder({ checkoutId: current.id, expectedTotalPence: 1089 });
+  assert.equal(placed.outcome, "submitted");
+  assert.equal(placed.summary, "Thank you");
   assert.equal(calls.filter((r) => r.method === "POST").length, 1);
 });
