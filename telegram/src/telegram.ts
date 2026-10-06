@@ -3,7 +3,7 @@ import { type WithItx } from "./bot.js";
 import { receiveUpdate } from "./webhook.js";
 
 export { isAddressed } from "./webhook.js";
-export { BOT_NAME, WELCOME, PRIVATE, placeholder, streamOf } from "./bot.js";
+export { BOT_NAME, WELCOME, PRIVATE, keyOf, placeholder, streamOf } from "./bot.js";
 export type { TelegramItx, WithItx } from "./bot.js";
 
 /** A project's Telegram, as a partial `fetch`: it answers the requests that are Telegram's, on the
