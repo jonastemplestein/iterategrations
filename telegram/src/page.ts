@@ -63,16 +63,26 @@ const COPY_SCRIPT = `document.addEventListener("click", async (event) => {
 const copyRow = (text: string): string =>
   `<div class="copy"><code>${esc(text)}</code><button type="button" class="quiet" data-copy="${esc(text)}">Copy</button></div>`;
 
+/** The link that adds the bot to a group as an admin, in one step: Telegram opens a picker of the
+ *  groups the person can add admins to, and makes the bot one when they confirm. An admin bot is sent
+ *  every message of the group, privacy mode or not. `manage_chat` is Telegram's plainest right. No
+ *  start parameter, so no "/start" lands in the group (https://core.telegram.org/api/links). */
+export const adminLink = (username: string): string =>
+  `https://t.me/${username}?startgroup&admin=manage_chat`;
+
 /** What Telegram says about the bot in groups: with privacy mode on it sees only what @mentions it,
- *  replies to it or is a command. */
-const groupsHelp = (username: string, readsAll: boolean | null): string =>
-  readsAll === true
-    ? `<p class="ok">@${esc(username)} reads every message in a group. It answers people you have let in when they @mention it, reply to it, write a command or say its name; the rest it reads as context.</p>`
-    : `<div class="${readsAll === false ? "warn" : "muted"}"><p>${
-        readsAll === false
-          ? `<b>Telegram's privacy mode is on.</b> In a group, @${esc(username)} only sees messages that @mention it, reply to it or are commands, so "Hi Jeeves" never reaches it. To let it hear everything, do <b>one</b> of these:`
-          : `In a group a bot sees only what @mentions it, replies to it or is a command, unless you change that. To let it hear everything, do <b>one</b> of these:`
-      }</p><ol><li>Make it an admin of the group: group → Edit → Administrators → Add Administrator → @${esc(username)}. It needs no rights.</li><li>Or in @BotFather send <code>/setprivacy</code>, choose the bot, choose <b>Disable</b>, then remove the bot from the group and add it again.</li></ol></div>`;
+ *  replies to it or is a command, unless it is an admin of the group. */
+const groupsHelp = (username: string, readsAll: boolean | null): string => {
+  const link = adminLink(username);
+  const button = `<p><a class="button" href="${esc(link)}">Add @${esc(username)} to a group as admin</a></p>${copyRow(link)}`;
+  if (readsAll === true)
+    return `<p class="ok">@${esc(username)} reads every message in a group, so it never needs an @mention. It answers people you have let in; the rest of the talk it reads as context.</p><p class="muted">To add it to another group, open this and pick the group:</p>${button}`;
+  return `<div class="${readsAll === false ? "warn" : "muted"}"><p>${
+    readsAll === false
+      ? `<b>Telegram's privacy mode is on.</b> In a group, @${esc(username)} only sees messages that @mention it, reply to it or are commands, so "Hi Jeeves" never reaches it. An <b>admin</b> bot is sent everything. Tap this, pick the group, and confirm:`
+      : `In a group a bot sees only what @mentions it, replies to it or is a command, unless it is an admin of the group. Tap this, pick the group, and confirm:`
+  }</p>${button}<p class="muted">Telegram makes the bot an admin for you. It needs no powers to see every message. You must be able to add admins to that group. Already added it? Open the group, then Edit, Administrators, Add Administrator, and choose it. Or send <code>/setprivacy</code> to @BotFather, choose the bot, choose <b>Disable</b>, and remove and re-add the bot.</p></div>`;
+};
 
 const post = (action: string, fields: Record<string, string>, label: string, quiet = false) =>
   `<form method="post" action="${action}">${Object.entries(fields)
@@ -130,7 +140,7 @@ async function botCard(
     }
     ${post("invite", { bot }, "Make an invite link")}
     <h2>In a group</h2>
-    <p>Add @${esc(info?.username ?? "")} to the group, and let in each person who should talk to it.</p>
+    <p class="muted">Let in each person who should talk to it (below), then add the bot to the group:</p>
     ${groupsHelp(info?.username ?? bot, readsAll)}
     <p>${post("disconnect", { bot }, "Disconnect", true)}</p>
   </section>`;

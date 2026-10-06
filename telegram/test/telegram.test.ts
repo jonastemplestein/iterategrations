@@ -611,10 +611,15 @@ test("the page says whether the bot can read a whole group, and how to fix it wh
   const on = await (await project.page("/_/")).text();
   assert.match(on, /privacy mode is on/);
   assert.match(on, /Add Administrator/);
+  // one tap: a link that opens Telegram's group picker and makes the bot an admin, with a Copy button
+  assert.match(on, /href="https:\/\/t\.me\/Iterate_Bot\?startgroup&amp;admin=manage_chat"/);
+  assert.match(on, /data-copy="https:\/\/t\.me\/Iterate_Bot\?startgroup&amp;admin=manage_chat"/); // &amp; in the attribute: the browser copies &
+  assert.doesNotMatch(on, /startgroup=/); // no start parameter: no "/start" lands in the group
   assert.match(on, /\/setprivacy/);
   project.readsAll(true);
   const off = await (await project.page("/_/")).text();
   assert.match(off, /reads every message in a group/);
+  assert.match(off, /startgroup&amp;admin=manage_chat/); // and another group is one tap away
   assert.doesNotMatch(off, /privacy mode is on/);
 });
 
