@@ -1,0 +1,307 @@
+{
+  "date": "2026-10-06",
+  "transport": "Node fetch",
+  "liveOrderSubmitted": false,
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/s",
+      "queryKeys": ["k", "page"],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dp/B077G7XSJY",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dp/B077G7XSJY",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cart/add-to-cart",
+      "queryKeys": [],
+      "bodyKeys": [
+        "anti-csrftoken-a2z",
+        "items[0.base][customerVisiblePrice][amount]",
+        "items[0.base][customerVisiblePrice][currencyCode]",
+        "items[0.base][customerVisiblePrice][displayString]",
+        "items[0.base][asin]",
+        "clientName",
+        "items[0.base][offerListingId]",
+        "pageLoadTimestampUTC",
+        "offerListingID",
+        "session-id",
+        "ASIN",
+        "isMerchantExclusive",
+        "merchantID",
+        "isAddon",
+        "nodeID",
+        "sellingCustomerID",
+        "qid",
+        "sr",
+        "storeID",
+        "tagActionCode",
+        "viewID",
+        "rebateId",
+        "ctaDeviceType",
+        "ctaPageType",
+        "usePrimeHandler",
+        "smokeTestEnabled",
+        "rsid",
+        "sourceCustomerOrgListID",
+        "sourceCustomerOrgListItemID",
+        "wlPopCommand",
+        "items[0.base][quantity]",
+        "quantity",
+        "pipelineType",
+        "referrer",
+        "isBuyNow",
+        "isEligibilityLogicDisabled",
+        "ref_",
+        "bulk-buying-total-units-quantity",
+        "bulk-buying-csrf-token",
+        "bulk-buying-ajax-endpoint",
+        "bulk-buying-total-units-locale",
+        "bulk-buying-subtotal-quantity",
+        "bulk-buying-price-per-item",
+        "bulk-buying-savings-per-item",
+        "bulk-buying-subtotal-country-code",
+        "bulk-buying-subtotal-locale",
+        "bulk-buying-subtotal-cop",
+        "bulk-buying-subtotal-marketplace-id",
+        "submit.add-to-cart"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cart/ref=ox_sc_cart_actions_1",
+      "queryKeys": [],
+      "bodyKeys": [
+        "submit.cart-actions",
+        "pageAction",
+        "actionPayload",
+        "hasMoreItems",
+        "addressId",
+        "addressZip",
+        "displayedSavedItemNum",
+        "activeItems",
+        "savedItems"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cart/ref=ox_sc_cart_actions_1",
+      "queryKeys": [],
+      "bodyKeys": [
+        "submit.cart-actions",
+        "pageAction",
+        "actionPayload",
+        "hasMoreItems",
+        "addressId",
+        "addressZip",
+        "displayedSavedItemNum",
+        "activeItems",
+        "savedItems"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/entry/cart",
+      "queryKeys": [
+        "isPreinit",
+        "partialCheckoutCart",
+        "pipelineType",
+        "referrer",
+        "isEligibilityLogicDisabled",
+        "cartItemCount"
+      ],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/p/<purchase-id>/business-address/continue",
+      "queryKeys": ["referrer", "pipelineType", "purchasePrograms"],
+      "bodyKeys": [
+        "addressID",
+        "abBusinessGroupId",
+        "purchaseId",
+        "fromAnywhere",
+        "action",
+        "enableDeliveryPreferences",
+        "requestToken",
+        "hasWorkingJavascript",
+        "pipelineType",
+        "prefetchFromAddressEnabled",
+        "stmaRenderEarly",
+        "isAsync",
+        "isClientTimeBased"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/p/<purchase-id>/address",
+      "queryKeys": ["pipelineType", "purchasePrograms", "referrer", "ref_", "redirectReason"],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/checkout/p/<purchase-id>/business-address/continue",
+      "queryKeys": ["referrer", "pipelineType", "purchasePrograms"],
+      "bodyKeys": [
+        "addressID",
+        "abBusinessGroupId",
+        "purchaseId",
+        "fromAnywhere",
+        "action",
+        "enableDeliveryPreferences",
+        "requestToken",
+        "hasWorkingJavascript",
+        "pipelineType",
+        "prefetchFromAddressEnabled",
+        "stmaRenderEarly",
+        "isAsync",
+        "isClientTimeBased"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/checkout/p/<purchase-id>/spc",
+      "queryKeys": ["pipelineType", "purchasePrograms", "referrer", "ref_"],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cart/ref=ox_sc_cart_actions_1",
+      "queryKeys": [],
+      "bodyKeys": [
+        "submit.cart-actions",
+        "pageAction",
+        "actionPayload",
+        "hasMoreItems",
+        "addressId",
+        "addressZip",
+        "displayedSavedItemNum",
+        "activeItems",
+        "savedItems"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/cart/ref=ox_sc_cart_actions_1",
+      "queryKeys": [],
+      "bodyKeys": [
+        "submit.cart-actions",
+        "pageAction",
+        "actionPayload",
+        "hasMoreItems",
+        "addressId",
+        "addressZip",
+        "displayedSavedItemNum",
+        "activeItems",
+        "savedItems"
+      ],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/gp/cart/view.html",
+      "queryKeys": [],
+      "bodyKeys": [],
+      "status": 200
+    }
+  ]
+}
