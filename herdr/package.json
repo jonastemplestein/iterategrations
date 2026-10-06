@@ -1,0 +1,14 @@
+{
+  "name": "iterate-herdr",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Your Herdr, lent to an iterate project from your own computer with `iterate provide`",
+  "type": "module",
+  "scripts": {
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}
