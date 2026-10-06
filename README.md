@@ -15,6 +15,7 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`whatsapp-calls/`](whatsapp-calls) | none: run with `iterate provide`           | WhatsApp voice calls both ways, carried to the project's voice app: `itx.whatsappCalls.call(…)` rings a person, and a known caller is picked up.      |
 | [`herdr/`](herdr)                   | none: a Herdr plugin, or `iterate provide` | Your Herdr as `itx.jonas.herdr`: one `call(method, params)` for Herdr's whole socket API, and its events on a stream (news durable, focus ephemeral). |
 | [`jmap/`](jmap)                     | `iterate-jmap`                             | A mailbox over JMAP (Fastmail by default): send from it (filed in Sent), search, threads; and Fastmail Masked Email, throwaway addresses on demand.   |
+| [`telegram/`](telegram)             | `iterate-telegram`                         | A Telegram bot with its own Connect Telegram page: private chats and groups, each handed to an agent; invite links to let people in.                  |
 
 [`zero-trust-mcp.md`](zero-trust-mcp.md) is the shared step behind Monzo and Yoto: connecting a
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) server, which keeps no credentials of its
