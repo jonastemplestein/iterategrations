@@ -107,8 +107,9 @@ const all = await masked.list();
   `state: "pending"` Fastmail deletes it 24 hours after it is made unless mail arrives first.
 - `emailPrefix` (at most 64 of a-z, 0-9 and `_`) chooses how the address starts.
 - The token needs the Masked Email scope; without it every call answers `capabilityNotSupported`.
-- Not stated in Fastmail's documentation: whether a masked address can be on the account's own
-  domain, and whether mail can be sent from one. Treat masked addresses as receive-only.
+- Fastmail makes masked addresses on the account's own domain when it has one (seen on
+  2026-10-06), so they read like ordinary addresses. Its documentation does not say whether mail
+  can be sent from one: treat masked addresses as receive-only.
 
 ## 5. Mail arriving
 
