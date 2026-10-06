@@ -4,7 +4,7 @@
 
 ### Takeaway
 
-Amazon documents a complete direct purchase API for Amazon Business in the UK. It is the only evidenced API route for a real UK order. It does not accept an ordinary consumer Amazon email and password as API credentials. It needs Amazon Business onboarding, approved API roles, and OAuth tokens.
+Amazon documents a complete direct purchase API for Amazon Business in the UK. It is the documented official route for a real UK order. It does not accept an ordinary consumer Amazon email and password as API credentials. It needs Amazon Business onboarding, approved API roles, and OAuth tokens.
 
 ### Cited Findings
 
@@ -30,7 +30,7 @@ Amazon documents a complete direct purchase API for Amazon Business in the UK. I
 
 ### Takeaway
 
-A browser can automate the ordinary consumer web flow after an interactive sign-in, but Amazon can demand MFA, a passkey, device verification, or a visual challenge. Direct HTTP is not a reliable checkout foundation: there is no documented consumer checkout API, and the available open-source client only proves fragile login and order-history access.
+A browser can automate the ordinary consumer web flow after an interactive sign-in, but Amazon can demand MFA, a passkey, device verification, or a visual challenge. The later live experiment verified direct HTTP search, basket changes, address selection and checkout review on an Amazon Business account. See [the current report](../../reports/Amazon%20UK%20agent%20shopping.md) and [HTTP trace](http_trace.json). Final order submission remains untested. The website protocol has no documented public support commitment.
 
 ### Cited Findings
 
@@ -43,10 +43,10 @@ A browser can automate the ordinary consumer web flow after an interactive sign-
 
 ### Inferences
 
-- Use a separate persistent browser profile per authorised Amazon account. Let a human complete first sign-in, MFA, passkey, and any visual challenge in that profile. Treat the saved browser state as an account credential: encrypt it, give it account-scoped access, and rotate it after invalidation.
+- Use the authorized real Chrome profile and a task tab. Let a human complete first sign-in, MFA, passkey, and any visual challenge. Treat the saved browser state as an account credential: encrypt it, give it account-scoped access, and rotate it after invalidation.
 - Do not give model workers the Amazon password or raw cookies. A shopping service should own both. It should return narrow, typed results to the agent and perform browser actions only through its own policy checks.
 - Avoid CAPTCHA/WAF-solving services. They do not make the consumer route stable or authorised, and a human-visible challenge hand-off is the evidence-backed fallback.
-- An unofficial requests-based client may help explore read-only session mechanics in an isolated test account, but it should not be used for adding items, selecting payment, or placing a purchase. Checkout commonly depends on changing web forms, CSRF values, session state, address/payment selection, and anti-abuse controls; no reviewed primary source establishes a durable consumer HTTP checkout client.
+- The direct client must load current forms and CSRF values. The live capture established working basket and checkout-review requests. Treat final submission and other account variants as unverified until tested.
 
 ### Gaps
 

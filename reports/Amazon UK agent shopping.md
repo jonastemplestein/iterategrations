@@ -1,45 +1,100 @@
 # Amazon UK agent shopping
 
-Checked 6 October 2026. The implemented adapter's setup recipe is in [amazon/README.md](../amazon/README.md).
+Checked 6 October 2026. The [integration recipe](../amazon/README.md) uses a local
+`iterate provide` bridge. Chrome establishes the session. Node then calls the website's HTTP
+endpoints directly.
 
-**An ordinary Amazon.co.uk email and password has no documented official buyer API for search, checkout, or order history.** Amazon Business is the supported API-first route: its UK Product Search, Cart, and Ordering APIs can research offers and place orders after approval, Business-account setup, and browser OAuth consent. The current experiment uses a constrained v2 Zinc adapter because its live per-URL preflight says an Amazon.co.uk item is orderable to GB with a customer account. The evidence remains limited: Zinc labels the route **“observed,” with no completed orders**, and its public schema conflicts with the GB result. The adapter keeps purchases disabled when `purchasePolicy` is absent. An owner can set a cap only after Zinc confirms UK, account, and currency support. The browser route is documented as an alternative, not built. Neither consumer route is verified checkout.
+## What the experiment established
 
-## Amazon Business provides the supported UK API route
+I captured requests while navigating Amazon UK in Jonas's real Chrome through Playwriter.
+The session was already signed into Amazon Business. I searched for pens, opened a product,
+added it to the basket, changed its quantity and selection, chose a stored delivery address,
+and reached the final order review. I did not submit an order.
 
-Amazon Business exposes the buyer functions absent from consumer APIs. **Product Search API** searches its business catalogue and offers in the EU region, including the UK; **Cart API** estimates shipping and tax from returned ASINs and offer IDs; and **Ordering API** exposes `placeOrder` and `orderDetails` for UK orders ([Product Search](https://docs.business.amazon.com/docs/product-search-api-overview), [Cart](https://docs.business.amazon.com/docs/cart-api-overview), [Ordering](https://docs.business.amazon.com/docs/ordering-api)). `placeOrder` needs the buyer’s email, buying group, stored-payment reference, shipping address, ASIN, purchase-order number, and price expectations. Amazon safeguards can reject an order when price or total exceeds configured tolerances ([placing an order](https://docs.business.amazon.com/docs/placing-an-order), [order safeguards](https://docs.business.amazon.com/docs/using-order-safeguards)).
+The website uses a mix of JSON resources, HTML pages and form submissions. The captured routes
+include:
 
-This path is API-first, but not password-based. The integrator needs role approval; the customer needs a Business account, active buying group, stored payment method, purchasing-system configuration, and authorised user. That user completes browser OAuth consent, which yields refresh-token access ([website authorisation](https://docs.business.amazon.com/docs/website-authorization-workflow), [API roles](https://docs.business.amazon.com/docs/amazon-business-roles)). Model the connection around that authorisation. The public sandbox covers Product Search and Cart in Europe, **not Ordering**, so it cannot prove a live order ([sandbox](https://docs.business.amazon.com/docs/amazon-business-api-sandbox)).
+| Function                    | Website route                                                            | Format                                                              |
+| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| Search                      | `GET /s`                                                                 | HTML result rows, ASINs and displayed prices                        |
+| Product                     | `GET /dp/{ASIN}`                                                         | HTML offer form and page token                                      |
+| Product resources           | `GET /api/marketplaces/A1F83G8C2ARO7P/products/{ASIN}`                   | JSON resource envelopes                                             |
+| Basket read                 | `GET /cart/add-to-cart/get-cart-items?clientName=SiteWideActionExecutor` | JSON ASINs, sellers and quantities                                  |
+| Add item                    | `POST /cart/add-to-cart`                                                 | Form data with offer, quantity and CSRF token                       |
+| Quantity, selection, delete | `POST /cart/ref=ox_sc_cart_actions_1`                                    | Form data with an action payload and CSRF header                    |
+| Start purchase view         | `GET /checkout/entry/cart?isPreinit=1&partialCheckoutCart=1&…`           | Checkout HTML                                                       |
+| Business address            | `POST /checkout/p/{purchase}/business-address/continue`                  | Stored address choice and request token                             |
+| Review                      | `GET /checkout/p/{purchase}/spc`                                         | Delivery, payment, items and final total                            |
+| Final purchase form         | `POST /checkout/p/{purchase}/spc/place-order`                            | CSRF token, consistency token and submit field; submission untested |
 
-Login with Amazon does not close this gap: its documented scopes return profile data, not shopping or payment authority ([profile scopes](https://developer.amazon.com/docs/login-with-amazon/obtain-customer-profile.html)). Creators API and the older Product Advertising API can support affiliate catalogue discovery for the UK, but their documented operations are catalogue and attribution functions, not buyer checkout ([Creators API](https://affiliate-program.amazon.com/creatorsapi/docs/en-us/introduction)). Selling Partner API is for sellers and vendors, not consumer buyers ([SP-API onboarding](https://developer-docs.amazon.com/sp-api/docs/onboarding-overview)).
+I replayed authenticated reads from Node with cookies exported from the task tab. Search,
+product and basket pages returned HTTP 200. Basket JSON also returned valid items. This proves
+that browser clicks are not required for these requests once a working session exists.
 
-## Zinc is the experimental consumer-account API adapter
+A live Node probe then verified search, product details, add, quantity change, selection,
+checkout review, stored-address selection, a refreshed review and delete. It restored the
+original basket. The fresh review matched the earlier contents and total.
 
-The current `AmazonApi` and config-worker Amazon RPC expose `searchProducts`, `checkRetailer`, `placeOrder`, `getOrder`, and `cancelOrder`. They use Zinc as the experimental API route for a normal Amazon.co.uk account. A live retailer check returns `orderable: true`, `guest_checkout: false`, `use_your_account: true`, `ships_to: ["GB"]`, and storefront slug `amazon-uk` for an Amazon UK product and GB destination ([live preflight](https://api.zinc.com/retailers/check?url=https%3A%2F%2Fwww.amazon.co.uk%2Fdp%2FB0C2J7Z17K&country=GB)). Use that exact URL form: `country=GB` is a separate query parameter, not encoded into the product URL. Zinc directs a passing preflight to `POST /orders`, where a product URL, shipping address, and integer `max_price` are required ([create order](https://www.zinc.com/docs/v2/api-reference/orders/create-order)).
+The implemented client loads current forms and tokens. It does not hard-code token values.
+The bridge keeps cookies, passwords and hidden checkout fields away from the agents. Agents
+receive product results, basket records and visible checkout choices.
 
-The private one-time Node env-file setup helper registers one managed Amazon account and saves its `retailer_credentials_id`. Zinc requires the Amazon email and password in the JSON body at registration; it encrypts the values at rest and does not return them, but Zinc still receives the password ([managed account](https://www.zinc.com/docs/v2/api-reference/managed-accounts/create-managed-account), [retailer credentials](https://www.zinc.com/docs/v2/api-reference/configuration/managed-accounts)). The helper passes `retailer: "amazon-uk"`, verifies the returned retailer fields, and retains the short account ID. The normal RPC calls do not send the raw Amazon password.
+One checkout detail matters: Chrome initializes a fresh purchase view. The direct Business
+entry route can reuse an earlier view containing deselected items. The client consumes the
+fresh checkout HTML returned by the initialization request. It records the resulting purchase
+URL for subsequent reviews. Follow-up requests use a page CSRF token and Amazon checkout AJAX
+headers. They return JSON with HTML panels; the client applies those panels to the saved page.
 
-Treat all checkout controls as policy controls. Persist one Zinc idempotency key for each logical purchase and reuse it only for network or 5xx retries; poll the asynchronous order state every 30–60 seconds; cancel only while Zinc reports the order as pending ([idempotency](https://www.zinc.com/docs/v2/api-reference/introduction/idempotency), [get order](https://www.zinc.com/docs/v2/api-reference/orders/get-order)). Keep purchase disabled until an owner configures a cap after confirming with Zinc that Amazon UK works for the intended account and that `max_price` uses the required currency. The API only calls it an integer in cents; it does **not** document whether a UK request expects GBP pence. Its published country list also names US, DE, and IT, which conflicts with the GB preflight. Zinc offers a `zn_test_` sandbox key with no real orders or charges, but it skips URL, country, and external-address checks, so it cannot validate UK checkout or currency ([Zinc sandbox](https://www.zinc.com/docs/v2/api-reference/introduction/sandbox)). Zinc says the retailer check applies the same gates as an order, but calls this store merely “observed” and reports no completed order; these facts support a guarded experiment, not a validated checkout route ([retailer check](https://www.zinc.com/docs/v2/api-reference/retailers/check-retailer)).
+The [sanitized live HTTP trace](../research_notes/Amazon%20UK%20agent%20shopping/http_trace.json)
+records request methods, paths, field names and status codes. It contains no cookies, token
+values, addresses or payment details. Raw capture data remains private and outside the repository.
 
-`searchProducts` calls Zinc’s beta cross-retailer `GET /search?q=` and filters returned URLs to `amazon.co.uk`. Its older v2 `/products/search` lists `amazon` but not `amazon-uk`; neither endpoint proves UK discovery coverage ([cross-retailer search](https://www.zinc.com/docs/v2/api-reference/search/cross-retailer), [product search](https://www.zinc.com/docs/v2/api-reference/products/search)). When it has no exact result, use normal web search and preflight the selected Amazon URL. Do not treat the sandbox as evidence for this path.
+## What remains unverified
 
-| Route                  | Ordinary Amazon account               | UK purchase API          | Evidence and implementation decision                                                              |
-| ---------------------- | ------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
-| Amazon Business        | No; Business OAuth and account setup  | Yes, subject to approval | Durable option; search, order, and status                                                         |
-| Zinc v2                | Yes, credentials registered privately | Experimental             | Current adapter; beta search, preflight, and policy-gated purchase                                |
-| Browser via Playwriter | Yes                                   | No; web UI automation    | Documented alternative; manual sign-in and challenge hand-off                                     |
-| Rye                    | No login/non-guest support            | No documented UK support | Exclude; current ordering is US-only ([limitations](https://rye.com/docs/api-v2/developer-notes)) |
-| Direct/unofficial HTTP | Potentially for fragile reads         | No evidenced checkout    | Do not use for basket, payment, or purchase                                                       |
+Final order submission has not been tested. Its form action and required fields were observed,
+and the client implements a single guarded POST. Purchases are disabled unless the owner sets
+a GBP cap. The caller must pass the exact total and current review ID. The client checks a fresh
+review before it submits. It consumes the review before the request and never retries it.
 
-## Browser automation keeps the person in authentication
+The live account is Amazon Business. A fresh ordinary-account login, new-address entry, new-card
+entry, MFA flows and other checkout variants need further testing. The credentials-file login
+helper is implemented, but the tested bootstrap exported an existing signed-in session.
+A person must complete authentication challenges.
 
-The browser route is not implemented. If used for a later consumer-account experiment, it should control the current user’s real Chrome through Playwriter and open its **own task tab**. It should remain private and interactive, not always on. It should record the exact products, seller, quantity, address, delivery, currency, final total, timestamp, and a page reference before it submits an order.
+The website protocol is not documented as a public shopping API. Network visibility proves
+technical access; it does not establish Amazon's support commitment for these endpoints.
 
-Amazon can require SMS or authenticator MFA, passkey approval, device verification, or visual challenges; a password alone can fail ([Amazon account security](https://www.aboutamazon.com/news/retail/how-to-secure-your-amazon-account), [passkeys](https://digprjsurvey.amazon.co.uk/csad/help/node/TPphmhSWBgcI9Ak87p)). A browser adapter would pause with `needs_human_auth` or `needs_human_challenge` and let the user complete that step in Chrome. Do not use cloud CAPTCHA solving, automated TOTP, email/SMS forwarding, or automated passkey handling. Treat browser state as a protected account credential; it can include cookies, local storage, IndexedDB, and WebAuthn credentials ([Playwright authentication](https://playwright.dev/docs/auth)).
+## Official API access
 
-Amazon UK’s conditions restrict data mining, robots, and extracting or reusing listings, prices, and other service content without permission ([Conditions of Use](https://digprjsurvey.amazon.co.uk/csad/help/node/GLSBYFE9MGKKQXXM)). This makes the browser route an internal, controlled research tool rather than a durable unattended service. Capture diagnostics for selector and flow drift, and seek written permission before operating agents broadly against consumer pages.
+Amazon Business supplies official UK buyer APIs:
+[Product Search](https://docs.business.amazon.com/docs/product-search-api-overview),
+[Cart](https://docs.business.amazon.com/docs/cart-api-overview), and
+[Ordering](https://docs.business.amazon.com/docs/ordering-api). Cart can add and modify items,
+estimate totals and return buying-option identifiers for ordering.
 
-## Direct HTTP offers no safe checkout foundation
+This route needs developer onboarding, approved roles, Business account setup and OAuth consent.
+Email and password alone do not provide API authorization.
+[API roles](https://docs.business.amazon.com/docs/amazon-business-roles),
+[website authorization](https://docs.business.amazon.com/docs/website-authorization-workflow).
 
-No reviewed official source exposes consumer checkout HTTP endpoints. The open-source `amazon-orders` library states that Amazon has no official API, parses consumer web pages, can break when Amazon changes them, officially supports only English `.com`, and only retrieves order history and transactions ([README](https://github.com/alexdlaird/amazon-orders/blob/main/README.md)). Its documented bridge from HTTP to a visible Playwright browser for login challenges confirms that even read access can need browser interaction ([browser documentation](https://amazon-orders.readthedocs.io/browser.html)).
+Login with Amazon grants profile scopes.
+[Its documented profile access](https://developer.amazon.com/docs/login-with-amazon/obtain-customer-profile.html)
+does not grant buyer checkout authority. Affiliate catalog APIs and seller SP-API serve different
+roles.
 
-Do not build direct HTTP logic for cart changes, address or payment selection, or checkout. Those actions depend on changing page forms, CSRF values, session state, and anti-abuse controls, with no evidence of a maintained amazon.co.uk checkout client. At most, use isolated, read-only HTTP exploration to understand session mechanics. It must never become the purchase path.
+## Other ordering services
+
+The earlier [Zinc adapter](../amazon/ZINC.md) remains as an alternative. Its live retailer check
+reports Amazon UK as orderable with customer credentials, but its support is marked observed
+and its published schemas do not consistently describe GB or UK currency handling.
+[Retailer check](https://www.zinc.com/docs/v2/api-reference/retailers/check-retailer),
+[create order](https://www.zinc.com/docs/v2/api-reference/orders/create-order).
+
+Zinc stores the Amazon email and password at private registration. Normal agent calls use a Zinc
+API key and managed-account ID. Its sandbox protocol was tested, but that does not prove Amazon UK
+login or checkout.
+[Managed accounts](https://www.zinc.com/docs/v2/api-reference/managed-accounts/create-managed-account),
+[sandbox](https://www.zinc.com/docs/v2/api-reference/introduction/sandbox).
+
+Rye's documented v2 constraints are US-only and do not support login or non-guest checkout.
+[Developer notes](https://rye.com/docs/api-v2/developer-notes).
