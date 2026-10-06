@@ -19,8 +19,15 @@ export HERDR_LABEL="${HERDR_LABEL:-Herdr on $(hostname -s)}"
 
 log() { printf 'iterate-bridge: %s\n' "$*"; }
 
-# `iterate`'s own shim runs pnpm's Node, which can be older than 22.18 and then cannot load a .ts
-# file: run the CLI's entry point with a Node that can.
+# A startup hook's output is only in `herdr plugin log list`, which nobody reads at startup: what
+# needs the user is also shown as a notification.
+fail() {
+  log "$*"
+  "${HERDR_BIN_PATH:-herdr}" notification show "iterate bridge" --body "$*" >/dev/null 2>&1 || true
+}
+
+# `iterate`'s own shim can run an older Node than 22.18, which cannot load a .ts file: run the CLI's
+# entry point with a Node that can.
 pick_node() {
   local candidate
   for candidate in "${NODE:-}" /opt/homebrew/bin/node /usr/local/bin/node "$(command -v node 2>/dev/null)"; do
@@ -31,25 +38,38 @@ pick_node() {
   return 1
 }
 
-pick_cli() {
-  local candidate
+# CLI_CMD: how to run the iterate CLI under that Node. An installed copy (CLI, then a global one), or
+# else `npx iterate`, so nothing has to be installed first (the first run downloads it).
+resolve_cli() {
+  local node="$1" candidate npx
   for candidate in "${CLI:-}" \
     "$HOME/Library/pnpm/global/5/node_modules/iterate/bin/iterate.js" \
     "$HOME/.local/share/pnpm/global/5/node_modules/iterate/bin/iterate.js" \
     "$(npm root -g 2>/dev/null)/iterate/bin/iterate.js"; do
-    [ -f "$candidate" ] && { echo "$candidate"; return 0; }
+    [ -f "$candidate" ] && { CLI_CMD=("$node" "$candidate"); return 0; }
   done
-  return 1
+  npx="$(dirname "$node")/npx"
+  [ -x "$npx" ] || npx="$(command -v npx 2>/dev/null)"
+  [ -n "$npx" ] || return 1
+  CLI_CMD=(env "PATH=$(dirname "$node"):$PATH" "$npx" --yes iterate)
 }
 
 # The lines of `targets`: <iterate config> <project> [capability name, default jonas.herdr]
 each_target() {
   local config project name
-  [ -f "$TARGETS" ] || { log "no $TARGETS (copy plugin/targets.example)"; return 1; }
+  [ -f "$TARGETS" ] || return 1
   while read -r config project name _; do
     case "$config" in '' | '#'*) continue ;; esac
     "$1" "$config" "$project" "${name:-jonas.herdr}"
   done <"$TARGETS"
+}
+
+# The first run: a `targets` file with nothing active, to edit.
+first_run() {
+  [ -f "$TARGETS" ] && return 0
+  sed 's/^\([^#[:space:]]\)/# \1/' "$ROOT/plugin/targets.example" >"$TARGETS"
+  fail "first run: set the iterate project to lend this Herdr to in $TARGETS, then run the restart action (README: As a Herdr plugin)"
+  return 1
 }
 
 alive() { # a pid file whose process runs
@@ -65,16 +85,25 @@ start_one() {
     log "$config/$project already runs (pid $(cat "$pidfile"))"
     return 0
   fi
-  local node cli key=""
-  node="$(pick_node)" || { log "no Node 22.18 or later (set NODE in $CONFIG_DIR/config.sh)"; return 1; }
-  cli="$(pick_cli)" || { log "no iterate CLI: pnpm add -g iterate@latest (or set CLI)"; return 1; }
+  local node key=""
+  node="$(pick_node)" || { fail "needs Node 22.18 or later: install it, or set NODE in $CONFIG_DIR/config.sh"; return 1; }
+  resolve_cli "$node" || { fail "needs the iterate CLI: install Node's npm (for npx) or run: npm install -g iterate"; return 1; }
   # a key of its own (iterate tokens create --never-expires) outlives the 30 days of `iterate login`
   [ -r "$CONFIG_DIR/$config.key" ] && key="$(cat "$CONFIG_DIR/$config.key")"
+  # an unknown config does not start; not signed in still starts, and connects by itself afterwards
+  local check
+  check="$("${CLI_CMD[@]}" --config "$config" config get 2>&1)"
+  case "$check" in
+    *error:*) fail "iterate config $config: $(printf '%s\n' "$check" | sed -n 's/^error: *//p' | head -n 1 | cut -c1-200)"; return 1 ;;
+  esac
+  if [ -z "$key" ] && ! printf '%s' "$check" | grep -q 'hasToken: true'; then
+    fail "$config is not signed in: run  iterate --config $config login  (the lend starts by itself afterwards)"
+  fi
   (
     exec >>"$logfile" 2>&1
     [ -n "$key" ] && export ITERATE_BEARER_TOKEN="$key"
     while true; do
-      "$node" "$cli" --config "$config" provide "$ROOT/src/herdr.ts" --name "$name" --project "$project"
+      "${CLI_CMD[@]}" --config "$config" provide "$ROOT/src/herdr.ts" --name "$name" --project "$project"
       echo "$(date -u +%FT%TZ) iterate provide ended (exit $?); again in 30 s"
       sleep 30
     done
@@ -105,10 +134,11 @@ status_one() {
   fi
 }
 
+start() { first_run && { each_target start_one || true; }; }
 case "${1:-status}" in
-  start) each_target start_one ;;
+  start) start ;;
   stop) each_target stop_one ;;
-  restart) each_target stop_one; sleep 1; each_target start_one ;;
+  restart) each_target stop_one; sleep 1; start ;;
   status) each_target status_one ;;
   *) echo "usage: bridge.sh start | stop | restart | status" >&2; exit 2 ;;
 esac

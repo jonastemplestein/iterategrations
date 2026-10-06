@@ -64,19 +64,34 @@ server start and live handoff, and nothing else needs to run. A startup hook is 
 `plugin/bridge.sh start` starts one `iterate provide` for each line of the plugin's `targets` file in
 the background, each redialing until stopped, and exits.
 
-```sh
-herdr plugin link "$PWD/herdr"                  # from this repository
-cp herdr/plugin/targets.example "$(herdr plugin config-dir iterate-bridge)/targets"   # then edit it
-herdr plugin action invoke iterate-bridge.restart     # start now, without restarting Herdr
-```
+**First time**
 
-- **`targets`**: one line a project, `<iterate config> <project> [name]`. An iterate config is a name from
-  `iterate config list`; each is a deployment (`prd` is `os.iterate.com`; add your own with
+1. You need Node 22.18 or later (npm and `npx` come with it). No `iterate` install is needed: without
+   one, the plugin runs `npx iterate` (the first start downloads it). `npm install -g iterate` pins a
+   copy instead, and `CLI` in `config.sh` names one.
+2. Link the plugin: `git clone https://github.com/jonastemplestein/iterategrations`, then
+   `herdr plugin link "$PWD/iterategrations/herdr"`.
+3. Start it once: `herdr plugin action invoke iterate-bridge.restart` (or restart Herdr). With no `targets`
+   file it writes a template, `$(herdr plugin config-dir iterate-bridge)/targets`, and shows a
+   notification saying so. Edit it: one line a project, `<iterate config> <project> [name]`.
+   `iterate --config <config> projects list` names the projects once you are signed in.
+4. Sign in: `iterate --config <config> login` (or `npx iterate --config <config> login`). Run the
+   restart action again; a target that was not signed in connects by itself once you are.
+
+**What goes wrong shows on screen.** A startup hook's output is only in the plugin log, so the plugin
+also raises a notification (by Herdr's own `ui.toast.delivery`: a macOS banner on a Mac) for: no `targets`
+file (first run), no Node 22.18, no `npx` and no CLI, an iterate config name that does not exist, and a
+config that is not signed in.
+
+- **`targets`**: one line a project. An iterate config is a name from `iterate config list`; each is a
+  deployment (`prd` is `os.iterate.com`; add your own with
   `iterate config set --name <name> --os-base-url <url>`).
-- **Signing in.** Each target uses its config's stored login: `iterate --config <config> login` (30 days
-  at most; the lend shows `Not logged in` in its log until then, and starts by itself once you are). For
-  a lend that outlives that, put a key in `<plugin config dir>/<config>.key` (mode 600):
-  `iterate --config <config> tokens create --project <project> --never-expires`.
+- **How long a sign-in lasts.** `iterate login` gives an access token for an hour, renewed from a grant
+  that dies after a week unused and in 30 days at most. A running lend renews itself, then stops when the
+  grant ends (the log says `Not logged in`; nothing is shown yet): sign in again. For a lend that
+  outlives that, put a personal access token in `<plugin config dir>/<config>.key` (mode 600):
+  `iterate --config <config> tokens create --project <project> --never-expires`. It acts as you on that
+  project until you revoke it (`iterate tokens revoke`), and sits in that file in plain text.
 - **`config.sh`** in the plugin's config dir is sourced when present: `HERDR_LABEL` (the name a model
   reads in the description), `HERDR_LOG_PATH`, and `NODE` / `CLI` if they are not found.
 - **Actions**: `iterate-bridge.status`, `.restart`, `.stop` (the qualified id: `main-sync` also has a
