@@ -23,7 +23,12 @@ type Message = {
   message_thread_id?: number;
   text?: string;
   caption?: string;
-  reply_to_message?: { from?: { id: number } };
+  reply_to_message?: {
+    message_id?: number;
+    from?: { id: number };
+    text?: string;
+    caption?: string;
+  };
   [media: string]: unknown;
 };
 
@@ -91,7 +96,56 @@ const once = (append: Promise<unknown>): Promise<unknown> =>
     if ((error as { code?: unknown } | null)?.code !== "IDEMPOTENCY_CONFLICT") throw error;
   });
 
-async function route(itx: TelegramItx, bot: string, id: number, message: Message): Promise<void> {
+/** Who handles an accepted message: this package's own agent for each chat (`agents`, the default),
+ *  or the project (`events`): the package records `telegram/message-accepted` and routes nothing. */
+export type Deliver = "agents" | "events";
+
+/** The `telegram/message-accepted` payload: what a project routes on. Written only for a person who
+ *  is let in, and never for a service message. */
+function accepted(
+  bot: string,
+  id: number,
+  message: Message,
+  addressed: boolean,
+): Record<string, unknown> {
+  const files = FILES.flatMap((kind) => {
+    const found = message[kind];
+    const file = (Array.isArray(found) ? found.at(-1) : found) as { file_id?: string } | undefined;
+    return file?.file_id ? [{ kind, fileId: file.file_id }] : [];
+  });
+  const from = message.from!;
+  const reply = message.reply_to_message;
+  return {
+    bot,
+    updateId: id,
+    messageId: message.message_id,
+    chat: { id: message.chat.id, type: message.chat.type, title: message.chat.title },
+    ...(message.message_thread_id ? { threadId: message.message_thread_id } : {}),
+    from: { id: from.id, name: from.first_name ?? String(from.id), username: from.username },
+    ...(message.text ? { text: message.text } : {}),
+    ...(message.caption ? { caption: message.caption } : {}),
+    ...(files.length ? { files } : {}),
+    ...(message.location ? { location: message.location } : {}),
+    ...(reply
+      ? {
+          replyTo: {
+            messageId: reply.message_id,
+            fromId: reply.from?.id,
+            text: reply.text ?? reply.caption,
+          },
+        }
+      : {}),
+    addressed,
+  };
+}
+
+async function route(
+  itx: TelegramItx,
+  bot: string,
+  id: number,
+  message: Message,
+  deliver: Deliver,
+): Promise<void> {
   const from = message.from;
   const info = await readJson<BotInfo>(itx, bot, "bot");
   if (!from || from.is_bot || !info || !hasContent(message)) return;
@@ -132,6 +186,18 @@ async function route(itx: TelegramItx, bot: string, id: number, message: Message
     return;
   }
 
+  // The project routes (its own agents, its own replies): the event is all it needs
+  if (deliver === "events") {
+    await once(
+      itx.cd(streamOf(bot)).append({
+        type: "telegram/message-accepted",
+        idempotencyKey: `telegram:${bot}:${id}:accepted`,
+        payload: accepted(bot, id, message, addressed),
+      }),
+    );
+    return;
+  }
+
   // One agent per chat. What is meant for the bot wakes it, with "typing" in the chat meanwhile;
   // the rest of a group's talk it reads as context only.
   const agent = `/agents/telegram/${bot}/chat-${message.chat.id}`;
@@ -165,7 +231,11 @@ async function route(itx: TelegramItx, bot: string, id: number, message: Message
  *  with `itx.secrets.verifyEquals`. An unknown bot or a wrong token looks like any other path: a 404
  *  that stores nothing. Each update is recorded as `telegram/update`, keyed by `update_id`; then
  *  `route` decides what it means. */
-export async function receiveUpdate(request: Request, withItx: WithItx): Promise<Response> {
+export async function receiveUpdate(
+  request: Request,
+  withItx: WithItx,
+  deliver: Deliver = "agents",
+): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
   const [, bot = ""] = new URL(request.url).pathname.split("/").map(decodeURIComponent);
   const presented = request.headers.get("x-telegram-bot-api-secret-token") ?? "";
@@ -193,7 +263,7 @@ export async function receiveUpdate(request: Request, withItx: WithItx): Promise
         payload: { bot, update },
       }),
     );
-    if (update.message) await route(itx, bot, id, update.message);
+    if (update.message) await route(itx, bot, id, update.message, deliver);
   });
   return Response.json({ ok: true });
 }

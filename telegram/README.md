@@ -132,6 +132,19 @@ and `telegram/bots/<bot>` for each connected bot.
 - **Rotating a token:** `/token` in @BotFather, then paste the new token on the page: connecting
   again also makes a new webhook secret.
 
+## When the project has agents of its own
+
+By default each chat gets an agent here, and the agent answers by calling the Bot API. A project with
+agents of its own (a chief of staff that already answers WhatsApp, say) passes `deliver: "events"`
+to `serveTelegram`. The package then keeps the door: who is let in, invites, welcomes, who waits.
+For each message from someone who is let in it records `telegram/message-accepted` on
+`/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The project routes that event
+to its agents and sends their answers itself, with `api`, `placeholder` and `splitText`, which the
+package exports. Its payload: `bot`, `updateId`, `messageId`, `chat { id, type, title }`, `threadId`,
+`from { id, name, username }`, `text`, `caption`, `files [{ kind, fileId }]`, `location`,
+`replyTo { messageId, fromId, text }` and `addressed` (whether the bot was @mentioned, replied to,
+named or commanded). A service message is never accepted.
+
 ## One tap, later
 
 [`managed-bots.md`](managed-bots.md) is a design for Telegram's managed bots, which would make the

@@ -14,7 +14,7 @@ const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdef";
 
 type Call = { method: string; credential: string; body: any };
 
-function fakeProject() {
+function fakeProject(deliver?: "agents" | "events") {
   const secrets: Record<string, unknown> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
@@ -70,7 +70,7 @@ function fakeProject() {
   };
   const withItx = async (call: (itx: any) => unknown) => call(itx);
   const serve = async (request: Request, requireMember: (r: Request) => Response | null) => {
-    const res = await serveTelegram(request, { withItx: withItx as any, requireMember });
+    const res = await serveTelegram(request, { withItx: withItx as any, requireMember, deliver });
     assert.ok(res, "a request on the telegram slug is answered");
     return res;
   };
@@ -616,4 +616,105 @@ test("the page says whether the bot can read a whole group, and how to fix it wh
   const off = await (await project.page("/_/")).text();
   assert.match(off, /reads every message in a group/);
   assert.doesNotMatch(off, /privacy mode is on/);
+});
+
+// ------------------------------------------- the project routes (deliver: "events")
+
+test("deliver events: a message from someone let in is recorded as accepted, for the project to route, and wakes no agent here", async () => {
+  const project = fakeProject("events");
+  await project.connected({ 42: ME });
+  const msg = message({
+    text: "what's for dinner?",
+    reply_to_message: { message_id: 3, from: { id: 1001 }, text: "Shall I order?" },
+  });
+  await project.hook(`/${BOT}`, { update_id: 200, message: msg });
+  await project.hook(`/${BOT}`, { update_id: 200, message: msg }); // Telegram's resend
+  const accepted = project.appended.filter((a) => a.event.type === "telegram/message-accepted");
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0]!.path, STREAM);
+  assert.equal(accepted[0]!.event.idempotencyKey, `telegram:${BOT}:200:accepted`);
+  assert.deepEqual(accepted[0]!.event.payload, {
+    bot: BOT,
+    updateId: 200,
+    messageId: 7,
+    chat: { id: 42, type: "private", title: undefined },
+    from: { id: 42, name: "Jonas", username: "jonas" },
+    text: "what's for dinner?",
+    replyTo: { messageId: 3, fromId: 1001, text: "Shall I order?" },
+    addressed: true,
+  });
+  assert.deepEqual(project.agents, []);
+  assert.deepEqual(agentEvents(project), []);
+  assert.deepEqual(project.calls, []); // no typing: the project's relay shows it
+});
+
+test("deliver events: a group's message is accepted whether or not it addresses the bot, with its files and thread", async () => {
+  const project = fakeProject("events");
+  await project.connected({ 42: ME });
+  await project.hook(`/${BOT}`, { update_id: 210, message: group({ text: "we need milk" }) });
+  await project.hook(`/${BOT}`, {
+    update_id: 211,
+    message: group({
+      text: undefined,
+      caption: "the sofa",
+      message_thread_id: 4,
+      photo: [{ file_id: "small" }, { file_id: "big" }],
+      document: { file_id: "doc1" },
+    }),
+  });
+  const accepted = project.appended
+    .filter((a) => a.event.type === "telegram/message-accepted")
+    .map((a) => a.event.payload);
+  assert.equal(accepted.length, 2);
+  assert.equal(accepted[0].addressed, false);
+  assert.deepEqual(accepted[0].chat, { id: -100, type: "supergroup", title: "Home" });
+  assert.equal(accepted[1].caption, "the sofa");
+  assert.equal(accepted[1].threadId, 4);
+  assert.deepEqual(accepted[1].files, [
+    { kind: "photo", fileId: "big" },
+    { kind: "document", fileId: "doc1" },
+  ]);
+  assert.deepEqual(agentEvents(project), []);
+});
+
+test("deliver events: strangers, other bots and service messages are never accepted; the door still works (invites, welcomes, waiting)", async () => {
+  const project = fakeProject("events");
+  await project.connected({ 42: ME });
+  await project.hook(`/${BOT}`, {
+    update_id: 220,
+    message: message({}, { id: 555, first_name: "Eve" }),
+  });
+  await project.hook(`/${BOT}`, { update_id: 221, message: message({}, { is_bot: true }) });
+  await project.hook(`/${BOT}`, {
+    update_id: 222,
+    message: {
+      message_id: 9,
+      from: { id: 42, is_bot: false, first_name: "Jonas" },
+      chat: { id: -100, type: "group", title: "Home" },
+      group_chat_created: true,
+    },
+  });
+  await project.hook(`/${BOT}`, { update_id: 223, message: message({ text: "/start" }) });
+  assert.deepEqual(
+    project.appended.filter((a) => a.event.type === "telegram/message-accepted"),
+    [],
+  );
+  assert.match(sent(project)[0]!.body.text, /private/); // the stranger is told once
+  assert.ok(project.kv[K("pending/555")]); // and waits on the page
+  assert.match(sent(project)[1]!.body.text, /You're in/); // an allowed person's /start is welcomed
+});
+
+test("the package exports what a project needs to send its own answers: api, placeholder, splitText", async () => {
+  const lib = await import("../dist/telegram.js");
+  assert.equal(typeof lib.api, "function");
+  assert.equal(
+    lib.placeholder("jeeves"),
+    'getSecret("/secrets/telegram-jeeves", { field: "token" })',
+  );
+  assert.deepEqual(lib.splitText("hi"), ["hi"]);
+  const long = Array.from({ length: 5 }, (_, i) => String(i).repeat(1500)).join("\n");
+  const pieces = lib.splitText(long);
+  assert.ok(pieces.length >= 2 && pieces.every((p: string) => p.length <= 4096));
+  assert.equal(pieces.join("\n"), long);
+  assert.ok(lib.splitText("😀".repeat(3000)).every((p: string) => !/[\ud800-\udbff]$/.test(p)));
 });

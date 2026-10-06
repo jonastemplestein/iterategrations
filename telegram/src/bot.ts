@@ -92,6 +92,27 @@ export async function say(
   await api(itx, placeholder(bot), "sendMessage", { chat_id: chatId, text }).catch(() => undefined);
 }
 
+/** A text message holds at most 4096 characters. */
+export const MESSAGE_LIMIT = 4096;
+
+/** `text` in pieces of at most `limit` characters, cut at a blank line, a line end or a space where
+ *  one is near, and never inside a surrogate pair. For a sender that carries long answers. */
+export function splitText(text: string, limit: number = MESSAGE_LIMIT): string[] {
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > limit) {
+    const head = rest.slice(0, limit);
+    let cut = Math.max(head.lastIndexOf("\n\n"), head.lastIndexOf("\n"), head.lastIndexOf(" "));
+    if (cut < limit / 2) cut = limit;
+    const last = rest.charCodeAt(cut - 1);
+    if (cut === limit && last >= 0xd800 && last <= 0xdbff) cut -= 1; // a high surrogate: keep the pair whole
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\s+/, "");
+  }
+  if (rest !== "" || pieces.length === 0) pieces.push(rest);
+  return pieces;
+}
+
 const hex = (bytes: number): string =>
   [...crypto.getRandomValues(new Uint8Array(bytes))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
