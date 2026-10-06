@@ -15,7 +15,8 @@ goes there.
 - **Private chats:** a message from someone who is in wakes that chat's agent. The chat shows
   "typing". Someone who is not in is told once that the bot is private, and waits on the page.
 - **Groups:** add the bot to a group. People who are in can talk to it there. It answers when it is
-  addressed (an @mention, a reply to it, a command) and reads the rest as context.
+  addressed (an @mention, a reply to it, a command, or its name as a word: "Hi Jeeves") and reads the
+  rest as context.
 - **Invites:** a one-time link, `t.me/<bot>?start=<code>`. The person opens it and taps Start. The bot
   says "You're in." Nobody types a user id. That is how a wife, a colleague or a second phone joins.
 
@@ -86,9 +87,11 @@ On the page, **Make an invite link** and send it to each person (to yourself too
 phone with Telegram, and tap **Start**. Or they message the bot, and you press **Let in** beside their
 name.
 
-For a group, the page says what to do. In short: add the bot to the group. To let it read the whole
-conversation, not only what is aimed at it, send `/setprivacy` to @BotFather, choose the bot, choose
-**Disable**, then remove the bot from the group and add it again.
+For a group, add the bot to it and let in each person who should talk to it. **Telegram's privacy mode
+is on by default:** the bot is then sent only the messages that @mention it, reply to it or are
+commands, so "Hi Jeeves" never reaches it. The page asks Telegram and says which it is. To let the bot
+hear everything, make it an admin of the group (it needs no rights), or send `/setprivacy` to
+@BotFather, choose the bot, choose **Disable**, then remove the bot from the group and add it again.
 
 Then write the bot's username and where its page is into the project's `AGENTS.md`.
 

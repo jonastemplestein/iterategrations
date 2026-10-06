@@ -1,11 +1,13 @@
 import {
   allow,
+  api,
   BOT_NAME,
   connectBot,
   disconnectBot,
   listBots,
   listPeople,
   makeInvite,
+  placeholder,
   readJson,
   say,
   keyOf,
@@ -33,7 +35,44 @@ const STYLE = `
   .person { display: flex; gap: .5rem; align-items: center; justify-content: space-between; padding: .25rem 0; }
   .muted { opacity: .7; font-size: .9rem; } code { word-break: break-all; }
   form { display: inline; }
+  .copy { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; }
+  .copy code { flex: 1; min-width: 0; }
+  .warn { background: #e67e2222; border: 1px solid #e67e22; border-radius: 8px; padding: .5rem .75rem; }
 `;
+
+/** Wires every [data-copy] button to the clipboard. It runs under a nonce: the page allows no other script. */
+const COPY_SCRIPT = `document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy]");
+  if (!button) return;
+  const text = button.getAttribute("data-copy");
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  const label = button.textContent;
+  button.textContent = "Copied";
+  setTimeout(() => (button.textContent = label), 1500);
+});`;
+
+const copyRow = (text: string): string =>
+  `<div class="copy"><code>${esc(text)}</code><button type="button" class="quiet" data-copy="${esc(text)}">Copy</button></div>`;
+
+/** What Telegram says about the bot in groups: with privacy mode on it sees only what @mentions it,
+ *  replies to it or is a command. */
+const groupsHelp = (username: string, readsAll: boolean | null): string =>
+  readsAll === true
+    ? `<p class="ok">@${esc(username)} reads every message in a group. It answers people you have let in when they @mention it, reply to it, write a command or say its name; the rest it reads as context.</p>`
+    : `<div class="${readsAll === false ? "warn" : "muted"}"><p>${
+        readsAll === false
+          ? `<b>Telegram's privacy mode is on.</b> In a group, @${esc(username)} only sees messages that @mention it, reply to it or are commands, so "Hi Jeeves" never reaches it. To let it hear everything, do <b>one</b> of these:`
+          : `In a group a bot sees only what @mentions it, replies to it or is a command, unless you change that. To let it hear everything, do <b>one</b> of these:`
+      }</p><ol><li>Make it an admin of the group: group → Edit → Administrators → Add Administrator → @${esc(username)}. It needs no rights.</li><li>Or in @BotFather send <code>/setprivacy</code>, choose the bot, choose <b>Disable</b>, then remove the bot from the group and add it again.</li></ol></div>`;
 
 const post = (action: string, fields: Record<string, string>, label: string, quiet = false) =>
   `<form method="post" action="${action}">${Object.entries(fields)
@@ -49,12 +88,20 @@ async function botCard(
   invite: string | null,
 ): Promise<string> {
   const info = await readJson<BotInfo>(itx, bot, "bot");
+  const readsAll = await api<{ can_read_all_group_messages?: boolean }>(
+    itx,
+    placeholder(bot),
+    "getMe",
+  )
+    .then((me) => me.can_read_all_group_messages ?? null)
+    .catch(() => null);
   const allowed = await listPeople<Person>(itx, bot, "allowed/");
   const pending = await listPeople<Pending>(itx, bot, "pending/");
   const link = invite && info ? `https://t.me/${info.username}?start=${invite}` : null;
   return `<section>
     <h2>@${esc(info?.username ?? bot)} <span class="muted">connected</span></h2>
     <p><a href="https://t.me/${esc(info?.username ?? "")}">Open it in Telegram</a></p>
+    ${copyRow(`https://t.me/${info?.username ?? ""}`)}
     ${
       pending.length
         ? `<h2>Waiting to be let in</h2>${pending
@@ -78,12 +125,13 @@ async function botCard(
     }
     ${
       link
-        ? `<div class="ok"><p>Send this link to the person. They open it in Telegram and tap <b>Start</b>. It works once, for a week.</p><p><code>${esc(link)}</code></p></div>`
+        ? `<div class="ok"><p>Send this link to the person. They open it in Telegram and tap <b>Start</b>. It works once, for a week.</p>${copyRow(link)}</div>`
         : ""
     }
     ${post("invite", { bot }, "Make an invite link")}
     <h2>In a group</h2>
-    <p class="muted">Add @${esc(info?.username ?? "")} to the group. It answers people you have let in, when they @mention it, reply to it or write a command. A bot sees only those messages unless you change that: in @BotFather send <code>/setprivacy</code>, choose the bot, choose <b>Disable</b>, then remove the bot from the group and add it again. It then reads everything and still answers only when it is addressed.</p>
+    <p>Add @${esc(info?.username ?? "")} to the group, and let in each person who should talk to it.</p>
+    ${groupsHelp(info?.username ?? bot, readsAll)}
     <p>${post("disconnect", { bot }, "Disconnect", true)}</p>
   </section>`;
 }
@@ -129,15 +177,15 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
       );
       return `${cards.join("")}${connectForm(bots.length === 0)}`;
     });
+    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
     return new Response(
       `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Telegram</title><style>${STYLE}</style></head><body><h1>Telegram</h1>${
         error ? `<p class="error">${esc(error)}</p>` : ""
-      }${connected ? `<p class="ok">Connected @${esc(connected)}. Open it in Telegram and send a message.</p>` : ""}${body}</body></html>`,
+      }${connected ? `<p class="ok">Connected @${esc(connected)}. Open it in Telegram and send a message.</p>` : ""}${body}<script nonce="${nonce}">${COPY_SCRIPT}</script></body></html>`,
       {
         headers: {
           ...html,
-          "content-security-policy":
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'`,
         },
       },
     );
