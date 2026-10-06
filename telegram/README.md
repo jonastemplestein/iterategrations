@@ -87,11 +87,15 @@ On the page, **Make an invite link** and send it to each person (to yourself too
 phone with Telegram, and tap **Start**. Or they message the bot, and you press **Let in** beside their
 name.
 
-For a group, add the bot to it and let in each person who should talk to it. **Telegram's privacy mode
-is on by default:** the bot is then sent only the messages that @mention it, reply to it or are
-commands, so "Hi Jeeves" never reaches it. The page asks Telegram and says which it is. To let the bot
-hear everything, make it an admin of the group (it needs no rights), or send `/setprivacy` to
-@BotFather, choose the bot, choose **Disable**, then remove the bot from the group and add it again.
+For a group, let in each person who should talk to it, then use the page's **Add @bot to a group as
+admin** button (with a Copy button for the link). It is Telegram's own deep link,
+`https://t.me/<bot>?startgroup&admin=manage_chat`: Telegram opens a picker of the groups the person can
+add admins to, and makes the bot an admin when they confirm. **That matters because Telegram's privacy
+mode is on by default:** a plain member bot is sent only the messages that @mention it, reply to it or
+are commands, so "Hi Jeeves" never reaches it. An admin bot is sent every message. No Bot API call can
+make a bot an admin or change privacy mode: only a person can, and the link is the shortest way. (The
+other ways: Edit, Administrators, Add Administrator in the group; or `/setprivacy` to @BotFather, choose
+the bot, **Disable**, then remove and re-add the bot.) The page asks Telegram which it is.
 
 Then write the bot's username and where its page is into the project's `AGENTS.md`.
 
