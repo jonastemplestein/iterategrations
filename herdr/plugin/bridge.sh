@@ -78,6 +78,18 @@ alive() { # a pid file whose process runs
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
+# After `iterate provide` ends: if what it wrote this run says the sign-in is over (every such error
+# ends in "Run `iterate login` ..."), say so, at most once in 12 hours for a target. $4 is the log's
+# line count before the run, so older lines never count.
+warn_login() {
+  local config="$1" project="$2" logfile="$3" before="$4"
+  tail -n +"$((before + 1))" "$logfile" | grep -q 'iterate login' || return 0
+  local stamp="$STATE_DIR/$config-$project.login-warned"
+  [ -z "$(find "$stamp" -mmin -720 2>/dev/null)" ] || return 0
+  touch "$stamp"
+  fail "$config's sign-in has ended: run  iterate --config $config login  (the lend starts by itself afterwards)"
+}
+
 start_one() {
   local config="$1" project="$2" name="$3"
   local pidfile="$STATE_DIR/$config-$project.pid" logfile="$STATE_DIR/$config-$project.log"
@@ -98,13 +110,16 @@ start_one() {
   esac
   if [ -z "$key" ] && ! printf '%s' "$check" | grep -q 'hasToken: true'; then
     fail "$config is not signed in: run  iterate --config $config login  (the lend starts by itself afterwards)"
+    touch "$STATE_DIR/$config-$project.login-warned"
   fi
   (
     exec >>"$logfile" 2>&1
     [ -n "$key" ] && export ITERATE_BEARER_TOKEN="$key"
     while true; do
+      before="$(wc -l <"$logfile" | tr -d ' ')"
       "${CLI_CMD[@]}" --config "$config" provide "$ROOT/src/herdr.ts" --name "$name" --project "$project"
       echo "$(date -u +%FT%TZ) iterate provide ended (exit $?); again in 30 s"
+      warn_login "$config" "$project" "$logfile" "$before"
       sleep 30
     done
   ) &
@@ -122,7 +137,7 @@ stop_one() {
   else
     log "$1/$2 does not run"
   fi
-  rm -f "$pidfile"
+  rm -f "$pidfile" "$STATE_DIR/$1-$2.login-warned"
 }
 
 status_one() {
