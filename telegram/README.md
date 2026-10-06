@@ -28,39 +28,39 @@ never take a secret in chat). The only code to commit is one dependency and one 
 
 ### 1. The package, in the config repo
 
-Pin a commit of this repo's `main` (the loader only takes a pkg.pr.new package at a full commit):
+Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
+`worker.ts`, probes the result as a worker, and commits it. `serveTelegram` is a partial `fetch`: it
+answers the requests that are Telegram's (the project's `telegram` routing slug) and returns `null` for
+every other, so the branch is the same four lines wherever it goes.
 
-```sh
-curl -sI https://pkg.pr.new/jonastemplestein/iterategrations/iterate-telegram@main | grep -i x-commit-key
-# x-commit-key: jonastemplestein:iterategrations:<40-hex sha>
-```
-
-In `package.json`, under `dependencies`:
-
-```json
-"iterate-telegram": "https://pkg.pr.new/jonastemplestein/iterategrations/iterate-telegram@<40-hex sha>"
-```
-
-`serveTelegram` is a partial `fetch`: it answers the requests that are Telegram's (the project's
-`telegram` routing slug) and returns `null` for every other. In `worker.ts`, add this at the top of
-`fetch`, with the import:
-
-```ts
-import { serveTelegram } from "iterate-telegram";
-
-const telegram = await serveTelegram(request, {
+```js
+// the values for add-to-a-project.md
+const PACKAGE = "iterate-telegram";
+const SLUG = "telegram";
+const IMPORT = 'import { serveTelegram } from "iterate-telegram";';
+const BRANCH = `const telegramResponse = await serveTelegram(request, {
   withItx: async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
     using itx = this.getItx();
     return await call(itx);
   },
   requireMember: (request) => this.auth.require(request),
 });
-if (telegram) return telegram;
+if (telegramResponse) return telegramResponse;`;
+const MEMBER = "";
+const FILES = {};
 ```
 
-Commit it in one commit with `itx.repos.get("/repos/config").commitFiles({ message, parent, changes })`,
-`parent` being the tip you read. A commit to `main` publishes. The project must have the agents app
-installed (`installAgents`, as the default template does).
+The project must have the agents app installed (`installAgents`, as the default template does). Check
+that the receiver is live. It answers a path it does not know with `404`, and that is the proof:
+
+```js
+async (itx) => {
+  const url = await itx.url({ routingSlug: "telegram", path: "/nope" });
+  const res = await itx.fetch(new Request(url, { method: "POST" }));
+  return { url, status: res.status }; // 404 = the receiver is there and refused. Anything else: not published yet
+};
+```
 
 ### 2. Send the person to the page
 

@@ -46,52 +46,37 @@ a permissions error; ask them to open the app and approve, then try again.
 
 ## 2. Add the receiver to the project's config repo
 
-Two ways to get the code into `/repos/config`; commit everything in one commit with
-`itx.repos.get("/repos/config").commitFiles({ message, parent, changes: [{ path, content }, …] })`,
-`parent` being the tip you read. A commit to `main` publishes.
+Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
+`worker.ts`, probes the result as a worker, and commits it:
 
-### Plan A: depend on the package (recommended)
-
-The code is the package `iterate-monzo`, built by this repo's CI and served by pkg.pr.new (never
-npm). The loader only takes a pkg.pr.new package at a full commit, so pin one:
-
-```sh
-curl -sI https://pkg.pr.new/jonastemplestein/iterategrations/iterate-monzo@main | grep -i x-commit-key
-# x-commit-key: jonastemplestein:iterategrations:<40-hex sha>
+```js
+// the values for add-to-a-project.md
+const PACKAGE = "iterate-monzo";
+const SLUG = "monzo";
+const IMPORT = 'import { receiveMonzoTransaction } from "iterate-monzo";';
+const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "monzo")
+  return receiveMonzoTransaction(request, async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
+    using itx = this.getItx();
+    return await call(itx);
+  });`;
+const MEMBER = "";
+const FILES = {};
 ```
 
-Add it under `dependencies` in the config repo's `package.json` (keep what is there):
+The branch answers the project's `monzo` host. `receiveMonzoTransaction` takes the request and a
+function that hands it the project's `itx` for one call (`using` releases it when the block ends).
 
-```json
-"dependencies": {
-  "iterate-monzo": "https://pkg.pr.new/jonastemplestein/iterategrations/iterate-monzo@<40-hex sha>"
-}
-```
+### By hand, or copy the source
 
-and one new file, `monzo.ts`, that only re-exports it:
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the branch above.
+To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) (about 40 lines, one type import) and
+commit it to `/repos/config` as `monzo.ts`; the branch then imports `receiveMonzoTransaction` from
+`"./monzo.ts"`. You own the copy.
 
-```ts
-export { receiveMonzoTransaction } from "iterate-monzo";
-```
+### Check it's live
 
-### Plan B: copy the source
-
-Read [`src/monzo.ts`](src/monzo.ts) (about 40 lines, one type import) and commit it to
-`/repos/config` as `monzo.ts`. You own the copy.
-
-### The branch in `worker.ts`
-
-In `worker.ts`, import it and add this at the top of `fetch`, before anything else that answers the
-project's hosts:
-
-```ts
-import { receiveMonzoTransaction } from "./monzo.ts";
-
-if (request.headers.get("x-iterate-routing-slug") === "monzo")
-  return receiveMonzoTransaction(request, (call) => this.withItx(call));
-```
-
-Check it's live. The receiver answers a path it doesn't know with `404`, and that is the proof:
+The receiver answers a path it doesn't know with `404`, and that is the proof:
 
 ```js
 async (itx) => {
