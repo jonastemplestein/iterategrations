@@ -12,6 +12,8 @@ type Kv = {
 /** The project, as this package uses it: what a config worker's `itx` already has. */
 export type TelegramItx = {
   fetch(request: Request): Promise<Response>;
+  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  kv: Kv;
   agents: { create(path: string): Promise<unknown> };
   secrets: {
     set(
@@ -23,7 +25,6 @@ export type TelegramItx = {
     verifyEquals(path: string, input: { value: string }): Promise<boolean>;
   };
   cd(path: string): {
-    kv: Kv;
     append(event: {
       type: string;
       idempotencyKey: string;
@@ -35,11 +36,13 @@ export type TelegramItx = {
 /** What a project's code is handed to run: `(call) => { using itx = this.getItx(); return call(itx); }` */
 export type WithItx = <T>(call: (itx: TelegramItx) => T) => Promise<Awaited<T>>;
 
-/** Each bot's own state (kv): `bot` (its id and username), `allowed/<user id>`, `pending/<user id>`,
- *  `invite/<code>`. The stream is also where each update is recorded. */
+/** The stream each bot's updates are recorded on. */
 export const streamOf = (bot: string): string => `/integrations/telegram/${bot}`;
-/** The names of the connected bots (kv `bots/<name>`). */
-const INDEX = "/integrations/telegram";
+/** Each bot's own state, in the project's kv: `telegram/<bot>/bot` (its id and username),
+ *  `…/allowed/<user id>`, `…/pending/<user id>`, `…/invite/<code>`. */
+export const keyOf = (bot: string, key: string): string => `telegram/${bot}/${key}`;
+/** The names of the connected bots: kv `telegram/bots/<name>`. */
+const BOTS = "telegram/bots/";
 
 export type Person = { name: string; username?: string; at: string };
 export type Pending = Person & { chatId: number; chatTitle?: string };
@@ -94,12 +97,12 @@ const hex = (bytes: number): string =>
     .join("");
 
 export async function readJson<T>(itx: TelegramItx, bot: string, key: string): Promise<T | null> {
-  const value = await itx.cd(streamOf(bot)).kv.get(key);
+  const value = await itx.kv.get(keyOf(bot, key));
   return value ? (JSON.parse(value) as T) : null;
 }
 
 export async function listBots(itx: TelegramItx): Promise<string[]> {
-  return (await itx.cd(INDEX).kv.list("bots/")).keys.map((key) => key.slice("bots/".length));
+  return (await itx.kv.list(BOTS)).keys.map((key) => key.slice(BOTS.length));
 }
 
 /** Everyone under `prefix` (`allowed/` or `pending/`), with the user id from the key. */
@@ -108,11 +111,11 @@ export async function listPeople<T>(
   bot: string,
   prefix: string,
 ): Promise<(T & { id: string })[]> {
-  const kv = itx.cd(streamOf(bot)).kv;
+  const base = keyOf(bot, prefix);
   const people: (T & { id: string })[] = [];
-  for (const key of (await kv.list(prefix)).keys) {
-    const value = await kv.get(key);
-    if (value) people.push({ ...(JSON.parse(value) as T), id: key.slice(prefix.length) });
+  for (const key of (await itx.kv.list(base)).keys) {
+    const value = await itx.kv.get(key);
+    if (value) people.push({ ...(JSON.parse(value) as T), id: key.slice(base.length) });
   }
   return people;
 }
@@ -149,8 +152,8 @@ export async function connectBot(
     allowed_updates: ["message"],
     drop_pending_updates: true,
   });
-  await itx.cd(streamOf(name)).kv.put("bot", JSON.stringify({ id: me.id, username: me.username }));
-  await itx.cd(INDEX).kv.put(`bots/${name}`, me.username);
+  await itx.kv.put(keyOf(name, "bot"), JSON.stringify({ id: me.id, username: me.username }));
+  await itx.kv.put(`${BOTS}${name}`, me.username);
   return { name, username: me.username };
 }
 
@@ -158,8 +161,8 @@ export async function disconnectBot(itx: TelegramItx, bot: string): Promise<void
   await api(itx, placeholder(bot), "deleteWebhook").catch(() => undefined);
   await itx.secrets.delete(`/secrets/telegram-${bot}`).catch(() => undefined);
   await itx.secrets.delete(`/secrets/telegram-webhook-${bot}`).catch(() => undefined);
-  await itx.cd(INDEX).kv.delete(`bots/${bot}`);
-  await itx.cd(streamOf(bot)).kv.delete("bot");
+  await itx.kv.delete(`${BOTS}${bot}`);
+  await itx.kv.delete(keyOf(bot, "bot"));
 }
 
 /** Let a person talk to the bot, by the number (never the username, which can change hands). */
@@ -169,26 +172,22 @@ export async function allow(
   id: string,
   person: Person,
 ): Promise<void> {
-  const kv = itx.cd(streamOf(bot)).kv;
-  await kv.put(`allowed/${id}`, JSON.stringify(person));
-  await kv.delete(`pending/${id}`);
+  await itx.kv.put(keyOf(bot, `allowed/${id}`), JSON.stringify(person));
+  await itx.kv.delete(keyOf(bot, `pending/${id}`));
 }
 
 /** A one-time link: whoever opens it in Telegram and taps Start is let in. Good for a week. */
 export async function makeInvite(itx: TelegramItx, bot: string): Promise<string> {
   const code = hex(16);
-  await itx
-    .cd(streamOf(bot))
-    .kv.put(`invite/${code}`, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+  await itx.kv.put(keyOf(bot, `invite/${code}`), String(Date.now() + 7 * 24 * 60 * 60 * 1000));
   const info = await readJson<BotInfo>(itx, bot, "bot");
   return `https://t.me/${info?.username ?? ""}?start=${code}`;
 }
 
 /** Spend an invite: true if the code was good (and now is gone). */
 export async function spendInvite(itx: TelegramItx, bot: string, code: string): Promise<boolean> {
-  const kv = itx.cd(streamOf(bot)).kv;
-  const expires = await kv.get(`invite/${code}`);
+  const expires = await itx.kv.get(keyOf(bot, `invite/${code}`));
   if (!expires) return false;
-  await kv.delete(`invite/${code}`);
+  await itx.kv.delete(keyOf(bot, `invite/${code}`));
   return Number(expires) > Date.now();
 }
