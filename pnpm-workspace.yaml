@@ -1,4 +1,5 @@
 packages:
+  - amazon
   - pebble
   - iphone-voice-notes
   - waitrose
