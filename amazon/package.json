@@ -1,0 +1,30 @@
+{
+  "name": "iterate-amazon",
+  "version": "0.0.0",
+  "description": "Experimental Amazon UK ordering through Zinc for iterate agents",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp pack && vp test",
+    "setup-account": "vp pack && node dist/setup.js",
+    "smoke": "vp pack && node test/sandbox.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}
