@@ -44,15 +44,88 @@ async (itx) =>
 
 Send the person the returned `url` and wait until they say it is saved.
 
-## 2. The dependency
+## 2. The dependency, and a mailbox for agents' scripts
 
-In the config repo's `package.json`, pinned to a commit of this repo's `main`:
+An agent's script cannot import a package, so a thin class in the config repo wraps this one, and
+`worker.ts` hands it out as `itx.config.mailbox()` (the same shape as any capability of the config
+worker). Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the
+package (built by this repo's CI and served by pkg.pr.new, never npm), adds `mail.ts` and the
+`mailbox()` method, probes the result as a worker, and commits it:
 
-```json
-"iterate-jmap": "https://pkg.pr.new/jonastemplestein/iterategrations/iterate-jmap@<commit>"
+```js
+// the values for add-to-a-project.md
+const PACKAGE = "iterate-jmap";
+const SLUG = "";
+const IMPORT = 'import { JmapMailbox } from "./mail.ts";';
+const BRANCH = "";
+const MEMBER = `  /** The project's mailbox over JMAP (iterate-jmap): itx.config.mailbox().send({ … }) from a script. */
+  mailbox() {
+    return new JmapMailbox(async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
+      using itx = this.getItx();
+      return await call(itx);
+    });
+  }
+`;
+const FILES = {
+  "mail.ts": `// mail.ts: the project's mailbox over JMAP, for agents' scripts. A thin RpcTarget over iterate-jmap:
+// every request rides the secret /secrets/fastmail, whose token egress swaps in toward
+// api.fastmail.com. This code never holds the token.
+import { RpcTarget } from "cloudflare:workers";
+import {
+  connectJmap,
+  maskedEmails,
+  type CreateMaskedEmail,
+  type Jmap,
+  type SearchInput,
+  type SendInput,
+} from "iterate-jmap";
+
+type WithItx = <T>(call: (itx: any) => T) => Promise<Awaited<T>>;
+
+export class JmapMailbox extends RpcTarget {
+  readonly #withItx: WithItx;
+  #jmap?: Promise<Jmap>;
+
+  constructor(withItx: WithItx) {
+    super();
+    this.#withItx = withItx;
+  }
+
+  #mail() {
+    return (this.#jmap ??= connectJmap({
+      fetch: (input, init) => this.#withItx((itx) => itx.fetch(new Request(input, init))),
+    }));
+  }
+
+  async send(input: SendInput) {
+    return (await this.#mail()).send(input);
+  }
+  async search(input: SearchInput = {}) {
+    return (await this.#mail()).search(input);
+  }
+  async getThread(threadId: string) {
+    return (await this.#mail()).getThread(threadId);
+  }
+  async getEmail(id: string, options: { bodies?: boolean } = {}) {
+    return (await this.#mail()).getEmail(id, options);
+  }
+  async createMaskedEmail(input: CreateMaskedEmail) {
+    return maskedEmails(await this.#mail()).create(input);
+  }
+  async listMaskedEmails() {
+    return maskedEmails(await this.#mail()).list();
+  }
+  async setMaskedEmailState(id: string, state: "enabled" | "disabled" | "deleted") {
+    return maskedEmails(await this.#mail()).setState(id, state);
+  }
+}
+`,
+};
 ```
 
 ## 3. Send, search, read
+
+In code in the config repo (`worker.ts`, or a file it imports), with the library:
 
 ```js
 import { connectJmap } from "iterate-jmap";
@@ -84,6 +157,17 @@ const full = await mail.getEmail(recent[0].id, { bodies: true }); // text, html,
 - `mail.call(using, methodCalls)` makes any JMAP method calls in one request.
 - Every failure is a `JmapError`, naming where (`request`, `Email/set`, …) and the JMAP error type
   (`forbiddenFrom`, `invalidArguments`, …).
+
+From an agent's script, through the class from step 2 (any itx script, or an agent's):
+
+```js
+async (itx) => {
+  const mail = itx.config.mailbox();
+  const recent = await mail.search({ mailbox: "inbox", limit: 5 });
+  return recent.map(({ id, threadId }) => ({ id, threadId }));
+  // and: await mail.send({ from, to: ["someone@example.com"], subject, text }); mail.getThread(threadId); mail.getEmail(id, { bodies: true })
+};
+```
 
 ## 4. Throwaway addresses (Fastmail Masked Email)
 
