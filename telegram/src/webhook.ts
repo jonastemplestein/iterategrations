@@ -30,15 +30,36 @@ type Message = {
 /** Files a message can carry; `photo` is a list of sizes, the largest last. */
 const FILES = ["photo", "document", "voice", "audio", "video", "video_note", "sticker"];
 
-/** Whether a group message is for the bot: it @mentions the bot, replies to it, or is a command. */
+/** What people call the bot: its display name, and the first word of its username
+ *  (`jeeves_templestein_bot` is Jeeves). */
+const callNames = (bot: BotInfo): string[] =>
+  [bot.name, bot.username.split(/[_-]/)[0]].flatMap((name) =>
+    name && name.length >= 3 ? [name.toLowerCase()] : [],
+  );
+
+/** Whether a group message is for the bot: it @mentions the bot, replies to it, is a command, or
+ *  says its name as a word ("Hi Jeeves"). */
 export function isAddressed(message: Message, bot: BotInfo): boolean {
-  const text = message.text ?? message.caption ?? "";
+  const text = (message.text ?? message.caption ?? "").toLowerCase();
+  const word = (name: string) =>
+    new RegExp(
+      `(^|[^\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`,
+      "u",
+    ).test(text);
   return (
-    text.toLowerCase().includes(`@${bot.username.toLowerCase()}`) ||
+    text.includes(`@${bot.username.toLowerCase()}`) ||
     message.reply_to_message?.from?.id === bot.id ||
-    text.startsWith("/")
+    text.startsWith("/") ||
+    callNames(bot).some(word)
   );
 }
+
+/** Whether a message says anything: text, a caption, a file or a place. Telegram also sends service
+ *  messages ("the group was created", "someone joined"), which are not chat. */
+const hasContent = (message: Message): boolean =>
+  Boolean(message.text ?? message.caption) ||
+  FILES.some((kind) => message[kind] !== undefined) ||
+  message.location !== undefined;
 
 /** What the agent is told: where, who, what, the files, and how to answer. An agent writes scripts
  *  against `itx`, which cannot import packages, so the answer is a plain `itx.fetch` with the
@@ -73,7 +94,7 @@ const once = (append: Promise<unknown>): Promise<unknown> =>
 async function route(itx: TelegramItx, bot: string, id: number, message: Message): Promise<void> {
   const from = message.from;
   const info = await readJson<BotInfo>(itx, bot, "bot");
-  if (!from || from.is_bot || !info) return;
+  if (!from || from.is_bot || !info || !hasContent(message)) return;
   const group = message.chat.type !== "private";
   const person = {
     name: from.first_name ?? String(from.id),
