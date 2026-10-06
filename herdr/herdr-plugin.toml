@@ -1,0 +1,29 @@
+id = "iterate-bridge"
+name = "iterate bridge"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Lends this Herdr to iterate projects as itx.jonas.herdr: one call(method, params) for the whole socket API, and every event on a stream. See README.md."
+platforms = ["macos", "linux"]
+
+# Startup hooks are one-shot, so this starts each bridge in the background and exits; it runs at every
+# server start and live handoff, and does nothing for a bridge that already runs.
+[[startup]]
+command = ["bash", "plugin/bridge.sh", "start"]
+
+[[actions]]
+id = "status"
+title = "iterate bridge: status"
+contexts = ["global"]
+command = ["bash", "plugin/bridge.sh", "status"]
+
+[[actions]]
+id = "restart"
+title = "iterate bridge: restart"
+contexts = ["global"]
+command = ["bash", "plugin/bridge.sh", "restart"]
+
+[[actions]]
+id = "stop"
+title = "iterate bridge: stop"
+contexts = ["global"]
+command = ["bash", "plugin/bridge.sh", "stop"]
