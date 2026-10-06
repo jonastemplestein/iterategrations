@@ -1,0 +1,20 @@
+{
+  "name": "iterate-phone-calls",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Real phone calls on an Andrews & Arnold VoIP number, carried to an iterate project's voice processor: iterate provide phone-calls/calls.ts --name phoneCalls",
+  "type": "module",
+  "scripts": {
+    "bridge": "go build -o jeeves-phone .",
+    "test": "vp test",
+    "test:go": "go test ./..."
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "iterate": "https://pkg.pr.new/iterate/iterate/iterate@d285b9c",
+    "typescript": "^7.0.2"
+  }
+}
