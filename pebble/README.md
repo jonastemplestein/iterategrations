@@ -52,53 +52,33 @@ saved. Check that `(await itx.secrets.list()).map((s) => s.path)` includes `/sec
 
 ## 2. Add the receiver to the project's config repo
 
-Two ways to get the code into `/repos/config`. Either way you also add one branch to `worker.ts`
-(below). Commit everything in one commit with
-`itx.repos.get("/repos/config").commitFiles({ message, changes: [{ path, content }, …] })`: a commit
-to `main` publishes.
+Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
+`worker.ts`, probes the result as a worker, and commits it:
 
-### Plan A: depend on the package (recommended)
-
-The code is the package `iterate-pebble`, built by this repo's CI and served by pkg.pr.new (it is
-never on npm). The loader only takes a pkg.pr.new package at a full commit, so pin one:
-
-```sh
-curl -sI https://pkg.pr.new/jonastemplestein/iterategrations/iterate-pebble@main | grep -i x-commit-key
-# x-commit-key: jonastemplestein:iterategrations:<40-hex sha>
+```js
+// the values for add-to-a-project.md
+const PACKAGE = "iterate-pebble";
+const SLUG = "pebble";
+const IMPORT = 'import { receivePebbleRecording } from "iterate-pebble";';
+const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "pebble")
+  return receivePebbleRecording(request, async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
+    using itx = this.getItx();
+    return await call(itx);
+  });`;
+const MEMBER = "";
+const FILES = {};
 ```
 
-Add the dependency to the config repo's `package.json` (keep what is there):
+The branch answers the project's `pebble` host. `receivePebbleRecording` takes the request and a
+function that hands it the project's `itx` for one call (`using` releases it when the block ends).
 
-```json
-"dependencies": {
-  "iterate-pebble": "https://pkg.pr.new/jonastemplestein/iterategrations/iterate-pebble@<40-hex sha>"
-}
-```
+### By hand, or copy the source
 
-and one new file, `pebble.ts`, that only re-exports it:
-
-```ts
-export { receivePebbleRecording } from "iterate-pebble";
-```
-
-To update later, pin a newer commit the same way.
-
-### Plan B: copy the source
-
-Read [`src/pebble.ts`](src/pebble.ts) (71 lines, no dependencies) and commit it to `/repos/config` as
-`pebble.ts`. Nothing else to add. You own the copy, so you can change it.
-
-### The branch in `worker.ts`
-
-In `worker.ts`, import it and add this inside `fetch`, after the fetch-routes block and before
-`if (!routingSlug)` (the project's worker already has `this.withItx`, from `ConfigWorker`):
-
-```ts
-import { receivePebbleRecording } from "./pebble.ts";
-
-if (request.headers.get("x-iterate-routing-slug") === "pebble")
-  return receivePebbleRecording(request, (call) => this.withItx(call));
-```
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the branch above.
+To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) (71 lines, no dependencies) and
+commit it to `/repos/config` as `pebble.ts`; the branch then imports `receivePebbleRecording` from
+`"./pebble.ts"`. You own the copy, so you can change it.
 
 ## 3. Get the webhook URL
 
