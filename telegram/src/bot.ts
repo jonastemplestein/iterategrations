@@ -46,7 +46,8 @@ const BOTS = "telegram/bots/";
 
 export type Person = { name: string; username?: string; at: string };
 export type Pending = Person & { chatId: number; chatTitle?: string };
-export type BotInfo = { id: number; username: string };
+/** `name` is the bot's display name ("Jeeves"); a bot connected before it was kept has none. */
+export type BotInfo = { id: number; username: string; name?: string };
 
 export const WELCOME = "You're in. Send me a message to get started.";
 export const PRIVATE = "This bot is private. I have asked its owner to let you in.";
@@ -130,7 +131,11 @@ export async function connectBot(
 ): Promise<{ name: string; username: string }> {
   if (!/^\d+:[\w-]{20,}$/.test(token.trim()))
     throw new Error("That does not look like a bot token");
-  const me = await api<{ id: number; username: string }>(itx, token.trim(), "getMe");
+  const me = await api<{ id: number; username: string; first_name?: string }>(
+    itx,
+    token.trim(),
+    "getMe",
+  );
   const name = me.username
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -152,7 +157,12 @@ export async function connectBot(
     allowed_updates: ["message"],
     drop_pending_updates: true,
   });
-  await itx.kv.put(keyOf(name, "bot"), JSON.stringify({ id: me.id, username: me.username }));
+  const info: BotInfo = {
+    id: me.id,
+    username: me.username,
+    ...(me.first_name ? { name: me.first_name } : {}),
+  };
+  await itx.kv.put(keyOf(name, "bot"), JSON.stringify(info));
   await itx.kv.put(`${BOTS}${name}`, me.username);
   return { name, username: me.username };
 }

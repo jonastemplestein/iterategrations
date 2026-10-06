@@ -20,6 +20,7 @@ function fakeProject() {
   const appended: { path: string; event: any }[] = [];
   const agents: string[] = [];
   const calls: Call[] = [];
+  let readsAll = false; // Telegram's privacy mode: on until the bot is an admin or it is switched off
   const itx: any = {
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
@@ -55,7 +56,15 @@ function fakeProject() {
       if (credential.includes("bad"))
         return Response.json({ ok: false, error_code: 401, description: "Unauthorized" });
       if (method === "getMe")
-        return Response.json({ ok: true, result: { id: 1001, username: "Iterate_Bot" } });
+        return Response.json({
+          ok: true,
+          result: {
+            id: 1001,
+            username: "Iterate_Bot",
+            first_name: "Iterate",
+            can_read_all_group_messages: readsAll,
+          },
+        });
       return Response.json({ ok: true, result: true });
     },
   };
@@ -101,7 +110,17 @@ function fakeProject() {
       }),
       requireMember,
     );
-  return { secrets, kv, appended, agents, calls, hook, connected, page };
+  return {
+    secrets,
+    kv,
+    appended,
+    agents,
+    calls,
+    hook,
+    connected,
+    page,
+    readsAll: (on: boolean) => void (readsAll = on),
+  };
 }
 
 const message = (over: Record<string, unknown> = {}, from: Record<string, unknown> = {}) => ({
@@ -383,6 +402,7 @@ test("with no bot the page shows the BotFather steps and the token form", async 
   assert.match(html, /\/newbot/);
   assert.match(html, /<form method="post" action="connect">/);
   assert.match(res.headers.get("content-security-policy")!, /form-action 'self'/);
+  assert.match(res.headers.get("content-security-policy")!, /script-src 'nonce-[A-Za-z0-9+/=]+'/);
 });
 
 test("pasting a token checks it, keeps it as a secret, and registers the webhook with a secret the project keeps", async () => {
@@ -408,6 +428,11 @@ test("pasting a token checks it, keeps it as a secret, and registers the webhook
     project.calls.map((c) => c.method),
     ["getMe", "setWebhook"],
   );
+  assert.deepEqual(JSON.parse(project.kv[K("bot")]!), {
+    id: 1001,
+    username: "Iterate_Bot",
+    name: "Iterate",
+  });
   // and a delivery carrying that secret is accepted
   assert.equal(
     (await project.hook(`/${BOT}`, { update_id: 1, message: message() }, webhookSecret)).status,
@@ -496,4 +521,99 @@ test("a form for a bot that is not connected, or with a bad id, changes nothing"
   const bad = await project.page("/_/allow", { form: { bot: BOT, id: "x; drop" } });
   assert.equal(bad.status, 404);
   assert.deepEqual(Object.keys(project.kv).sort(), [`telegram/bots/${BOT}`, K("bot")].sort());
+});
+
+// ------------------------------------------------- the group that did not answer
+
+test("in a group saying the bot's name, as a word, is addressing it: its display name, or the first word of its username", async () => {
+  const project = fakeProject();
+  await project.connected({ 42: ME });
+  project.kv[K("bot")] = JSON.stringify({
+    id: 1001,
+    username: "jeeves_templestein_bot",
+    name: "Butler",
+  });
+  const say = async (id: number, text: string) =>
+    project.hook(`/${BOT}`, { update_id: id, message: group({ text }) });
+  for (const [id, text] of [
+    [100, "Hi Jeeves"],
+    [101, "thanks, butler!"],
+    [102, "Jeeves, what's for dinner?"],
+    [103, "we need milk"],
+    [104, "the jeevesome plan"],
+    [105, "butlers are great"],
+  ] as const)
+    await say(id, text);
+  const policies = agentEvents(project).map(
+    (a) => a.event.payload.llmRequestPolicy?.behaviour ?? "wakes",
+  );
+  assert.deepEqual(policies, [
+    "wakes",
+    "wakes",
+    "wakes",
+    "dont-trigger-request",
+    "dont-trigger-request",
+    "dont-trigger-request",
+  ]);
+});
+
+test("a service message (the group was created, someone joined) is not chat: it is recorded and reaches no agent", async () => {
+  const project = fakeProject();
+  await project.connected({ 42: ME });
+  const created = {
+    message_id: 1,
+    from: { id: 42, is_bot: false, first_name: "Jonas" },
+    chat: { id: -100, type: "group", title: "Home" },
+    group_chat_created: true,
+  };
+  const joined = {
+    ...created,
+    message_id: 2,
+    new_chat_members: [{ id: 1001, is_bot: true }],
+    group_chat_created: undefined,
+  };
+  await project.hook(`/${BOT}`, { update_id: 110, message: created });
+  await project.hook(`/${BOT}`, { update_id: 111, message: joined });
+  assert.equal(project.appended.filter((a) => a.path === STREAM).length, 2);
+  assert.deepEqual(project.agents, []);
+  assert.deepEqual(project.calls, []);
+});
+
+test("a location, with no words, still counts as something said", async () => {
+  const project = fakeProject();
+  await project.connected({ 42: ME });
+  await project.hook(`/${BOT}`, {
+    update_id: 120,
+    message: message({ text: undefined, location: { latitude: 51.4, longitude: -2.3 } }),
+  });
+  assert.equal(agentEvents(project).length, 1);
+});
+
+// --------------------------------------------------------------- the page
+
+test("every link the page makes has a Copy button, and the page runs one script, under a nonce", async () => {
+  const project = fakeProject();
+  await project.connected();
+  const made = await project.page("/_/invite", { form: { bot: BOT } });
+  const res = await project.page(`/_/${made.headers.get("location")!.slice(2)}`);
+  const html = await res.text();
+  const nonce = /script-src 'nonce-([^']+)'/.exec(res.headers.get("content-security-policy")!)![1];
+  assert.match(html, /data-copy="https:\/\/t\.me\/Iterate_Bot\?start=[0-9a-f]{32}"/);
+  assert.match(html, /data-copy="https:\/\/t\.me\/Iterate_Bot"/);
+  assert.equal(html.match(/<script/g)!.length, 1);
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.doesNotMatch(html, /onclick=/);
+});
+
+test("the page says whether the bot can read a whole group, and how to fix it when privacy mode is on", async () => {
+  const project = fakeProject();
+  await project.connected();
+  const on = await (await project.page("/_/")).text();
+  assert.match(on, /privacy mode is on/);
+  assert.match(on, /Add Administrator/);
+  assert.match(on, /\/setprivacy/);
+  project.readsAll(true);
+  const off = await (await project.page("/_/")).text();
+  assert.match(off, /reads every message in a group/);
+  assert.doesNotMatch(off, /privacy mode is on/);
 });
