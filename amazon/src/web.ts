@@ -269,6 +269,10 @@ export class AmazonWebApi {
       form.data.set("hasWorkingJavascript", "1");
       form.data.set("isAsync", "1");
       form.data.set("isClientTimeBased", "1");
+      for (const key of ["pipelineType", "cartItemCount", "referrer"]) {
+        const value = new URL(doc.url).searchParams.get(key);
+        if (value !== null && !form.data.has(key)) form.data.set(key, value);
+      }
     }
     return this.#request(
       form.action,
@@ -538,7 +542,7 @@ export class AmazonWebApi {
       .filter(
         (f) =>
           !f.action.includes("place-order") &&
-          /\/(?:business-address\/continue|set\/ship-to-multi|payselect\/[^?]*continue)(?:\?|$)/.test(
+          /\/(?:business-address\/continue|set\/ship-to-multi|pay\/continue|payselect\/[^?]*continue)(?:\?|$)/.test(
             f.action,
           ),
       )
@@ -564,7 +568,9 @@ export class AmazonWebApi {
           ? "address"
           : steps.some((f) => f.action.includes("ship-to-multi"))
             ? "items"
-            : new URL(doc.url).pathname.split("/").at(-1)!,
+            : steps.some((f) => new URL(f.action).pathname.endsWith("/pay/continue"))
+              ? "payment"
+              : new URL(doc.url).pathname.split("/").at(-1)!,
       summary: summary(doc.$),
       totalPence,
       currency: "GBP",
@@ -580,9 +586,18 @@ export class AmazonWebApi {
     const purchasePath = /^(\/checkout\/p\/[^/]+)/.exec(
       new URL((orderForm ?? steps[0])?.action ?? doc.url).pathname,
     )?.[1];
-    if (purchasePath && ["review", "address", "items"].includes(view.stage)) {
+    if (purchasePath && ["review", "address", "items", "payment"].includes(view.stage)) {
       const canonical = amazonUrl((orderForm ?? steps[0])!.action);
-      canonical.pathname = `${purchasePath}/${view.stage === "review" ? "spc" : view.stage === "items" ? "itemselect" : "address"}`;
+      const routes: Record<string, string> = {
+        review: "spc",
+        items: "itemselect",
+        address: "address",
+        payment: "pay",
+      };
+      canonical.pathname = `${purchasePath}/${routes[view.stage]}`;
+      const pipeline = new URL(doc.url).searchParams.get("pipelineType");
+      if (pipeline !== null && !canonical.searchParams.has("pipelineType"))
+        canonical.searchParams.set("pipelineType", pipeline);
       doc = { ...doc, url: canonical.href };
     }
     this.#checkout = { view, doc, forms: steps, orderForm };
@@ -625,7 +640,7 @@ export class AmazonWebApi {
         if (!path || !Object.hasOwn(routes, options.step))
           throw new AmazonWebError("unsupported_checkout_step");
         const step = options.step;
-        if (step !== "review") {
+        if (step !== "review" && new URL(url).pathname !== `${path}/${routes[step]}`) {
           const href = this.#checkout.doc
             .$("a[href]")
             .map((_, el) => this.#checkout!.doc.$(el).attr("href"))
@@ -639,7 +654,7 @@ export class AmazonWebApi {
             });
           if (!href) throw new AmazonWebError("unsupported_checkout_step");
           url = amazonUrl(href, url).href;
-        } else {
+        } else if (step === "review") {
           const target = amazonUrl(url);
           target.pathname = `${path}/spc`;
           url = target.href;

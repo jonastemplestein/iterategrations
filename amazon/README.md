@@ -4,7 +4,9 @@ Agents shop through Amazon UK's website HTTP protocol. Chrome establishes the lo
 The local bridge then uses Node HTTP requests for search, products, basket changes and checkout.
 It is available as `itx.amazon` through `iterate provide`.
 
-The adapter came from requests captured in Jonas's real Chrome with Playwriter on 6 October 2026. The observed account is Amazon Business. It uses stored addresses and payment methods.
+The adapter came from requests captured in real Chrome with Playwriter on 6–7 October 2026.
+The observed accounts include Amazon Business and a consumer account with shared Prime benefits.
+It uses stored addresses and payment methods.
 The website protocol is experimental. It is distinct from the officially documented
 [Amazon Business Search, Cart and Ordering APIs](https://docs.business.amazon.com/docs/cart-api-overview),
 which require developer onboarding and approved roles.
@@ -99,9 +101,13 @@ checkout = await itx.amazon.continueCheckout({
 ```
 
 Checkout returns visible field names and their allowed choices. Hidden tokens stay in the bridge.
-`continueCheckout` cannot change hidden fields or submit the final purchase form. The tested step form covers Business address selection. Dispatching items to addresses is
-implemented from captured forms. Payment choice changes, new card entry, new address forms
-and other checkout variants need further capture. The account's stored payment method can take checkout directly to review.
+`continueCheckout` cannot change hidden fields or submit the final purchase form. Tested step
+forms cover Business address selection and consumer confirmation of an already selected card.
+At the consumer `payment` stage, read the displayed card and submit the `pay/continue` form
+without changing its hidden widget fields. The bridge preserves the checkout context and
+merges Amazon's response panels to obtain the review.
+Dispatching items to addresses is implemented from captured forms. Payment choice changes,
+new card entry, new address forms and other checkout variants need further capture.
 
 After the owner has enabled purchases, read the final summary and use its exact total:
 
@@ -150,7 +156,9 @@ See the [research report](../reports/Amazon%20UK%20agent%20shopping.md) for the 
 On 6 October 2026, one explicitly approved order completed through a self-hosted Iterate MCP
 server and this local HTTP bridge. Amazon's order history confirmed the product, exact total
 and delivery status. The original basket was restored. The proof used a stored address and card
-on an Amazon Business account. Other account and checkout variants remain untested.
+on an Amazon Business account. On 7 October 2026, a consumer account with shared Prime benefits
+reached a ready order review through HTTP after confirming its saved card. A fresh review had
+the same contents and total. Consumer order placement and other checkout variants remain untested.
 Website changes or renewed authentication can stop calls.
 The adapter returns `human_login_required` when it sees an authentication challenge.
 
