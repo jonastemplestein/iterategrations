@@ -3,10 +3,9 @@ import type { WithItx } from "./auth.js";
 
 export {
   ACCOUNT_KEY,
-  CLIENT_ID,
-  CODEX_BASE,
   EXCHANGE_SOURCE,
   PIN,
+  RESOURCE,
   SECRET,
   accountOf,
   claimsOf,
@@ -28,7 +27,7 @@ export {
  *  (the project's `chatgpt` routing slug) and returns `null` for every other, so a worker chains
  *  it: `const chatgpt = await serveChatgpt(request, …); if (chatgpt) return chatgpt;`
  *
- *  What it answers: the Connect ChatGPT page at `/_/`, for members only.
+ *  What it answers: the Connect ChatGPT page at `/`, for members only. Any other path is a 404.
  *
  *  - `withItx`: `(call) => { using itx = this.getItx(); return call(itx); }`
  *  - `requireMember`: `(request) => this.auth.require(request)`: a `Response` to send, or null.
