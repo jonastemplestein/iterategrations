@@ -94,8 +94,8 @@ const COLLECT_DESCRIPTION = `Your GitHub App's private key and webhook secret.
 
 The key only signs the App's requests for installation tokens to GitHub's API, and the webhook secret only checks GitHub's deliveries. Neither passes through the project's code.`;
 
-/** The link to the Dash's page that collects the App's secrets into `/secrets/github-app`. It only
- *  builds a URL, so the page asks for a fresh one each time it renders. */
+/** The link to the Dash's page that collects the App's secrets into `/secrets/own-github-app`. It
+ *  only builds a URL, so the page asks for a fresh one each time it renders. */
 const collectLink = (itx: GithubItx): Promise<string> =>
   itx.secrets
     .collectFromUser({

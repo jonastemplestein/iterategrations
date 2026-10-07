@@ -81,7 +81,7 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
 2. **Paste the App ID and slug** on the page (both public, kept in the project's kv). The slug is
    the end of the App's public link, `https://github.com/apps/<slug>`; the link itself works too.
 3. **Save the private key and the webhook secret** through the page's link: a page of iterate's
-   Dash, made by `itx.secrets.collectFromUser`, keeps them as `/secrets/github-app`, pinned to
+   Dash, made by `itx.secrets.collectFromUser`, keeps them as `/secrets/own-github-app`, pinned to
    `github.com` and `api.github.com`. They never pass through the project's code.
 4. **Install**: GitHub asks which account and which repositories, then sends them back to the page,
    which connects the installation and shows its account.
@@ -90,8 +90,9 @@ Then write the App's name, its installations and where its page is into the proj
 
 ## What the agent gets
 
-For each delivery, one `github/delivery-received` on `/integrations/github/<installation id>`, keyed
-by GitHub's delivery id, so a redelivery adds nothing:
+For each delivery, one `github/delivery-received` on
+`/integrations/own-github/<installation id>`, keyed by GitHub's delivery id, so a redelivery adds
+nothing:
 
 ```json
 {
@@ -108,9 +109,9 @@ by GitHub's delivery id, so a redelivery adds nothing:
 `body` is GitHub's payload, untouched. A project's worker routes it in `processEvent` (an issue
 opened, a review asked for) to its agents.
 
-Each installation is a secret, `/secrets/github-<installation id>`, whose `accessToken` the platform
-mints from the App's key on first use and again when GitHub answers 401. Call the API with its
-placeholder:
+Each installation is a secret, `/secrets/own-github-<installation id>`, whose `accessToken` the
+platform mints from the App's key on first use and again when GitHub answers 401. Call the API with
+its placeholder:
 
 ```js
 async (itx) => {
@@ -118,7 +119,7 @@ async (itx) => {
     new Request("https://api.github.com/installation/repositories", {
       headers: {
         authorization:
-          'Bearer getSecret("/secrets/github-<installation id>", { field: "accessToken" })',
+          'Bearer getSecret("/secrets/own-github-<installation id>", { field: "accessToken" })',
         accept: "application/vnd.github+json",
         "user-agent": "iterate",
       },
@@ -134,7 +135,7 @@ In the config repo's code, Octokit takes the same placeholder, with `itx.fetch` 
 import { Octokit } from "@octokit/rest";
 
 const octokit = new Octokit({
-  auth: 'getSecret("/secrets/github-<installation id>", { field: "accessToken" })',
+  auth: 'getSecret("/secrets/own-github-<installation id>", { field: "accessToken" })',
   userAgent: "iterate",
   request: { fetch: (url: string, init: RequestInit) => itx.fetch(new Request(url, init)) },
 });
@@ -148,21 +149,21 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
   pointing at the old ones. Set a primary hostname for the project before you create an App that
   should outlive a rename, and paste the URLs the page shows on it.
 - **One App secret serves every installation.** An installation's secret holds the App ID and a
-  placeholder for the key, `getSecret("/secrets/github-app", { field: "privateKey" })`, which the
-  platform reads at each mint. To rotate the key, generate a new one at GitHub, save it through the
-  page's link (**Replace them**), then delete the old one at GitHub.
+  placeholder for the key, `getSecret("/secrets/own-github-app", { field: "privateKey" })`, which
+  the platform reads at each mint. To rotate the key, generate a new one at GitHub, save it through
+  the page's link (**Replace them**), then delete the old one at GitHub.
 - **No admin proof.** iterate's shared App proves that the person administers an account before an
   installation counts for a project. This App is the project's own: it holds the App's key, so it
   can mint for any installation of its App already. The page binds GitHub's redirect to an install
   it started instead: a nonce in the install link's `state`, good for an hour (or, for a request,
-  until it is answered). An installation claims its nonce once, as a `github/nonce-used` event on
-  `/integrations/github` keyed by the nonce, before any secret is written, so two redirects with one
-  nonce never both go on.
+  until it is answered). An installation claims its nonce once, as an `own-github/nonce-used`
+  event on `/integrations/own-github` keyed by the nonce, before any secret is written, so two
+  redirects with one nonce never both go on.
 - **An update proves itself first.** GitHub sends the person back after every change to an
-  installation. The page proves it through a secret of its own, `/secrets/github-<id>-proof`, and
-  changes the installation's secret only once the proof has passed, so a failure at GitHub, or a
-  wrong App ID saved on the page, leaves a working installation as it was. The proof's secret goes
-  either way.
+  installation. The page proves it through a secret of its own,
+  `/secrets/own-github-<id>-proof`, and changes the installation's secret only once the proof has
+  passed, so a failure at GitHub, or a wrong App ID saved on the page, leaves a working
+  installation as it was. The proof's secret goes either way.
 - **The first ping fails.** GitHub sends a `ping` when the App is created, before its webhook
   secret is saved here, so it is refused. Redeliver it from the App's **Advanced** tab once the
   secrets are saved, if you want to see one go through. A delivery for an installation the page did
@@ -175,8 +176,14 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
 - **Disconnect** deletes the installation's secret, then forgets it here. A secret that cannot be
   deleted is shown as an error, and the installation stays listed, so Disconnect again can finish. A
   row the Dash could not be told to take away is taken away by Disconnect again, or at the next
-  publish: until then `github/removed/<connection>` in the kv marks it. The App stays installed at
-  GitHub: only its account can uninstall it.
+  publish: until then `own-github/removed/<connection>` in the kv marks it. The App stays
+  installed at GitHub: only its account can uninstall it.
+- **Its own names.** Everything the package keeps starts with `own-github`: the secrets
+  `/secrets/own-github-app` and `/secrets/own-github-<installation id>`, the streams
+  `/integrations/own-github/<installation id>`, and the kv keys `own-github/…`. iterate's shared
+  GitHub App owns every `/secrets/github-<connection>` and `/integrations/github/<connection>`, for
+  any connection name a member or an agent chooses (`app`, digits), so a project can use both. The
+  routing slug and the card on the Dash stay `github`.
 - **Not the platform's event.** `events.iterate.com/github/webhook-received` is the platform's record
   of a delivery for iterate's shared App (github-sync and the AI linter read it). This package's
   event is its own, `github/delivery-received`.

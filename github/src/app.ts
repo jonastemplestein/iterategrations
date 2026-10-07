@@ -46,36 +46,43 @@ export type GithubItx = {
   };
 };
 
+/** EVERY NAME THE PACKAGE KEEPS STARTS WITH `own-github`: its secrets, its streams, its kv keys
+ *  and its claims. The platform's shared GitHub App owns every `/secrets/github-<connection>` and
+ *  `/integrations/github/<connection>`, for any connection name a member or an agent chooses
+ *  (`app`, digits), so a project that uses both would collide on any `github-` name. Its routing
+ *  slug and its card on the Dash stay `github`: the shared App has no project host, and the
+ *  registry is the packages' own. */
+
 /** The App's own secret: `privateKey` (the PEM GitHub generated) and `webhookSecret` (the one typed
  *  in the App's settings), collected on the Dash so neither passes through this code. */
-export const APP_SECRET = "/secrets/github-app";
+export const APP_SECRET = "/secrets/own-github-app";
 /** Where the App's secrets and every installation's token may go. */
 export const PIN: string[] = ["https://github.com", "https://api.github.com"];
 const API = "https://api.github.com";
 
 /** An installation's secret: the App ID and a placeholder for the App's key, from which the
  *  platform mints the installation's token (`accessToken`). */
-export const secretOf = (installationId: string): string => `/secrets/github-${installationId}`;
+export const secretOf = (installationId: string): string => `/secrets/own-github-${installationId}`;
 /** What a request to GitHub's API sends for an installation's token, in a header: iterate's egress
  *  swaps in the token, minted by the platform. */
 export const placeholder = (installationId: string): string =>
   `getSecret("${secretOf(installationId)}", { field: "accessToken" })`;
 /** The stream each installation's webhook deliveries are recorded on. */
 export const streamOf = (installationId: string): string =>
-  `/integrations/github/${installationId}`;
+  `/integrations/own-github/${installationId}`;
 
-/** The kv: `github/app` (the App's ID and slug, both public), `github/pending/<nonce>` (an install
- *  this page started), `github/installations/<connection>` (an installation, by its id, or a
- *  request an owner has yet to approve, `request-<…>`), and `github/removed/<connection>` (a
- *  removal whose null row has yet to land on the Dash). */
-export const APP_KEY = "github/app";
-const PENDING = "github/pending/";
-export const INSTALLATIONS = "github/installations/";
-export const REMOVED = "github/removed/";
+/** The kv: `own-github/app` (the App's ID and slug, both public), `own-github/pending/<nonce>`
+ *  (an install this page started), `own-github/installations/<connection>` (an installation, by
+ *  its id, or a request an owner has yet to approve, `request-<…>`), and
+ *  `own-github/removed/<connection>` (a removal whose null row has yet to land on the Dash). */
+export const APP_KEY = "own-github/app";
+const PENDING = "own-github/pending/";
+export const INSTALLATIONS = "own-github/installations/";
+export const REMOVED = "own-github/removed/";
 /** How long an install the page started can come back. */
 const NONCE_TTL_MS = 60 * 60 * 1000;
 /** Where each nonce is claimed, once (`claimNonce`). */
-const CLAIMS = "/integrations/github";
+const CLAIMS = "/integrations/own-github";
 
 /** An installation id, as GitHub sends it to the setup URL and in a delivery's body. */
 export const INSTALLATION_ID: RegExp = /^\d{1,20}$/;
@@ -194,8 +201,8 @@ export async function issuedNonce(
 export async function claimNonce(itx: GithubItx, nonce: string): Promise<boolean> {
   try {
     await itx.cd(CLAIMS).append({
-      type: "github/nonce-used",
-      idempotencyKey: `github:nonce:${nonce}`,
+      type: "own-github/nonce-used",
+      idempotencyKey: `own-github:nonce:${nonce}`,
       payload: { nonce, claim: hex(16) },
     });
   } catch (error) {
@@ -230,15 +237,16 @@ async function prove(itx: GithubItx, path: string, installationId: string): Prom
 }
 
 /** Record an installation GitHub sent back: its secret, proved by one call that also names the
- *  account, and the kv entry. The proof runs on a secret of its own, `/secrets/github-<id>-proof`,
- *  and the installation's secret is set only once it has passed: an update that fails (GitHub down,
- *  a wrong App ID saved) leaves a working installation as it was, its minted token included. The
- *  proof's secret goes either way, and a failure to delete it is said.
+ *  account, and the kv entry. The proof runs on a secret of its own,
+ *  `/secrets/own-github-<id>-proof`, and the installation's secret is set only once it has passed:
+ *  an update that fails (GitHub down, a wrong App ID saved) leaves a working installation as it
+ *  was, its minted token included. The proof's secret goes either way, and a failure to delete it
+ *  is said.
  *
  *  The secret holds the App ID and a placeholder for the App's key, which the platform reads from
- *  `/secrets/github-app` at each mint: one App secret serves every installation. No proof that the
- *  person administers the account is needed: the project owns the App and holds its key, so it can
- *  mint for any installation of its App already. */
+ *  `/secrets/own-github-app` at each mint: one App secret serves every installation. No proof that
+ *  the person administers the account is needed: the project owns the App and holds its key, so it
+ *  can mint for any installation of its App already. */
 export async function connectInstallation(itx: GithubItx, installationId: string): Promise<string> {
   const app = await readApp(itx);
   if (!app) throw new Error("Save the App ID and slug first");
@@ -296,7 +304,7 @@ export async function recordRequest(itx: Pick<GithubItx, "kv">, nonce: string): 
 /** Forget a connection here: an installation's secret first, then its kv entry. A secret that
  *  cannot be deleted is thrown, and the entry stays, so the row stays and another try can work.
  *  From the moment the secret is gone until the null row has landed on the Dash, a tombstone,
- *  `github/removed/<connection>`, says what is left to do (`registerRemoval`); the install hook
+ *  `own-github/removed/<connection>`, says what is left to do (`registerRemoval`); the install hook
  *  finishes any it finds. The App stays installed at GitHub. */
 export async function forget(itx: GithubItx, connection: string): Promise<void> {
   if (INSTALLATION_ID.test(connection)) await dropSecret(itx, secretOf(connection));

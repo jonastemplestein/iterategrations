@@ -3,10 +3,10 @@ import { APP_SECRET, INSTALLATION_ID, INSTALLATIONS, streamOf, type GithubItx } 
 /** GitHub's webhook for the App. GitHub POSTs each delivery as JSON with `X-Hub-Signature-256:
  *  sha256=<hex>`, the HMAC-SHA256 of the raw body under the App's webhook secret
  *  (https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries), checked
- *  against `/secrets/github-app`'s `webhookSecret` with `itx.secrets.verifyHmac`: a delivery that is
- *  not signed so is 401 and stores nothing. `installation.id` in the body names the installation; one
- *  this page did not connect is acknowledged and dropped. Each delivery lands once on
- *  `/integrations/github/<installation id>` as `github/delivery-received`, keyed by
+ *  against `/secrets/own-github-app`'s `webhookSecret` with `itx.secrets.verifyHmac`: a delivery
+ *  that is not signed so is 401 and stores nothing. `installation.id` in the body names the
+ *  installation; one this page did not connect is acknowledged and dropped. Each delivery lands
+ *  once on `/integrations/own-github/<installation id>` as `github/delivery-received`, keyed by
  *  `X-GitHub-Delivery`, so a redelivery adds nothing. */
 export async function receiveDelivery(request: Request, itx: GithubItx): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
