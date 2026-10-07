@@ -4,18 +4,20 @@ import {
   INSTALLATION_ID,
   INSTALLATIONS,
   PIN,
+  REMOVED,
+  claimNonce,
   connectInstallation,
   forget,
   hasAppSecret,
+  issuedNonce,
   listInstallations,
   readApp,
   recordRequest,
   saveApp,
-  spendNonce,
   startInstall,
   type GithubItx,
 } from "./app.js";
-import { registerCard, registerRow } from "./registry.js";
+import { registerCard, registerRemoval, registerRow } from "./registry.js";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 const esc = (text: string): string => text.replace(/[&<>"]/g, (c) => ESCAPES[c]!);
@@ -68,8 +70,17 @@ const post = (action: string, fields: Record<string, string>, label: string, qui
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}" />`)
     .join("")}<button${quiet ? ' class="quiet"' : ""}>${label}</button></form>`;
 
+/** No other site may show these pages in a frame: a framed form posts from this origin, so the
+ *  member gate passes (clickjacking). `default-src` does not cover `frame-ancestors`. Every answer
+ *  carries both, the page's and the callback's alike. */
+const NO_FRAMES = {
+  "x-frame-options": "DENY",
+  "content-security-policy": "frame-ancestors 'none'",
+} as const;
+
 const redirect = (query = ""): Response =>
-  new Response(null, { status: 303, headers: { location: `./${query}` } });
+  new Response(null, { status: 303, headers: { location: `./${query}`, ...NO_FRAMES } });
+const notFound = (): Response => new Response("Not found\n", { status: 404, headers: NO_FRAMES });
 const flashOf = (key: "error" | "connected" | "requested", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 const messageOf = (error: unknown): string =>
@@ -156,7 +167,7 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
   const step5 = `<section>
     <h2>Installations</h2>
     ${list}
-    <p class="muted">Disconnect forgets an installation here and deletes its secret. The App stays installed at GitHub: only its account can uninstall it, in the account's settings under its installed GitHub Apps. A request waits for an owner of the account: once they approve it, press Install again and Save on GitHub's page, and GitHub sends the installation here.</p>
+    <p class="muted">Disconnect forgets an installation here and deletes its secret. The App stays installed at GitHub: only its account can uninstall it, in the account's settings under its installed GitHub Apps. A request waits for an owner of the account. When GitHub sends their approval back here, the request becomes the installation; if it does not, press Install again and Save on GitHub's page, then Forget the request.</p>
   </section>`;
   return `${flash}${step1}${step2}${step3}${step4}${step5}`;
 }
@@ -171,7 +182,7 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
 
   // `/_` would resolve the page's relative links against `/`
   if (request.method === "GET" && url.pathname === "/_")
-    return new Response(null, { status: 308, headers: { location: "_/" } });
+    return new Response(null, { status: 308, headers: { location: "_/", ...NO_FRAMES } });
   if (request.method === "GET" && path === "") {
     // the URLs GitHub is given keep the base path a paths ingress strips
     const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
@@ -182,7 +193,7 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
       : connected
         ? `<p class="ok">Installed on ${esc(connected)}. Its webhook deliveries now reach the project.</p>`
         : url.searchParams.has("requested")
-          ? `<p class="warn">GitHub asked an owner of that account to approve the App. Once they do, press Install again and Save on GitHub's page: GitHub then sends the installation here.</p>`
+          ? `<p class="warn">GitHub asked an owner of that account to approve the App. The request waits below. When GitHub sends their approval back here, it becomes the installation.</p>`
           : "";
     const body = await render(itx, here, flash);
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
@@ -192,13 +203,14 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
+          "x-frame-options": NO_FRAMES["x-frame-options"],
           // Install posts here and is sent on to GitHub, so a form may lead there too
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' https://github.com; base-uri 'none'`,
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );
   }
-  if (request.method !== "POST") return new Response("Not found\n", { status: 404 });
+  if (request.method !== "POST") return notFound();
 
   const form = await request.formData();
   const field = (name: string): string => {
@@ -212,18 +224,24 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
       return redirect();
     }
     if (path === "install")
-      return new Response(null, { status: 303, headers: { location: await startInstall(itx) } });
+      return new Response(null, {
+        status: 303,
+        headers: { location: await startInstall(itx), ...NO_FRAMES },
+      });
     if (path === "disconnect") {
+      // an installation, a request, or a removal that did not finish: Disconnect again finishes it
       const connection = field("id");
       const known =
-        CONNECTION.test(connection) && (await itx.kv.get(`${INSTALLATIONS}${connection}`)) !== null;
+        CONNECTION.test(connection) &&
+        ((await itx.kv.get(`${INSTALLATIONS}${connection}`)) !== null ||
+          (await itx.kv.get(`${REMOVED}${connection}`)) !== null);
       if (!known) return redirect(flashOf("error", "Unknown installation"));
       await forget(itx, connection);
-      await registerRow(itx, slug, connection);
+      await registerRemoval(itx, slug, connection);
       await registerCard(itx, slug);
       return redirect();
     }
-    return new Response("Not found\n", { status: 404 });
+    return notFound();
   } catch (error) {
     return redirect(flashOf("error", messageOf(error)));
   }
@@ -234,27 +252,30 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
  *  approve it, with no installation yet) and the `state` the install link carried
  *  (https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-setup-url,
  *  https://docs.github.com/en/apps/sharing-github-apps/sharing-your-github-app). Anyone can open
- *  this URL with any `installation_id`, so a nonce this page issued for an install it started is
- *  required, and spent. */
+ *  this URL with any `installation_id`, so a nonce this page issued is required: for an install it
+ *  started within the hour, or for a request an owner has yet to approve. A request keeps its nonce;
+ *  an installation claims its nonce once, before any secret is written, so two callbacks with one
+ *  nonce never both go on. The request whose nonce comes back with an installation is answered, and
+ *  only that one: the others wait for their own approval, or for Forget. */
 export async function serveCallback(
   request: Request,
   itx: GithubItx,
   slug: string,
 ): Promise<Response> {
-  if (request.method !== "GET") return new Response("GET only\n", { status: 405 });
+  if (request.method !== "GET")
+    return new Response("GET only\n", { status: 405, headers: NO_FRAMES });
   const query = new URL(request.url).searchParams;
   const state = query.get("state") ?? "";
   const action = query.get("setup_action") ?? "";
   const id = query.get("installation_id") ?? "";
   const back = (flash: string): Response =>
-    new Response(null, { status: 303, headers: { location: `./_/${flash}` } });
-  if (!(await spendNonce(itx, state)))
-    return back(
-      flashOf(
-        "error",
-        "GitHub came back from an install this page did not start, or that is over an hour old. Press Install again.",
-      ),
-    );
+    new Response(null, { status: 303, headers: { location: `./_/${flash}`, ...NO_FRAMES } });
+  const refused = flashOf(
+    "error",
+    "GitHub came back from an install this page did not start, or that is over an hour old. Press Install again.",
+  );
+  const issued = await issuedNonce(itx, state);
+  if (!issued) return back(refused);
   try {
     if (action === "request") {
       const connection = await recordRequest(itx, state);
@@ -262,11 +283,12 @@ export async function serveCallback(
       return back(flashOf("requested", "1"));
     }
     if ((action === "install" || action === "update") && INSTALLATION_ID.test(id)) {
+      if (!(await claimNonce(itx, state)))
+        return back(flashOf("error", "GitHub came back with an install that was used already."));
       const account = await connectInstallation(itx, id);
-      // a request this page recorded is answered by now, as far as anything here can tell
-      for (const { connection } of (await listInstallations(itx)).filter((i) => i.requested)) {
-        await forget(itx, connection);
-        await registerRow(itx, slug, connection);
+      if (issued.request) {
+        await forget(itx, issued.request);
+        await registerRemoval(itx, slug, issued.request);
       }
       await registerRow(itx, slug, id);
       await registerCard(itx, slug);

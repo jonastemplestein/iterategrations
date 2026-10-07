@@ -1,8 +1,10 @@
 import {
+  CONNECTION,
   hasAppSecret,
   INSTALLATIONS,
   listInstallations,
   readApp,
+  REMOVED,
   type GithubItx,
   type Installation,
 } from "./app.js";
@@ -101,9 +103,34 @@ export async function registerRow(
   );
 }
 
-/** The install hook's registration: the card and a row per installation the kv keeps, each keyed
- *  by the triggering event (`at` is its path and offset), so a retry appends nothing new. */
+/** Takes a removed connection's row away (`forget` left a tombstone), then the tombstone: it
+ *  stands until the null row has landed, so a failure here leaves the removal to finish. */
+export async function registerRemoval(
+  itx: GithubItx,
+  slug: string,
+  connection: string,
+  key?: string,
+): Promise<void> {
+  await append(
+    itx,
+    "events.iterate.com/integration/connection-configured",
+    { integration: INTEGRATION, connection, row: null },
+    key,
+  );
+  await itx.kv.delete(`${REMOVED}${connection}`);
+}
+
+/** The install hook's registration, each fact keyed by the triggering event (`at` is its path and
+ *  offset), so a retry appends nothing new. First the removals that did not finish: a tombstone's
+ *  kv entry goes if it is still there, then its null row, under a key of its own (the row's may be
+ *  spent on this event already). Then the card, and a row per installation the kv keeps. */
 export async function registerAll(itx: GithubItx, slug: string, at: string): Promise<void> {
+  for (const key of (await itx.kv.list(REMOVED)).keys) {
+    const connection = key.slice(REMOVED.length);
+    if (!CONNECTION.test(connection)) continue;
+    await itx.kv.delete(`${INSTALLATIONS}${connection}`);
+    await registerRemoval(itx, slug, connection, `github:registry:removed:${connection}:${at}`);
+  }
   await registerCard(itx, slug, `github:registry:${at}`);
   for (const { connection } of await listInstallations(itx))
     await registerRow(itx, slug, connection, `github:registry:${connection}:${at}`);

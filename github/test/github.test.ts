@@ -1,9 +1,11 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: secrets (an HMAC check run
-// here as the platform's is, and a collection link to a pretend Dash), a kv, appends that refuse a key
-// used twice for another event (as the platform does; the same event again is a no-op), and an
-// egress to a pretend GitHub that records every request and answers an installation's token only
-// while its secret and the App's exist (the platform mints it from them). `host` is the worker
-// hosting the package: a scope per `getItx`, counted.
+// here as the platform's is, a delete of a missing secret refused as SECRET_NOT_SET, and a collection
+// link to a pretend Dash), a kv, appends that refuse a key used twice for another event (as the
+// platform does; the same event again is a no-op), and an egress to a pretend GitHub that records
+// every request. The egress mints an installation's token as the platform does: on first use, while
+// its secret and the App's exist, and only for the App's real ID. `faults` makes a secret's delete or
+// an append on /integrations fail. `host` is the worker hosting the package: a scope per `getItx`,
+// counted.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vite-plus/test";
@@ -19,6 +21,8 @@ const PIN = ["https://github.com", "https://api.github.com"];
 const CONFIGURED = "events.iterate.com/integration/configured";
 const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
 const DASH_LINK = "https://dash.example/collect-secret/iterate?path=%2Fsecrets%2Fgithub-app";
+/** The App's real ID at the pretend GitHub: a token is minted for no other. */
+const APP_ID = "123456";
 
 type Call = { url: string; headers: Record<string, string> };
 
@@ -29,12 +33,22 @@ function fakeProject(options: { slug?: string } = {}) {
   const calls: Call[] = [];
   const collected: any[] = [];
   const scopes = { opened: 0, disposed: 0 };
-  const github_ = { refuse: 0 }; // GitHub refuses the proof with this status
+  // GitHub refuses the proof with `refuse`; `accounts` names an installation's account
+  const github_ = { refuse: 0, accounts: {} as Record<string, string>, mints: 0 };
+  const faults = { deletes: false, registry: 0 };
   const itx: any = {
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
-        void (secrets[path] = { material, options }),
-      delete: async (path: string) => void delete secrets[path],
+        void (secrets[path] = structuredClone({ material, options })),
+      delete: async (path: string) => {
+        if (faults.deletes)
+          throw Object.assign(new Error("the secret store is unavailable"), {
+            code: "UNAVAILABLE",
+          });
+        if (!secrets[path])
+          throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
+        delete secrets[path];
+      },
       list: async () => Object.keys(secrets).map((path) => ({ path })),
       verifyHmac: async (
         path: string,
@@ -62,6 +76,10 @@ function fakeProject(options: { slug?: string } = {}) {
     },
     cd: (path: string) => ({
       append: async (event: any) => {
+        if (path === "/integrations" && faults.registry > 0) {
+          faults.registry--;
+          throw new Error("the registry is unavailable");
+        }
         const earlier = appended.find(
           (a) =>
             a.path === path &&
@@ -75,18 +93,28 @@ function fakeProject(options: { slug?: string } = {}) {
     }),
     fetch: async (request: Request) => {
       calls.push({ url: request.url, headers: Object.fromEntries(request.headers) });
-      const id = /^Bearer getSecret\("\/secrets\/github-(\d+)", \{ field: "accessToken" \}\)$/.exec(
-        request.headers.get("authorization") ?? "",
-      )?.[1];
-      if (!id || !secrets[`/secrets/github-${id}`] || !secrets["/secrets/github-app"])
+      const path =
+        /^Bearer getSecret\("(\/secrets\/github-[^"]+)", \{ field: "accessToken" \}\)$/.exec(
+          request.headers.get("authorization") ?? "",
+        )?.[1];
+      const secret = path ? secrets[path] : undefined;
+      if (!secret || !secrets["/secrets/github-app"])
         return Response.json({ message: "Bad credentials" }, { status: 401 });
+      // the platform mints the installation's token on first use, from the App ID and the App's key
+      if (!secret.material.accessToken) {
+        if (secret.material.appId !== APP_ID)
+          return Response.json({ message: "Integration not found" }, { status: 401 });
+        secret.material.accessToken = `a-made-up-token-${++github_.mints}`;
+      }
       if (github_.refuse)
         return Response.json({ message: "Not Found" }, { status: github_.refuse });
-      if (new URL(request.url).pathname === "/installation/repositories")
+      if (new URL(request.url).pathname === "/installation/repositories") {
+        const login = github_.accounts[secret.options.refresh.installationId] ?? "acme";
         return Response.json({
           total_count: 3,
-          repositories: [{ full_name: "acme/pets", owner: { login: "acme" } }],
+          repositories: [{ full_name: `${login}/pets`, owner: { login } }],
         });
+      }
       return new Response("unexpected", { status: 500 });
     },
   };
@@ -114,7 +142,7 @@ function fakeProject(options: { slug?: string } = {}) {
     );
   /** The App made at GitHub, its ID and slug saved on the page, its secrets saved on the Dash. */
   const setUp = async () => {
-    await page("/_/app", { form: { appId: "123456", slug: "iterate-acme" } });
+    await page("/_/app", { form: { appId: APP_ID, slug: "iterate-acme" } });
     secrets["/secrets/github-app"] = structuredClone(APP_SECRET);
   };
   /** Press Install: the nonce in the link to GitHub. */
@@ -166,6 +194,7 @@ function fakeProject(options: { slug?: string } = {}) {
     calls,
     collected,
     scopes,
+    faults,
     github: github_,
     serve,
     page,
@@ -266,6 +295,9 @@ test("the page shows the URLs to paste at GitHub, from the request's origin and 
   assert.match(html, /https:\/\/github\.com\/settings\/apps\/new/);
   const csp = res.headers.get("content-security-policy")!;
   assert.match(csp, /form-action 'self' https:\/\/github\.com;/);
+  // no other site may frame it: a framed Disconnect would post from this origin
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
   const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
   assert.equal(html.match(/<script/g)!.length, 1);
   assert.ok(html.includes(`<script nonce="${nonce}">`));
@@ -348,6 +380,25 @@ test("Install needs the App's ID and slug, and its secrets; then it sends the pe
   assert.match(await (await project.page("/_/")).text(), /<form method="post" action="install">/);
 });
 
+test("no other site can frame the page's answers or the callback's", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const answers = [
+    await project.page("/_/app", { form: { appId: APP_ID, slug: "iterate-acme" } }),
+    await project.page("/_/disconnect", { form: { id: "7" } }),
+    await project.callback({ installation_id: "42", setup_action: "install", state: "x" }),
+    await project.callback({
+      installation_id: "42",
+      setup_action: "install",
+      state: await project.install(),
+    }),
+  ];
+  for (const res of answers) {
+    assert.equal(res.headers.get("x-frame-options"), "DENY", res.headers.get("location")!);
+    assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  }
+});
+
 // --------------------------------------------------------------- the callback
 
 test("the callback for an install sets the installation's secret, proves it with one call, lists it, registers its row and the card, and sends the person back", async () => {
@@ -378,17 +429,25 @@ test("the callback for an install sets the installation's secret, proves it with
       },
     },
   });
+  // proved through a secret of its own, which is gone again
   assert.deepEqual(project.calls, [
     {
       url: "https://api.github.com/installation/repositories?per_page=1",
       headers: {
         accept: "application/vnd.github+json",
-        authorization: 'Bearer getSecret("/secrets/github-42", { field: "accessToken" })',
+        authorization: 'Bearer getSecret("/secrets/github-42-proof", { field: "accessToken" })',
         "user-agent": "iterate",
       },
     },
   ]);
+  assert.equal(project.secrets["/secrets/github-42-proof"], undefined);
   assert.equal(JSON.parse(project.kv["github/installations/42"]!).account, "acme");
+  // the nonce is claimed once, in the log: kv cannot claim anything
+  const claims = project.appended.filter((a) => a.event.type === "github/nonce-used");
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]!.path, "/integrations/github");
+  assert.equal(claims[0]!.event.idempotencyKey, `github:nonce:${nonce}`);
+  assert.equal(claims[0]!.event.payload.nonce, nonce);
   assert.deepEqual(project.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
@@ -430,7 +489,24 @@ test("the callback for an update does the same; a nonce is good once, and a miss
   );
   assert.equal(project.secrets["/secrets/github-42"], undefined);
   assert.equal(project.kv["github/installations/42"], undefined);
-  assert.equal(project.kv[`github/pending/${expired}`], undefined, "an expired nonce is spent too");
+});
+
+test("two callbacks with one nonce, started together: exactly one goes on, and the other writes nothing", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const nonce = await project.install();
+  const answers = await Promise.all(
+    [0, 1].map(() =>
+      project.callback({ installation_id: "42", setup_action: "install", state: nonce }),
+    ),
+  );
+  const flashes = answers.map(location).sort();
+  assert.equal(flashes.filter((flash) => flash.endsWith("?connected=acme")).length, 1, flashes[0]);
+  assert.equal(flashes.filter((flash) => flash.includes("?error=")).length, 1, flashes[1]);
+  assert.equal(project.calls.length, 1, "one proof");
+  assert.equal(project.secrets["/secrets/github-42"]!.material.appId, APP_ID);
+  assert.ok(project.kv["github/installations/42"]);
+  assert.equal(project.appended.filter((a) => a.event.type === "github/nonce-used").length, 1);
 });
 
 test("the callback for a request records a row that waits for an owner's approval; the installation that follows replaces it", async () => {
@@ -454,18 +530,63 @@ test("the callback for a request records a row that waits for an owner's approva
     /awaiting an owner's approval/,
   );
 
-  // the owner approves; the person installs again and saves, and GitHub sends the installation
-  await project.callback({
-    installation_id: "42",
-    setup_action: "update",
-    state: await project.install(),
-  });
-  assert.equal(project.kv[`github/installations/${connection}`], undefined);
-  assert.ok(
+  // the owner approves it, and GitHub comes back with the request's own nonce, after the hour too
+  const removed = (connection: string) =>
     project
       .registry()
-      .some((event) => event.payload.connection === connection && event.payload.row === null),
+      .some((event) => event.payload.connection === connection && event.payload.row === null);
+  project.github.accounts["77"] = "acme-org";
+  const approved = await project.callback({
+    installation_id: "77",
+    setup_action: "install",
+    state: nonce,
+  });
+  assert.equal(approved.headers.get("location"), "./_/?connected=acme-org");
+  assert.equal(project.kv[`github/installations/${connection}`], undefined);
+  assert.ok(removed(connection));
+  assert.equal(JSON.parse(project.kv["github/installations/77"]!).account, "acme-org");
+  // and the request's nonce is spent with it
+  const again = await project.callback({ setup_action: "request", state: nonce });
+  assert.match(location(again), /error=GitHub came back from an install this page did not start/);
+});
+
+test("an install answers only the request whose nonce came back with it: the others wait, for their approval or for Forget", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const requested: string[] = [];
+  for (const _org of ["a", "b"]) {
+    const nonce = await project.install();
+    await project.callback({ setup_action: "request", state: nonce });
+    requested.push(nonce);
+  }
+  const waiting = () =>
+    Object.keys(project.kv)
+      .filter((key) => key.startsWith("github/installations/request-"))
+      .sort();
+  const both = requested.map((nonce) => `github/installations/request-${nonce.slice(0, 16)}`);
+  assert.deepEqual(waiting(), [...both].sort());
+
+  // an installation no request asked for leaves both waiting
+  await project.callback({
+    installation_id: "42",
+    setup_action: "install",
+    state: await project.install(),
+  });
+  assert.deepEqual(waiting(), [...both].sort());
+  assert.ok(!project.registry().some((event) => event.payload.row === null));
+
+  // the approval of the first takes its row; the second waits
+  project.github.accounts["77"] = "org-a";
+  await project.callback({ installation_id: "77", setup_action: "install", state: requested[0]! });
+  assert.deepEqual(waiting(), [both[1]]);
+  const nulls = project.registry().filter((event) => event.payload.row === null);
+  assert.deepEqual(
+    nulls.map((event) => event.payload.connection),
+    [`request-${requested[0]!.slice(0, 16)}`],
   );
+  // Forget takes the second away by hand
+  await project.page("/_/disconnect", { form: { id: `request-${requested[1]!.slice(0, 16)}` } });
+  assert.deepEqual(waiting(), []);
 });
 
 test("a proof GitHub refuses deletes the secret again, shows the error, and lists nothing", async () => {
@@ -480,24 +601,70 @@ test("a proof GitHub refuses deletes the secret again, shows the error, and list
   });
   assert.match(location(res), /error=GitHub refused installation 42 \(HTTP 404: Not Found\)/);
   assert.equal(project.secrets["/secrets/github-42"], undefined);
+  assert.equal(project.secrets["/secrets/github-42-proof"], undefined);
   assert.equal(project.kv["github/installations/42"], undefined);
   assert.equal(project.registry().length, before);
   const html = await (await project.page(`/_/${res.headers.get("location")!.slice(4)}`)).text();
   assert.match(html, /class="error">GitHub refused installation 42/);
 });
 
-test("an update whose proof fails keeps the installation it had: a failure at GitHub breaks nothing that works", async () => {
+test("an update whose proof fails leaves the installation as it was: its App ID and its minted token", async () => {
   const project = await connected();
+  // the installation is in use: the platform has minted its token
+  await project.itx.fetch(
+    new Request("https://api.github.com/installation/repositories", {
+      headers: {
+        authorization: 'Bearer getSecret("/secrets/github-42", { field: "accessToken" })',
+      },
+    }),
+  );
   const kept = structuredClone(project.secrets["/secrets/github-42"]);
+  assert.match(kept!.material.accessToken, /^a-made-up-token-/);
+
+  // GitHub is down, then a wrong App ID is saved: both updates fail, and neither touches it
   project.github.refuse = 502;
+  const down = await project.callback({
+    installation_id: "42",
+    setup_action: "update",
+    state: await project.install(),
+  });
+  assert.match(location(down), /error=GitHub refused installation 42 \(HTTP 502/);
+  project.github.refuse = 0;
+  await project.page("/_/app", { form: { appId: "999999", slug: "iterate-acme" } });
+  const wrong = await project.callback({
+    installation_id: "42",
+    setup_action: "update",
+    state: await project.install(),
+  });
+  assert.match(location(wrong), /error=GitHub refused installation 42 \(HTTP 401/);
+  assert.deepEqual(project.secrets["/secrets/github-42"], kept);
+  assert.equal(project.secrets["/secrets/github-42-proof"], undefined);
+  assert.equal(JSON.parse(project.kv["github/installations/42"]!).account, "acme");
+});
+
+test("an update that passes its proof replaces the installation's secret, and the proof's secret goes", async () => {
+  const project = await connected();
+  await project.itx.fetch(
+    new Request("https://api.github.com/installation/repositories", {
+      headers: {
+        authorization: 'Bearer getSecret("/secrets/github-42", { field: "accessToken" })',
+      },
+    }),
+  );
+  project.github.accounts["42"] = "acme-renamed";
   const res = await project.callback({
     installation_id: "42",
     setup_action: "update",
     state: await project.install(),
   });
-  assert.match(location(res), /error=GitHub refused installation 42 \(HTTP 502/);
-  assert.deepEqual(project.secrets["/secrets/github-42"], kept);
-  assert.equal(JSON.parse(project.kv["github/installations/42"]!).account, "acme");
+  assert.equal(res.headers.get("location"), "./_/?connected=acme-renamed");
+  // set again from the proof's material: the platform mints a fresh token at the next use
+  assert.deepEqual(project.secrets["/secrets/github-42"]!.material, {
+    appId: APP_ID,
+    privateKey: 'getSecret("/secrets/github-app", { field: "privateKey" })',
+  });
+  assert.equal(project.secrets["/secrets/github-42-proof"], undefined);
+  assert.equal(JSON.parse(project.kv["github/installations/42"]!).account, "acme-renamed");
 });
 
 test("Install forgets the nonces of installs that never came back, after an hour", async () => {
@@ -602,6 +769,90 @@ test("disconnect deletes the installation's secret and kv entry, takes its row a
   assert.match(
     location(await project.page("/_/disconnect", { form: { id: "43" } })),
     /Unknown installation/,
+  );
+});
+
+test("a Disconnect whose secret cannot be deleted says so, and keeps the installation and its row for another try", async () => {
+  const project = await connected();
+  const before = project.registry().length;
+  project.faults.deletes = true;
+  const res = await project.page("/_/disconnect", { form: { id: "42" } });
+  assert.match(location(res), /error=the secret store is unavailable/);
+  assert.ok(project.secrets["/secrets/github-42"], "the token stays, and says so");
+  assert.ok(project.kv["github/installations/42"]);
+  assert.equal(project.kv["github/removed/42"], undefined);
+  assert.equal(project.registry().length, before, "no row is taken away");
+  project.faults.deletes = false;
+  assert.equal(
+    (await project.page("/_/disconnect", { form: { id: "42" } })).headers.get("location"),
+    "./",
+  );
+  assert.equal(project.secrets["/secrets/github-42"], undefined);
+  assert.equal(project.kv["github/installations/42"], undefined);
+});
+
+test("a Disconnect whose secret is already gone finishes", async () => {
+  const project = await connected();
+  delete project.secrets["/secrets/github-42"];
+  const res = await project.page("/_/disconnect", { form: { id: "42" } });
+  assert.equal(res.headers.get("location"), "./");
+  assert.equal(project.kv["github/installations/42"], undefined);
+  assert.equal(project.registry().at(-2)!.payload.row, null);
+});
+
+test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
+  for (const finish of ["disconnect", "publish"] as const) {
+    const project = await connected();
+    project.faults.registry = 1;
+    const failed = await project.page("/_/disconnect", { form: { id: "42" } });
+    assert.match(location(failed), /error=the registry is unavailable/, finish);
+    assert.equal(project.secrets["/secrets/github-42"], undefined);
+    assert.equal(project.kv["github/installations/42"], undefined);
+    assert.ok(project.kv["github/removed/42"], "the tombstone stands until the null row lands");
+    assert.ok(!project.registry().some((event) => event.payload.row === null));
+    if (finish === "disconnect") {
+      const again = await project.page("/_/disconnect", { form: { id: "42" } });
+      assert.equal(again.headers.get("location"), "./", "not Unknown installation");
+      assert.deepEqual(project.registry().at(-2), {
+        type: CONNECTION_CONFIGURED,
+        payload: { integration: "github", connection: "42", row: null },
+      });
+    } else {
+      await project.publish(9);
+      assert.deepEqual(
+        project
+          .registry()
+          .filter((event) => event.payload.connection === "42")
+          .at(-1),
+        {
+          type: CONNECTION_CONFIGURED,
+          idempotencyKey: "github:registry:removed:42:/@9",
+          payload: { integration: "github", connection: "42", row: null },
+        },
+      );
+    }
+    assert.equal(project.kv["github/removed/42"], undefined, finish);
+  }
+});
+
+test("an installation connected again after a Disconnect that did not finish keeps its row at the next publish", async () => {
+  const project = await connected();
+  project.faults.registry = 1;
+  await project.page("/_/disconnect", { form: { id: "42" } });
+  assert.ok(project.kv["github/removed/42"]);
+  await project.callback({
+    installation_id: "42",
+    setup_action: "install",
+    state: await project.install(),
+  });
+  assert.equal(project.kv["github/removed/42"], undefined);
+  await project.publish(9);
+  assert.deepEqual(
+    project
+      .registry()
+      .filter((event) => event.payload.connection === "42")
+      .at(-1)!.payload.row,
+    row(),
   );
 });
 

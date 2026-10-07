@@ -154,15 +154,28 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
 - **No admin proof.** iterate's shared App proves that the person administers an account before an
   installation counts for a project. This App is the project's own: it holds the App's key, so it
   can mint for any installation of its App already. The page binds GitHub's redirect to an install
-  it started instead: a nonce in the install link's `state`, good once, for an hour.
+  it started instead: a nonce in the install link's `state`, good for an hour (or, for a request,
+  until it is answered). An installation claims its nonce once, as a `github/nonce-used` event on
+  `/integrations/github` keyed by the nonce, before any secret is written, so two redirects with one
+  nonce never both go on.
+- **An update proves itself first.** GitHub sends the person back after every change to an
+  installation. The page proves it through a secret of its own, `/secrets/github-<id>-proof`, and
+  changes the installation's secret only once the proof has passed, so a failure at GitHub, or a
+  wrong App ID saved on the page, leaves a working installation as it was. The proof's secret goes
+  either way.
 - **The first ping fails.** GitHub sends a `ping` when the App is created, before its webhook
   secret is saved here, so it is refused. Redeliver it from the App's **Advanced** tab once the
   secrets are saved, if you want to see one go through. A delivery for an installation the page did
   not connect is acknowledged and dropped.
 - **An installation an owner must approve.** When the person installs on an organization they do not
-  own, GitHub asks an owner, and the page shows a request waiting. Once the owner approves it, press
-  **Install** again and **Save** on GitHub's page: GitHub sends the installation back to the page.
-- **Disconnect** forgets an installation here and deletes its secret. The App stays installed at
+  own, GitHub asks an owner, and the page shows a request waiting, which keeps its nonce. When GitHub
+  comes back with that nonce, once the owner has approved, the request becomes the installation; any
+  other request keeps waiting. If GitHub does not come back with it, press **Install** again and
+  **Save** on GitHub's page, then **Forget** the request.
+- **Disconnect** deletes the installation's secret, then forgets it here. A secret that cannot be
+  deleted is shown as an error, and the installation stays listed, so Disconnect again can finish. A
+  row the Dash could not be told to take away is taken away by Disconnect again, or at the next
+  publish: until then `github/removed/<connection>` in the kv marks it. The App stays installed at
   GitHub: only its account can uninstall it.
 - **Not the platform's event.** `events.iterate.com/github/webhook-received` is the platform's record
   of a delivery for iterate's shared App (github-sync and the AI linter read it). This package's
