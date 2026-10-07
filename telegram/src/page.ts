@@ -174,6 +174,9 @@ export async function servePage(
   const path = url.pathname.replace(/^\/_\/?/, "");
   const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
 
+  // `/_` would resolve the page's relative links against `/`
+  if (request.method === "GET" && url.pathname === "/_")
+    return new Response(null, { status: 308, headers: { location: "_/" } });
   if (request.method === "GET" && path === "") {
     const error = url.searchParams.get("error");
     const connected = url.searchParams.get("connected");
@@ -200,8 +203,6 @@ export async function servePage(
       },
     );
   }
-  if (request.method === "GET" && url.pathname === "/_")
-    return new Response(null, { status: 308, headers: { location: "_/" } });
   if (request.method !== "POST") return new Response("Not found\n", { status: 404 });
 
   const form = await request.formData();

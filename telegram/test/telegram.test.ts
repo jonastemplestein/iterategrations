@@ -408,6 +408,10 @@ test("with no bot the page shows the BotFather steps and the token form", async 
   assert.match(html, /<form method="post" action="connect">/);
   assert.match(res.headers.get("content-security-policy")!, /form-action 'self'/);
   assert.match(res.headers.get("content-security-policy")!, /script-src 'nonce-[A-Za-z0-9+/=]+'/);
+  // without its slash the page's relative links would lead off it
+  const bare = await project.page("/_");
+  assert.equal(bare.status, 308);
+  assert.equal(bare.headers.get("location"), "_/");
 });
 
 test("pasting a token checks it, keeps it as a secret, and registers the webhook with a secret the project keeps", async () => {
