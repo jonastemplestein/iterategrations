@@ -1,6 +1,6 @@
 # Amazon UK agent shopping
 
-Checked 6 October 2026. The [integration recipe](../amazon/README.md) uses a local
+Checked 6–7 October 2026. The [integration recipe](../amazon/README.md) uses a local
 `iterate provide` bridge. Chrome establishes the session. Node then calls the website's HTTP
 endpoints directly.
 
@@ -17,22 +17,31 @@ Huel Black Edition ready-to-drink bottles for the reviewed total. An exact order
 in Amazon's order history confirmed a new order, the total and the delivery status.
 The receipt and account details remain in the private project. The original basket was restored.
 
+On 7 October, a native project agent completed another explicitly approved purchase on a dedicated
+consumer account with shared Prime benefits. The agent searched for clothing, selected the size,
+confirmed a saved card, preserved the fresh review and submitted once. Amazon's consumer order
+history confirmed the order number, item, exact total and delivery window. The basket was empty
+afterward. This bridge ran on a Linux host with the session established in Chrome on the Mac. The
+temporary purchase cap was removed and the bridge restarted after verification.
+
 The website uses a mix of JSON resources, HTML pages and form submissions. The captured routes
 include:
 
-| Function                    | Website route                                                            | Format                                           |
-| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
-| Search                      | `GET /s`                                                                 | HTML result rows, ASINs and displayed prices     |
-| Product                     | `GET /dp/{ASIN}`                                                         | HTML offer form and page token                   |
-| Product resources           | `GET /api/marketplaces/A1F83G8C2ARO7P/products/{ASIN}`                   | JSON resource envelopes                          |
-| Basket read                 | `GET /cart/add-to-cart/get-cart-items?clientName=SiteWideActionExecutor` | JSON ASINs, sellers and quantities               |
-| Add item                    | `POST /cart/add-to-cart`                                                 | Form data with offer, quantity and CSRF token    |
-| Quantity, selection, delete | `POST /cart/ref=ox_sc_cart_actions_1`                                    | Form data with an action payload and CSRF header |
-| Start purchase view         | `GET /checkout/entry/cart?isPreinit=1&partialCheckoutCart=1&…`           | Checkout HTML                                    |
-| Business address            | `POST /checkout/p/{purchase}/business-address/continue`                  | Stored address choice and request token          |
-| Review                      | `GET /checkout/p/{purchase}/spc`                                         | Delivery, payment, items and final total         |
-| Final purchase form         | `POST /checkout/p/{purchase}/spc/place-order`                            | Guarded POST; one approved order confirmed       |
-| Business order history      | `POST /ab/your-orders/orderHistory`                                      | Read-only HTML results with a page CSRF token    |
+| Function                    | Website route                                                            | Format                                               |
+| --------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| Search                      | `GET /s`                                                                 | HTML result rows, ASINs and displayed prices         |
+| Product                     | `GET /dp/{ASIN}`                                                         | HTML offer form and page token                       |
+| Product resources           | `GET /api/marketplaces/A1F83G8C2ARO7P/products/{ASIN}`                   | JSON resource envelopes                              |
+| Basket read                 | `GET /cart/add-to-cart/get-cart-items?clientName=SiteWideActionExecutor` | JSON ASINs, sellers and quantities                   |
+| Add item                    | `POST /cart/add-to-cart`                                                 | Form data with offer, quantity and CSRF token        |
+| Quantity, selection, delete | `POST /cart/ref=ox_sc_cart_actions_1`                                    | Form data with an action payload and CSRF header     |
+| Start purchase view         | `GET /checkout/entry/cart?isPreinit=1&partialCheckoutCart=1&…`           | Checkout HTML                                        |
+| Business address            | `POST /checkout/p/{purchase}/business-address/continue`                  | Stored address choice and request token              |
+| Consumer saved card         | `POST /checkout/p/{purchase}/pay/continue`                               | Private widget fields; JSON response panels          |
+| Review                      | `GET /checkout/p/{purchase}/spc`                                         | Delivery, payment, items and final total             |
+| Final purchase form         | `POST /checkout/p/{purchase}/spc/place-order`                            | Guarded POST; Business and consumer orders confirmed |
+| Business order history      | `POST /ab/your-orders/orderHistory`                                      | Read-only HTML results with a page CSRF token        |
+| Consumer order history      | `GET /gp/css/order-history`                                              | Default order list; keyword search not implemented   |
 
 I replayed authenticated reads from Node with cookies exported from the task tab. Search,
 product and basket pages returned HTTP 200. Basket JSON also returned valid items. This proves
@@ -66,10 +75,12 @@ but that alone was not treated as proof. The client now reads Business order-his
 and handles HTML fragments that have no `body` element. An exact order-number search verified
 the live order. Future callers must also verify an order record after submission.
 
-The live account is Amazon Business. A fresh ordinary-account login, new-address entry, new-card
-entry, MFA flows and other checkout variants need further testing. The credentials-file login
-helper is implemented, but the tested bootstrap exported an existing signed-in session.
-A person must complete authentication challenges.
+Both Business and consumer accounts were tested with stored addresses and cards. The consumer
+account was created in Chrome with email and SMS verification, then exported into the bridge.
+The credentials-file password-login helper remains untested. New-address entry, new-card entry
+through HTTP, payment-choice changes and other checkout variants need further testing.
+Chrome is still needed for renewed authentication and challenges. The bridge has no automatic
+reauthentication.
 
 The website protocol is not documented as a public shopping API. Network visibility proves
 technical access; it does not establish Amazon's support commitment for these endpoints.
