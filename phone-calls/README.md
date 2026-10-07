@@ -115,4 +115,7 @@ pnpm test:go     # the codec, the playout queue, and the bridge against a SIP pe
   does not. When the latest thing each side said is a goodbye, the lend hangs up 2.5 s after the
   voice's goodbye has played, unless the person makes a sound; `call-ended` then has
   `endedAfterGoodbyes: true`.
+- **A recorded line says so.** With `PHONE_CALLS_RECORDING_NOTICE` set (for example "Please note
+  that this call is recorded."), a placed call to a number the lend does not answer opens with it,
+  and the call's agent is told. Household numbers (`PHONE_CALLS_ALLOWED`) hear no notice.
 - DTMF (keys pressed) arrives and is logged, nothing more.

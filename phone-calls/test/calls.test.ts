@@ -22,6 +22,7 @@ process.env.FAKE_BRIDGE_CONTROL = control;
 process.env.FAKE_BRIDGE_LOG = log;
 process.env.PHONE_CALLS_ALLOWED = "447700900001,+44 7700 900002";
 process.env.PHONE_CALLS_TEST_FROM = "?phonetest";
+process.env.PHONE_CALLS_RECORDING_NOTICE = "Please note that this call is recorded.";
 process.env.PHONE_CALLS_ANSWER_WITH = JSON.stringify({
   "447700900001": "At your service, sir.",
   "447700900002": "At your service, ma'am.",
@@ -232,7 +233,11 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
     /You are on a phone call .* to \+447700900002, which you placed yourself/,
   );
   await until("the opening", () => spoken().length === 4);
-  assert.deepEqual(spoken()[3], ["/agents/voice/phone-447700900002", "Good evening, ma'am."]);
+  assert.deepEqual(
+    spoken()[3],
+    ["/agents/voice/phone-447700900002", "Good evening, ma'am."],
+    "a household number hears no recording notice",
+  );
   assert.deepEqual(lent.hangup(), { hungUp: true, callId: "out-1" });
   await until("the report", () => project.messages[0]);
   assert.equal(project.messages[0]!.to, "/agents/family-chief-of-staff");
@@ -304,3 +309,32 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   assert.equal(ended.payload.endedAfterGoodbyes, true);
   assert.equal(ended.payload.metrics.linkMoves, 1);
 }, 15_000);
+
+test("a call to someone outside the household opens with the recording notice", async () => {
+  const project = pretendProject();
+  const { default: provide } = await import("../calls.ts");
+  const lent = await provide({ itx: project.itx as never });
+  const placed = await lent.call({
+    to: "+44 7700 900009",
+    opening: "Good afternoon. Jeeves here.",
+  });
+  await until("the opening", () =>
+    project.events.find((event) => event.type === "events.iterate.com/agent/web-message-sent"),
+  );
+  const said = project.events.find(
+    (event) => event.type === "events.iterate.com/agent/web-message-sent",
+  )!;
+  assert.equal(
+    said.payload.message,
+    "Good afternoon. Jeeves here. Please note that this call is recorded.",
+  );
+  const brief = project.events.find(
+    (event) =>
+      event.type === "events.iterate.com/agent/context-added" && event.path === placed.streamPath,
+  )!;
+  assert.match(brief.payload.content, /This call is recorded, and your opening told them so/);
+  lent.hangup();
+  await until("its end", () =>
+    project.events.find((event) => event.type === "phone-calls/call-ended"),
+  );
+});

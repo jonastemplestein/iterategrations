@@ -68,6 +68,9 @@ const ANSWER_WITH: Record<string, string> = (() => {
     return {};
   }
 })();
+/** Said after the opening of a call to anyone this lend does not answer (someone outside the
+ *  household) when the line records its calls: "Please note that this call is recorded." Unset, nothing. */
+const RECORDING_NOTICE = (process.env.PHONE_CALLS_RECORDING_NOTICE || "").trim();
 /** Where this lend's call in progress is kept, for the other call lends. */
 const BUSY_KEY = "calls/busy";
 
@@ -598,6 +601,16 @@ async function call(input: CallInput): Promise<Placed> {
   const current = newCall("out", digits, `+${digits}`);
   current.opening = input.opening;
   current.brief = input.brief;
+  // the lend says it, so the model cannot forget it
+  if (RECORDING_NOTICE && !ALLOWED.has(digits)) {
+    current.opening = [input.opening?.trim(), RECORDING_NOTICE].filter(Boolean).join(" ");
+    current.brief = [
+      input.brief,
+      `This call is recorded, and your opening told them so ("${RECORDING_NOTICE}").`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
   current.reportTo = input.reportTo;
   active = current;
   markBusy(project, current);
