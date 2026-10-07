@@ -13,11 +13,12 @@
     "dist"
   ],
   "scripts": {
-    "build": "vp pack"
+    "build": "vp pack",
+    "test": "vp pack && vp test"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260925.1",
-    "iterate": "https://pkg.pr.new/iterate/iterate/iterate@d285b9c",
+    "@types/node": "^24.0.0",
     "typescript": "^7.0.2"
   }
 }
