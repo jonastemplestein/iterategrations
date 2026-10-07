@@ -1,0 +1,24 @@
+{
+  "name": "iterate-chatgpt",
+  "version": "0.0.0",
+  "description": "Bring your own ChatGPT for an iterate project: a Connect ChatGPT page, and model requests paid by the subscription",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/chatgpt.d.ts",
+      "default": "./dist/chatgpt.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp pack && vp test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}
