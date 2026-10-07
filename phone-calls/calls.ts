@@ -489,12 +489,8 @@ async function call(input: CallInput): Promise<Placed> {
     throw new Error(
       `call({ to }) needs a phone number with its country code, got ${JSON.stringify(input?.to)}`,
     );
-  if (!ALLOWED.has(digits))
-    throw new Error(
-      `+${digits} is not a number this lend may ring (it rings ${
-        [...ALLOWED].map((n) => `+${n}`).join(", ") || "nobody"
-      }).`,
-    );
+  // OUT: anyone (Jonas, 2026-10-07: "we should be able to call anyone"). Who is rung, and when, is
+  // the agents' rules (calls.md); PHONE_CALLS_ALLOWED says only who is answered.
   if (active)
     throw new Error(`A call is already in progress (with ${active.who}): one call at a time.`);
   const elsewhere = await busyElsewhere(project);
