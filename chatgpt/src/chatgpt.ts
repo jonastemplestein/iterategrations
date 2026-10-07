@@ -24,7 +24,7 @@ export {
   serverEvents,
 } from "./request.js";
 
-/** The worker that hosts the package, as `fetch` is handed it (iterate/sdk `IntegrationHost`):
+/** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
  *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
  *  gate of a members-only page. */
 export type IntegrationHost = {

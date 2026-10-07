@@ -62,7 +62,7 @@ export type WaitroseItx = {
   };
 };
 
-/** The worker that hosts the package, as `fetch` is handed it (iterate/sdk `IntegrationHost`). */
+/** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it. */
 export type IntegrationHost = {
   getItx(): WaitroseItx & Disposable;
   auth: { require(request: Request): Response | null };

@@ -121,9 +121,9 @@ const { scopes } = await itx.secrets.completeOAuth("/secrets/acme-main", { code,
 ```
 
 The exchange runs in the platform's secret facet: the page never sees a token, and the same callback
-again (a refreshed tab) answers the same. The URL is `itx.url({ routingSlug, path })`'s, so a rename
-of the project or a primary hostname set later moves it, and the provider's registration must
-follow. For a GitHub App, store one secret per installation with the App's key as a placeholder and
+again (a refreshed tab) answers the same. The platform composes the URL under the deployment's
+ingress, never a primary hostname, so a rename of the project moves it, and the provider's
+registration must follow. For a GitHub App, store one secret per installation with the App's key as a placeholder and
 the `github-app-installation` refresh strategy: the platform mints each installation's token on use.
 Claim a nonce once by appending an event with the nonce as its idempotency key and a body only
 that claim has (a random value: the same event again is a no-op, so two identical claims would
