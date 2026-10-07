@@ -136,7 +136,8 @@ export async function chatgptText(
   return text;
 }
 
-/** The model names the plan's token can see (`GET /v1/models`). */
+/** The model names the plan's token can see (`GET /v1/models`). For a plan's token OpenAI answers in
+ *  Codex's shape, `{ models: [{ slug }] }`, not the API's `{ data: [{ id }] }`: both are read. */
 export async function chatgptModels(itx: Pick<ChatgptItx, "fetch">): Promise<string[]> {
   const response = await itx.fetch(
     new Request(`${RESOURCE}/models`, {
@@ -144,6 +145,14 @@ export async function chatgptModels(itx: Pick<ChatgptItx, "fetch">): Promise<str
     }),
   );
   if (!response.ok) throw new Error(`models: HTTP ${response.status}`);
-  const body = (await response.json()) as { data?: { id?: string }[] };
-  return (body.data ?? []).flatMap((model) => (model.id ? [model.id] : []));
+  const body = (await response.json()) as {
+    data?: { id?: string }[];
+    models?: { slug?: string; visibility?: string }[];
+  };
+  return [
+    ...(body.data ?? []).flatMap((model) => (model.id ? [model.id] : [])),
+    ...(body.models ?? []).flatMap((model) =>
+      model.slug && model.visibility !== "hide" ? [model.slug] : [],
+    ),
+  ];
 }
