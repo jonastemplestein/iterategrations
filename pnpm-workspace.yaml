@@ -5,6 +5,10 @@ packages:
   - whatsapp
   - whatsapp-calls
   - phone-calls
+  - herdr
+  - jmap
+  - telegram
+  - chatgpt
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0

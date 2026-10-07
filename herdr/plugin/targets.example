@@ -1,0 +1,11 @@
+# The plugin's `targets` file: one line for each iterate project to lend this Herdr to, as itx.<name>
+# (default jonas.herdr):
+#
+#   <iterate config>  <project>  [name]
+#
+# An `iterate --config <config>` name: `prd` is the hosted os.iterate.com; a self-hosted deployment is
+# one you add with `iterate config set --name <name> --os-base-url https://<its host>`. Sign in with
+# `iterate --config <config> login` (it lasts 30 days at most), or put a key of its own in
+# "<config dir>/<config>.key" (mode 600; `iterate --config <config> tokens create --project <project>
+# --never-expires`). `iterate --config <config> projects list` names the projects.
+prd          my-project

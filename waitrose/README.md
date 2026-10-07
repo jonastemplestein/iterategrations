@@ -80,58 +80,41 @@ export async function exchange(material, fetch) {
 
 ## 2. Serve the API from the project's config repo
 
-Two ways to get the code into `/repos/config`; commit everything in one commit with
-`itx.repos.get("/repos/config").commitFiles({ message, changes: [{ path, content }, …] })`: a commit
-to `main` publishes.
+Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the imports and one branch to
+`worker.ts`, probes the result as a worker, and commits it. The route is for members only: the API acts
+as the person's Waitrose account, `placeOrder` included.
 
-### Plan A: depend on the package (recommended)
-
-The code is the package `iterate-waitrose`, built by this repo's CI and served by pkg.pr.new (never
-npm). The loader only takes a pkg.pr.new package at a full commit, so pin one:
-
-```sh
-curl -sI https://pkg.pr.new/jonastemplestein/iterategrations/iterate-waitrose@main | grep -i x-commit-key
-# x-commit-key: jonastemplestein:iterategrations:<40-hex sha>
-```
-
-Add to the config repo's `package.json` (keep what is there):
-
-```json
-"dependencies": {
-  "iterate-waitrose": "https://pkg.pr.new/jonastemplestein/iterategrations/iterate-waitrose@<40-hex sha>"
-}
-```
-
-and one new file, `waitrose.ts`, that only re-exports it:
-
-```ts
-export { Waitrose } from "iterate-waitrose";
-```
-
-### Plan B: copy the source
-
-Read [`src/client.ts`](src/client.ts) (the API, no dependencies), [`src/index.ts`](src/index.ts) (the
-RPC target) and [`src/exchange.ts`](src/exchange.ts), and commit them to `/repos/config` under
-`waitrose/`. You own the copy. Use `waitrose/index.ts` as the import below.
-
-### The branch in `worker.ts`
-
-Members only: the API acts as the person's Waitrose account, `placeOrder` included. In `worker.ts`,
-after the fetch-routes block and before `if (!routingSlug)`:
-
-```ts
-import { newWorkersRpcResponse } from "iterate/sdk";
-import { Waitrose } from "./waitrose.ts";
-
-if (request.headers.get("x-iterate-routing-slug") === "waitrose") {
+```js
+// the values for add-to-a-project.md
+const PACKAGE = "iterate-waitrose";
+const SLUG = "waitrose";
+const IMPORT = `import { newWorkersRpcResponse as iterateRpcResponse } from "iterate/sdk";
+import { Waitrose as IterateWaitrose } from "iterate-waitrose";`;
+const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "waitrose") {
   const denied = this.auth.require(request);
   if (denied) return denied;
-  return newWorkersRpcResponse(
+  return iterateRpcResponse(
     request,
-    new Waitrose({ fetch: (r) => this.withItx((itx) => itx.fetch(r)) }),
+    new IterateWaitrose({
+      fetch: async (outbound: Request) => {
+        using itx = this.getItx();
+        return await itx.fetch(outbound);
+      },
+    }),
   );
-}
+}`;
+const MEMBER = "";
+const FILES = {};
 ```
+
+### By hand, or copy the source
+
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the imports and the branch above.
+To copy the source instead, read [`src/client.ts`](src/client.ts) (the API, no dependencies),
+[`src/index.ts`](src/index.ts) (the RPC target) and [`src/exchange.ts`](src/exchange.ts), and commit
+them to `/repos/config` under `waitrose/`. You own the copy. The branch then imports `Waitrose` from
+`"./waitrose/index.ts"`.
 
 ## 3. Use it
 

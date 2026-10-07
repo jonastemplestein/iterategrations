@@ -5,15 +5,36 @@ folder's `README.md` is the recipe: read it, then follow it. Each folder is also
 CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's config repo depends on
 `https://pkg.pr.new/jonastemplestein/iterategrations/<package>@<commit>`.
 
-| Folder                              | Package                          | What it does                                                                                                                                     |
-| ----------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`pebble/`](pebble)                 | `iterate-pebble`                 | Receive Pebble Index 01 ring recordings (transcript event + audio file).                                                                         |
-| [`waitrose/`](waitrose)             | `iterate-waitrose`               | The Waitrose grocery API as a Cap'n Web RPC target, and its login as a secret's exchange code.                                                   |
-| [`monzo/`](monzo)                   | `iterate-monzo`                  | Monzo transactions as events (a webhook with a generated secret in its URL), signed in through zero-trust-mcp.                                   |
-| [`yoto/`](yoto)                     | none                             | Yoto players and library for a project's agents, connected through zero-trust-mcp.                                                               |
-| [`whatsapp/`](whatsapp)             | none: run with `iterate provide` | Your WhatsApp (Baileys, from your own computer) as `itx.whatsapp`, every message an event; a dummy to try it without an account.                 |
-| [`whatsapp-calls/`](whatsapp-calls) | none: run with `iterate provide` | WhatsApp voice calls both ways, carried to the project's voice app: `itx.whatsappCalls.call(…)` rings a person, and a known caller is picked up. |
-| [`phone-calls/`](phone-calls)       | none: run with `iterate provide` | Real phone calls both ways on an Andrews & Arnold VoIP number (a SIP phone in Go), carried to the project's voice app: `itx.phoneCalls.call(…)`. |
+| Folder                              | Package                                    | What it does                                                                                                                                          |
+| ----------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`pebble/`](pebble)                 | `iterate-pebble`                           | Receive Pebble Index 01 ring recordings (transcript event + audio file).                                                                              |
+| [`waitrose/`](waitrose)             | `iterate-waitrose`                         | The Waitrose grocery API as a Cap'n Web RPC target, and its login as a secret's exchange code.                                                        |
+| [`monzo/`](monzo)                   | `iterate-monzo`                            | Monzo transactions as events (a webhook with a generated secret in its URL), signed in through zero-trust-mcp.                                        |
+| [`yoto/`](yoto)                     | none                                       | Yoto players and library for a project's agents, connected through zero-trust-mcp.                                                                    |
+| [`whatsapp/`](whatsapp)             | none: run with `iterate provide`           | Your WhatsApp (Baileys, from your own computer) as `itx.whatsapp`, every message an event; a dummy to try it without an account.                      |
+| [`whatsapp-calls/`](whatsapp-calls) | none: run with `iterate provide`           | WhatsApp voice calls both ways, carried to the project's voice app: `itx.whatsappCalls.call(…)` rings a person, and a known caller is picked up.      |
+| [`phone-calls/`](phone-calls)       | none: run with `iterate provide`           | Real phone calls both ways on an Andrews & Arnold VoIP number (a SIP phone in Go), carried to the project's voice app: `itx.phoneCalls.call(…)`.      |
+| [`herdr/`](herdr)                   | none: a Herdr plugin, or `iterate provide` | Your Herdr as `itx.jonas.herdr`: one `call(method, params)` for Herdr's whole socket API, and its events on a stream (news durable, focus ephemeral). |
+| [`jmap/`](jmap)                     | `iterate-jmap`                             | A mailbox over JMAP (Fastmail by default): send from it (filed in Sent), search, threads; and Fastmail Masked Email, throwaway addresses on demand.   |
+| [`telegram/`](telegram)             | `iterate-telegram`                         | A Telegram bot with its own Connect Telegram page: private chats and groups, each handed to an agent; invite links to let people in.                  |
+| [`chatgpt/`](chatgpt)               | `iterate-chatgpt`                          | Bring your own ChatGPT: a Connect ChatGPT page, and model requests paid by the subscription instead of an API key.                                    |
+
+## Adding one to a project
+
+You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
+project's root). How an integration reaches a project depends on what it is:
+
+- **A package** (`iterate-…` in the table: Pebble, Waitrose, Monzo, JMAP, Telegram, ChatGPT) runs in the
+  project's own config worker. [`add-to-a-project.md`](add-to-a-project.md) is the one script that
+  pins it (a full pkg.pr.new commit), adds it to `package.json` and `worker.ts`, probes the patched repo
+  as a worker, commits it and waits for the platform to publish. Each recipe gives the values to put in
+  its first block, then what to do next (a secret, a webhook, a page).
+- **Lent from your own computer** (WhatsApp, WhatsApp calls, Herdr: "run with `iterate provide`"): one
+  command lends it to the project as `itx.<name>`. Each recipe says what to run and has a sample call.
+- **Through zero-trust-mcp** (Monzo's sign-in, Yoto): [`zero-trust-mcp.md`](zero-trust-mcp.md) connects
+  the server; the recipe then calls its tools.
+
+Never take a secret in chat: a recipe that needs one makes a form with `itx.secrets.collectFromUser`.
 
 [`zero-trust-mcp.md`](zero-trust-mcp.md) is the shared step behind Monzo and Yoto: connecting a
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) server, which keeps no credentials of its
