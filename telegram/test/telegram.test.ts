@@ -1,8 +1,10 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets, streams with a kv
-// at the root only (a sub-context has `append` and nothing else, as the platform's default-deny
-// rewrite rules make it), agents, appends that refuse a key used twice for another event (as the
-// platform does; the same event again is a no-op), and an egress to a pretend Telegram that records
-// every Bot API call. `host` is the worker hosting the package: a scope per `getItx`, counted.
+// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a delete of a
+// missing one refused as SECRET_NOT_SET, as the platform does), streams with a kv at the root only (a
+// sub-context has `append` and nothing else, as the platform's default-deny rewrite rules make it),
+// agents, appends that refuse a key used twice for another event (as the platform does; the same
+// event again is a no-op), and an egress to a pretend Telegram that records every Bot API call.
+// `faults` makes a secret's delete or an append on /integrations fail. `host` is the worker hosting
+// the package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import { telegram } from "../dist/telegram.js";
@@ -24,12 +26,21 @@ function fakeProject(deliver?: "agents" | "events", slug?: string) {
   const agents: string[] = [];
   const calls: Call[] = [];
   const scopes = { opened: 0, disposed: 0 };
+  const faults = { deletes: false, registry: 0 };
   let readsAll = false; // Telegram's privacy mode: on until the bot is an admin or it is switched off
   const itx: any = {
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
         void (secrets[path] = { material, options }),
-      delete: async (path: string) => void delete secrets[path],
+      delete: async (path: string) => {
+        if (faults.deletes)
+          throw Object.assign(new Error("the secret store is unavailable"), {
+            code: "UNAVAILABLE",
+          });
+        if (!(path in secrets))
+          throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
+        delete secrets[path];
+      },
       verifyEquals: async (path: string, { value }: { value: string }) =>
         (secrets[path] as any)?.material === value,
     },
@@ -44,6 +55,10 @@ function fakeProject(deliver?: "agents" | "events", slug?: string) {
     },
     cd: (path: string) => ({
       append: async (event: any) => {
+        if (path === "/integrations" && faults.registry > 0) {
+          faults.registry--;
+          throw new Error("the registry is unavailable");
+        }
         const earlier = appended.find(
           (a) =>
             a.path === path &&
@@ -132,6 +147,7 @@ function fakeProject(deliver?: "agents" | "events", slug?: string) {
     agents,
     calls,
     scopes,
+    faults,
     hook,
     connected,
     page,
@@ -868,4 +884,93 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
       itx: project.itx,
     });
   assert.equal(project.appended.length, before);
+});
+
+// ------------------------------------------- a disconnect that does not finish
+
+test("a Disconnect whose secret cannot be deleted says so, and the bot stays listed for another try", async () => {
+  const project = fakeProject();
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  const before = project.registry().length;
+  project.faults.deletes = true;
+  const failed = await project.page("/_/disconnect", { form: { bot: BOT } });
+  assert.match(
+    decodeURIComponent(failed.headers.get("location")!),
+    /error=the secret store is unavailable/,
+  );
+  assert.ok(project.secrets[`/secrets/telegram-${BOT}`], "the token stays, and says so");
+  assert.ok(project.kv[`telegram/bots/${BOT}`]);
+  assert.equal(project.kv[`telegram/removed/${BOT}`], undefined);
+  assert.equal(project.registry().length, before, "no row is taken away");
+  project.faults.deletes = false;
+  assert.equal(
+    (await project.page("/_/disconnect", { form: { bot: BOT } })).headers.get("location"),
+    "./",
+  );
+  assert.deepEqual(project.secrets, {});
+  assert.equal(project.kv[`telegram/bots/${BOT}`], undefined);
+});
+
+test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
+  for (const finish of ["disconnect", "publish"] as const) {
+    const project = fakeProject();
+    await project.page("/_/connect", { form: { token: TOKEN } });
+    project.faults.registry = 1;
+    const failed = await project.page("/_/disconnect", { form: { bot: BOT } });
+    assert.match(
+      decodeURIComponent(failed.headers.get("location")!),
+      /error=the registry is unavailable/,
+    );
+    assert.deepEqual(project.secrets, {});
+    assert.equal(project.kv[`telegram/bots/${BOT}`], undefined);
+    assert.ok(
+      project.kv[`telegram/removed/${BOT}`],
+      "the tombstone stands until the null row lands",
+    );
+    assert.ok(!project.registry().some((event) => event.payload.row === null));
+    if (finish === "disconnect") {
+      const again = await project.page("/_/disconnect", { form: { bot: BOT } });
+      assert.equal(again.headers.get("location"), "./", "not Unknown bot");
+      assert.deepEqual(project.registry().at(-2), {
+        type: CONNECTION_CONFIGURED,
+        payload: { integration: "telegram", connection: BOT, row: null },
+      });
+    } else {
+      await project.publish(9);
+      assert.deepEqual(
+        project
+          .registry()
+          .filter((event) => event.payload.connection === BOT)
+          .at(-1),
+        {
+          type: CONNECTION_CONFIGURED,
+          idempotencyKey: `telegram:registry:removed:${BOT}:/@9`,
+          payload: { integration: "telegram", connection: BOT, row: null },
+        },
+      );
+      assert.deepEqual(
+        project.registry().at(-1)!.payload.card,
+        card({ kind: "attention", text: "Connect a bot" }, "Connect"),
+      );
+    }
+    assert.equal(project.kv[`telegram/removed/${BOT}`], undefined, finish);
+  }
+});
+
+test("a bot connected again after a Disconnect that did not finish keeps its row at the next publish", async () => {
+  const project = fakeProject();
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  project.faults.registry = 1;
+  await project.page("/_/disconnect", { form: { bot: BOT } });
+  assert.ok(project.kv[`telegram/removed/${BOT}`]);
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  assert.equal(project.kv[`telegram/removed/${BOT}`], undefined);
+  await project.publish(9);
+  assert.deepEqual(
+    project
+      .registry()
+      .filter((event) => event.payload.connection === BOT)
+      .at(-1)!.payload.row,
+    row("0 people"),
+  );
 });

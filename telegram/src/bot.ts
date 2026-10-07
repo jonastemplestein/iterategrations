@@ -47,6 +47,9 @@ export const streamOf = (bot: string): string => `/integrations/telegram/${bot}`
 export const keyOf = (bot: string, key: string): string => `telegram/${bot}/${key}`;
 /** The names of the connected bots: kv `telegram/bots/<name>`. */
 const BOTS = "telegram/bots/";
+/** A disconnect whose null row has yet to land on the Dash: kv `telegram/removed/<name>`. No bot is
+ *  called `removed`: a bot's username ends in `bot`. */
+export const REMOVED = "telegram/removed/";
 
 export type Person = { name: string; username?: string; at: string };
 export type Pending = Person & { chatId: number; chatTitle?: string };
@@ -189,6 +192,8 @@ export async function connectBot(
     username: me.username,
     ...(me.first_name ? { name: me.first_name } : {}),
   };
+  // connected again after a disconnect that did not finish: that disconnect is over
+  await itx.kv.delete(`${REMOVED}${name}`);
   await itx.kv.put(keyOf(name, "bot"), JSON.stringify(info));
   await itx.kv.put(`${BOTS}${name}`, me.username);
   await registerBot(itx, name, slug);
@@ -196,16 +201,40 @@ export async function connectBot(
   return { name, username: me.username };
 }
 
+/** Delete a secret. One that is already gone (`SECRET_NOT_SET`) is what was wanted; any other
+ *  failure is thrown, so nothing reports a credential gone while it still works. */
+async function dropSecret(itx: TelegramItx, path: string): Promise<void> {
+  await itx.secrets.delete(path).catch((error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code !== "SECRET_NOT_SET") throw error;
+  });
+}
+
+/** Whether a disconnect of `bot` has yet to finish (its tombstone stands). */
+export async function removing(itx: TelegramItx, bot: string): Promise<boolean> {
+  return (await itx.kv.get(`${REMOVED}${bot}`)) !== null;
+}
+
 /** Disconnect a bot: its webhook, its two secrets, its place in the list, and its row on the
- *  Dash's Integrations page. Who was let in stays, for a bot connected again. */
+ *  Dash's Integrations page. A secret that cannot be deleted is thrown, and the bot stays listed,
+ *  so Disconnect again can work. From the moment the secrets are gone until the null row has
+ *  landed, a tombstone, `telegram/removed/<bot>`, says what is left to do: Disconnect again
+ *  finishes it, and so does the install hook. Who was let in stays, for a bot connected again. */
 export async function disconnectBot(itx: TelegramItx, bot: string, slug: string): Promise<void> {
   await api(itx, placeholder(bot), "deleteWebhook").catch(() => undefined);
-  await itx.secrets.delete(`/secrets/telegram-${bot}`).catch(() => undefined);
-  await itx.secrets.delete(`/secrets/telegram-webhook-${bot}`).catch(() => undefined);
+  await dropSecret(itx, `/secrets/telegram-${bot}`);
+  await dropSecret(itx, `/secrets/telegram-webhook-${bot}`);
+  await itx.kv.put(`${REMOVED}${bot}`, new Date().toISOString());
   await itx.kv.delete(`${BOTS}${bot}`);
   await itx.kv.delete(keyOf(bot, "bot"));
-  await setRow(itx, INTEGRATION, bot, null);
+  await registerRemoval(itx, bot);
   await registerCard(itx, slug);
+}
+
+/** Takes a disconnected bot's row away, then its tombstone: it stands until the null row has
+ *  landed, so a failure here leaves the disconnect to finish. */
+async function registerRemoval(itx: TelegramItx, bot: string, key?: string): Promise<void> {
+  await setRow(itx, INTEGRATION, bot, null, key);
+  await itx.kv.delete(`${REMOVED}${bot}`);
 }
 
 /** The package's name on the Dash's Integrations page. */
@@ -252,9 +281,18 @@ export async function registerBot(
   );
 }
 
-/** The install hook's registration: the card and a row per bot in the list, each keyed by the
- *  triggering event (`at` is its path and offset), so a retry appends nothing new. */
+/** The install hook's registration, each fact keyed by the triggering event (`at` is its path and
+ *  offset), so a retry appends nothing new. First the disconnects that did not finish: a tombstone's
+ *  bot leaves the list if it is still there, then its null row lands, under a key of its own (the
+ *  row's may be spent on this event already). Then the card, and a row per bot in the list. */
 export async function registerAll(itx: TelegramItx, slug: string, at: string): Promise<void> {
+  for (const key of (await itx.kv.list(REMOVED)).keys) {
+    const bot = key.slice(REMOVED.length);
+    if (!BOT_NAME.test(bot)) continue;
+    await itx.kv.delete(`${BOTS}${bot}`);
+    await itx.kv.delete(keyOf(bot, "bot"));
+    await registerRemoval(itx, bot, `telegram:registry:removed:${bot}:${at}`);
+  }
   await registerCard(itx, slug, `telegram:registry:${at}`);
   for (const bot of await listBots(itx))
     await registerBot(itx, bot, slug, `telegram:registry:${bot}:${at}`);

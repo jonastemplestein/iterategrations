@@ -117,6 +117,11 @@ card and `integration/connection-configured` for each bot's row, connection `<bo
 registers both again after every publish, and again whenever a bot is connected or disconnected or
 someone is let in or out.
 
+Disconnect deletes the bot's two secrets first. One that cannot be deleted is shown as an error, and
+the bot stays listed, so Disconnect again can finish. A row the Dash could not be told to take away
+is taken away by Disconnect again, or at the next publish: until then `telegram/removed/<bot>` in the
+kv marks it.
+
 ## Good to know
 
 - **The token passes through the page once.** The form posts it to the project's own worker, which

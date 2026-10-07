@@ -10,6 +10,7 @@ import {
   placeholder,
   readJson,
   registerBot,
+  removing,
   say,
   keyOf,
   WELCOME,
@@ -217,6 +218,11 @@ export async function servePage(
     if (path === "connect") {
       const { username } = await connectBot(itx, field("token"), `${url.origin}${basePath}`, slug);
       return redirect(flash("connected", username));
+    }
+    // a bot whose disconnect did not finish is disconnected again, which finishes it
+    if (path === "disconnect" && BOT_NAME.test(bot) && (await removing(itx, bot))) {
+      await disconnectBot(itx, bot, slug);
+      return redirect();
     }
     const valid = BOT_NAME.test(bot) && (await listBots(itx)).includes(bot);
     if (!valid) return redirect(flash("error", "Unknown bot"));
