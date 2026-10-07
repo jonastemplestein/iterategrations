@@ -119,6 +119,11 @@ export type VoiceCall<Context> = {
    *  with `reason`, wait (at most 2 s) for the answer's last frames to arrive, and end the
    *  subscription. */
   hangUp(reason: string): Promise<void>;
+  /** The connection the call rode on is gone (`iterate provide` reconnected): carry the call on
+   *  `project`, the new connection's root. Microphone frames and the keepalive go there, and a new
+   *  subscription resumes after the last fact this one saw, so a `call-ended` or a transcript that
+   *  landed in the gap still arrives. The answer's audio from the gap is lost: it is ephemeral. */
+  moveTo(project: { cd(path: string): Context }): Promise<void>;
 };
 
 /** Place a call on `project` (a root whose `itx.voice` is installed). `client` names the caller
@@ -141,7 +146,10 @@ export async function startVoiceCall<
   ).join("");
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
   const streamPath = `/agents/voice/${client}/${stamp}-${activation}`;
-  const itx = project.cd(streamPath);
+  let itx = project.cd(streamPath);
+  /** The offset of the last stored event delivered: a moved call's subscription resumes after it. */
+  let lastOffset: number | undefined;
+  let moves = 0;
   const stats: VoiceCallStats = {
     micFramesSent: 0,
     micFramesDropped: 0,
@@ -151,17 +159,21 @@ export async function startVoiceCall<
     handshakeMs: null,
   };
   const callEnded = Promise.withResolvers<void>();
-  // THE PRESS, pipelined with the subscription: neither waits for the other's answer.
-  const [{ streamPath: settledPath }, subscription] = await Promise.all([
-    project.voice.setupVoiceAgent({ streamPath, activation }),
-    itx.subscribe({
-      name: `${client}-${activation}`,
+  const subscribeOn = (context: Context) =>
+    context.subscribe({
+      name: moves ? `${client}-${activation}-${String(moves)}` : `${client}-${activation}`,
       consumes: [
         "events.iterate.com/voice-agent/speaker-frame",
         ...VoiceCallFact.options.map((fact) => fact.shape.type.value),
       ],
+      ...(lastOffset !== undefined && { afterOffset: lastOffset }),
       target: (events) => {
         for (const event of events) {
+          const offset = (event as { offset?: unknown }).offset;
+          if (typeof offset === "number") {
+            if (lastOffset !== undefined && offset <= lastOffset) continue; // seen before a move
+            lastOffset = offset;
+          }
           const frame = SpeakerFrame.safeParse(event);
           if (frame.success) {
             if (frame.data.payload.activation !== activation) continue;
@@ -182,10 +194,15 @@ export async function startVoiceCall<
           onFact(fact.data);
         }
       },
-    }),
+    });
+  // THE PRESS, pipelined with the subscription: neither waits for the other's answer.
+  const [{ streamPath: settledPath }, firstSubscription] = await Promise.all([
+    project.voice.setupVoiceAgent({ streamPath, activation }),
+    subscribeOn(itx),
   ]);
   if (settledPath !== streamPath)
     throw new Error(`setupVoiceAgent answered ${settledPath} for ${streamPath}`);
+  let subscription = firstSubscription;
 
   const inFlight = new Set<Promise<unknown>>();
   let open = true;
@@ -195,7 +212,9 @@ export async function startVoiceCall<
       .catch(() => undefined);
   }, VOICE_CALL_KEEPALIVE_MS);
   return {
-    itx,
+    get itx() {
+      return itx;
+    },
     streamPath,
     activation,
     stats,
@@ -245,6 +264,17 @@ export async function startVoiceCall<
       } catch {
         // the session may already be gone
       }
+    },
+    async moveTo(next) {
+      if (!open) return;
+      try {
+        subscription[Symbol.dispose]();
+      } catch {
+        // the old connection is gone, and its subscription with it
+      }
+      itx = next.cd(streamPath);
+      moves += 1;
+      subscription = await subscribeOn(itx);
     },
   };
 }
