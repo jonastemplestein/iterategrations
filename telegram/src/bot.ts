@@ -1,5 +1,8 @@
+import { setCard, setRow, type Card } from "./registry.js";
+
 /** A bot's name in a URL, a secret path, a stream path and an agent path: `iterate_bot` is
- *  `iterate-bot`. It is made from the bot's username when the bot is connected. */
+ *  `iterate-bot`. It is made from the bot's username when the bot is connected. It is also the
+ *  bot's connection on the Dash's Integrations page. */
 export const BOT_NAME: RegExp = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 type Kv = {
@@ -14,7 +17,6 @@ export type TelegramItx = {
   fetch(request: Request): Promise<Response>;
   /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: Kv;
-  agents: { create(path: string): Promise<unknown> };
   secrets: {
     set(
       path: string,
@@ -27,14 +29,16 @@ export type TelegramItx = {
   cd(path: string): {
     append(event: {
       type: string;
-      idempotencyKey: string;
+      idempotencyKey?: string;
       payload: Record<string, unknown>;
     }): Promise<unknown>;
   };
 };
 
-/** What a project's code is handed to run: `(call) => { using itx = this.getItx(); return call(itx); }` */
-export type WithItx = <T>(call: (itx: TelegramItx) => T) => Promise<Awaited<T>>;
+/** The agents app's root, which the default delivery uses: the project installs the app
+ *  (`installAgents`, as the default template does). `TelegramItx` leaves it out because the scope
+ *  a worker hands a package is typed without installed apps (iterate/api `IterateContextApiWith`). */
+export type AgentsItx = { agents: { create(path: string): Promise<unknown> } };
 
 /** The stream each bot's updates are recorded on. */
 export const streamOf = (bot: string): string => `/integrations/telegram/${bot}`;
@@ -143,12 +147,14 @@ export async function listPeople<T>(
 }
 
 /** Connect a bot from the token @BotFather gave: check it, keep it as a secret, make the webhook
- *  secret (kept, never shown), and register `webhookBase/<name>` with Telegram. Connecting the same
- *  bot again rotates the webhook secret. Answers the bot's name here. */
+ *  secret (kept, never shown), register `webhookBase/<name>` with Telegram, and list the bot on the
+ *  Dash's Integrations page with links to `slug`'s page. Connecting the same bot again rotates the
+ *  webhook secret. Answers the bot's name here. */
 export async function connectBot(
   itx: TelegramItx,
   token: string,
   webhookBase: string,
+  slug: string,
 ): Promise<{ name: string; username: string }> {
   if (!/^\d+:[\w-]{20,}$/.test(token.trim()))
     throw new Error("That does not look like a bot token");
@@ -185,15 +191,73 @@ export async function connectBot(
   };
   await itx.kv.put(keyOf(name, "bot"), JSON.stringify(info));
   await itx.kv.put(`${BOTS}${name}`, me.username);
+  await registerBot(itx, name, slug);
+  await registerCard(itx, slug);
   return { name, username: me.username };
 }
 
-export async function disconnectBot(itx: TelegramItx, bot: string): Promise<void> {
+/** Disconnect a bot: its webhook, its two secrets, its place in the list, and its row on the
+ *  Dash's Integrations page. Who was let in stays, for a bot connected again. */
+export async function disconnectBot(itx: TelegramItx, bot: string, slug: string): Promise<void> {
   await api(itx, placeholder(bot), "deleteWebhook").catch(() => undefined);
   await itx.secrets.delete(`/secrets/telegram-${bot}`).catch(() => undefined);
   await itx.secrets.delete(`/secrets/telegram-webhook-${bot}`).catch(() => undefined);
   await itx.kv.delete(`${BOTS}${bot}`);
   await itx.kv.delete(keyOf(bot, "bot"));
+  await setRow(itx, INTEGRATION, bot, null);
+  await registerCard(itx, slug);
+}
+
+/** The package's name on the Dash's Integrations page. */
+const INTEGRATION = "telegram";
+
+/** The card: whether a bot is connected, and the button to the page. */
+const cardOf = (slug: string, connected: boolean): Card => ({
+  title: "Telegram",
+  description:
+    "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
+  status: connected ? { kind: "ok" } : { kind: "attention", text: "Connect a bot" },
+  actions: [{ label: connected ? "Manage" : "Connect", routingSlug: slug, path: "/_/" }],
+});
+
+/** Registers the card, as the connected bots make it. */
+export async function registerCard(itx: TelegramItx, slug: string, key?: string): Promise<void> {
+  await setCard(itx, INTEGRATION, cardOf(slug, (await listBots(itx)).length > 0), key);
+}
+
+/** Sets a connected bot's row: its username, a link to the page and one to the bot, and how many
+ *  people are let in. */
+export async function registerBot(
+  itx: TelegramItx,
+  bot: string,
+  slug: string,
+  key?: string,
+): Promise<void> {
+  const username = (await readJson<BotInfo>(itx, bot, "bot"))?.username;
+  const people = (await itx.kv.list(keyOf(bot, "allowed/"))).keys.length;
+  await setRow(
+    itx,
+    INTEGRATION,
+    bot,
+    {
+      account: `@${username ?? bot}`,
+      status: { kind: "ok" },
+      actions: [
+        { label: "Manage", routingSlug: slug, path: "/_/" },
+        ...(username ? [{ label: "Open", url: `https://t.me/${username}` }] : []),
+      ],
+      details: { "Let in": people === 1 ? "1 person" : `${people} people` },
+    },
+    key,
+  );
+}
+
+/** The install hook's registration: the card and a row per bot in the list, each keyed by the
+ *  triggering event (`at` is its path and offset), so a retry appends nothing new. */
+export async function registerAll(itx: TelegramItx, slug: string, at: string): Promise<void> {
+  await registerCard(itx, slug, `telegram:registry:${at}`);
+  for (const bot of await listBots(itx))
+    await registerBot(itx, bot, slug, `telegram:registry:${bot}:${at}`);
 }
 
 /** Let a person talk to the bot, by the number (never the username, which can change hands). */

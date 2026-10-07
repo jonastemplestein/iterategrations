@@ -1,25 +1,29 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: secrets, streams with a kv
 // at the root only (a sub-context has `append` and nothing else, as the platform's default-deny
-// rewrite rules make it), agents, appends that refuse a key used twice (as the platform does), and an
-// egress to a pretend Telegram that records every Bot API call.
+// rewrite rules make it), agents, appends that refuse a key used twice for another event (as the
+// platform does; the same event again is a no-op), and an egress to a pretend Telegram that records
+// every Bot API call. `host` is the worker hosting the package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
-import { serveTelegram } from "../dist/telegram.js";
+import { telegram } from "../dist/telegram.js";
 
 const BOT = "iterate-bot";
 const STREAM = `/integrations/telegram/${BOT}`;
 /** A key of the bot's state in the project's kv. */
 const K = (key: string): string => `telegram/${BOT}/${key}`;
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdef";
+const CONFIGURED = "events.iterate.com/integration/configured";
+const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
 
 type Call = { method: string; credential: string; body: any };
 
-function fakeProject(deliver?: "agents" | "events") {
+function fakeProject(deliver?: "agents" | "events", slug?: string) {
   const secrets: Record<string, unknown> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
   const agents: string[] = [];
   const calls: Call[] = [];
+  const scopes = { opened: 0, disposed: 0 };
   let readsAll = false; // Telegram's privacy mode: on until the bot is an admin or it is switched off
   const itx: any = {
     secrets: {
@@ -40,10 +44,14 @@ function fakeProject(deliver?: "agents" | "events") {
     },
     cd: (path: string) => ({
       append: async (event: any) => {
-        if (
-          appended.some((a) => a.path === path && a.event.idempotencyKey === event.idempotencyKey)
-        )
-          throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
+        const earlier = appended.find(
+          (a) =>
+            a.path === path &&
+            event.idempotencyKey !== undefined &&
+            a.event.idempotencyKey === event.idempotencyKey,
+        );
+        if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
+        if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
         appended.push({ path, event });
       },
     }),
@@ -68,20 +76,21 @@ function fakeProject(deliver?: "agents" | "events") {
       return Response.json({ ok: true, result: true });
     },
   };
-  const withItx = async (call: (itx: any) => unknown) => call(itx);
-  const serve = async (request: Request, requireMember: (r: Request) => Response | null) => {
-    const res = await serveTelegram(request, { withItx: withItx as any, requireMember, deliver });
-    assert.ok(res, "a request on the telegram slug is answered");
-    return res;
-  };
+  const integration = telegram({ deliver, slug });
+  const host = (requireMember: (request: Request) => Response | null) => ({
+    getItx: () => {
+      scopes.opened++;
+      return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
+    },
+    auth: { require: requireMember },
+  });
+  const serve = (request: Request, requireMember: (r: Request) => Response | null) =>
+    integration.fetch!(request, host(requireMember));
   const hook = async (path: string, body: unknown, token: string | null = "s3cret") =>
     serve(
       new Request(`https://telegram--iterate.example${path}`, {
         method: "POST",
-        headers: {
-          "x-iterate-routing-slug": "telegram",
-          ...(token === null ? {} : { "x-telegram-bot-api-secret-token": token }),
-        },
+        headers: token === null ? {} : { "x-telegram-bot-api-secret-token": token },
         body: typeof body === "string" ? body : JSON.stringify(body),
       }),
       () => null,
@@ -101,24 +110,33 @@ function fakeProject(deliver?: "agents" | "events") {
     serve(
       new Request(`https://telegram--iterate.example${path}`, {
         method: init.form ? "POST" : "GET",
-        headers: {
-          "x-iterate-routing-slug": "telegram",
-          "x-iterate-base-path": "",
-          ...init.headers,
-        },
+        headers: { "x-iterate-base-path": "", ...init.headers },
         body: init.form ? new URLSearchParams(init.form) : undefined,
       }),
       requireMember,
     );
+  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  const publish = (offset: number) =>
+    integration.processEvent!({
+      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      itx,
+    });
+  /** What was registered on `/integrations` for the Dash, in order. */
+  const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
   return {
+    integration,
+    itx,
     secrets,
     kv,
     appended,
     agents,
     calls,
+    scopes,
     hook,
     connected,
     page,
+    publish,
+    registry,
     readsAll: (on: boolean) => void (readsAll = on),
   };
 }
@@ -139,36 +157,22 @@ const agentEvents = (project: ReturnType<typeof fakeProject>) =>
 const ME = { name: "Jonas", username: "jonas", at: "x" };
 const WIFE = { name: "Wife", username: "wife", at: "x" };
 
-// ---------------------------------------------------------------- partial fetch
+// ------------------------------------------------------------- the integration
 
-test("it is a partial fetch: a request that is not on the telegram slug is null, touching nothing", async () => {
+test("it answers its own routing slug, telegram unless another is given", () => {
+  assert.equal(telegram().routingSlug, "telegram");
+  assert.equal(telegram({ slug: "tg" }).routingSlug, "tg");
+});
+
+test("each request opens one scope and releases it; a page refused to a non-member opens none", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  const touched: string[] = [];
-  const options = {
-    withItx: (async () => void touched.push("itx")) as any,
-    requireMember: () => void touched.push("auth") as never,
-  };
-  for (const headers of [
-    {},
-    { "x-iterate-routing-slug": "pebble" },
-    { "x-iterate-routing-slug": "telegram-x" },
-  ])
-    for (const path of ["/_/", `/${BOT}`, "/"])
-      assert.equal(
-        await serveTelegram(
-          new Request(`https://x.example${path}`, { method: "POST", headers }),
-          options,
-        ),
-        null,
-      );
-  assert.deepEqual(touched, []);
-  // and the slug can be another
-  const other = await serveTelegram(
-    new Request(`https://x.example/${BOT}`, { headers: { "x-iterate-routing-slug": "tg" } }),
-    { ...options, slug: "tg" },
-  );
-  assert.equal(other!.status, 405);
+  await project.hook(`/${BOT}`, { update_id: 1, message: message() });
+  await project.page("/_/");
+  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+  const refused = await project.page("/_/", {}, () => new Response("Sign in\n", { status: 401 }));
+  assert.equal(refused.status, 401);
+  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
 });
 
 // ---------------------------------------------------------------- webhook
@@ -379,7 +383,7 @@ test("in a group a stranger who addresses the bot waits on the page and gets no 
 
 // ------------------------------------------------------------------- page
 
-test("the page is for members: whatever requireMember answers is sent, and nothing is read or written", async () => {
+test("the page is for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
   const project = fakeProject();
   const refused = new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
@@ -391,6 +395,7 @@ test("the page is for members: whatever requireMember answers is sent, and nothi
   }
   assert.deepEqual(project.secrets, {});
   assert.deepEqual(project.calls, []);
+  assert.equal(project.scopes.opened, 0);
 });
 
 test("with no bot the page shows the BotFather steps and the token form", async () => {
@@ -722,4 +727,141 @@ test("the package exports what a project needs to send its own answers: api, pla
   assert.ok(pieces.length >= 2 && pieces.every((p: string) => p.length <= 4096));
   assert.equal(pieces.join("\n"), long);
   assert.ok(lib.splitText("😀".repeat(3000)).every((p: string) => !/[\ud800-\udbff]$/.test(p)));
+});
+
+// --------------------------------------------- the Dash's Integrations page
+
+const card = (status: object, label: string, routingSlug = "telegram") => ({
+  title: "Telegram",
+  description:
+    "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
+  status,
+  actions: [{ label, routingSlug, path: "/_/" }],
+});
+const row = (people: string, routingSlug = "telegram") => ({
+  account: "@Iterate_Bot",
+  status: { kind: "ok" },
+  actions: [
+    { label: "Manage", routingSlug, path: "/_/" },
+    { label: "Open", url: "https://t.me/Iterate_Bot" },
+  ],
+  details: { "Let in": people },
+});
+
+test("the install hook registers the card and a row per bot it knows, keyed by the event's path and offset: a retry appends nothing new", async () => {
+  const project = fakeProject();
+  await project.connected({ 42: ME, 77: WIFE });
+  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "telegram:registry:/@5",
+      payload: { integration: "telegram", card: card({ kind: "ok" }, "Manage") },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: `telegram:registry:${BOT}:/@5`,
+      payload: { integration: "telegram", connection: BOT, row: row("2 people") },
+    },
+  ]);
+  // every publish registers again, so a registry that was emptied heals
+  await project.publish(9);
+  assert.deepEqual(
+    project.registry().map((event) => event.idempotencyKey),
+    [
+      "telegram:registry:/@5",
+      `telegram:registry:${BOT}:/@5`,
+      "telegram:registry:/@9",
+      `telegram:registry:${BOT}:/@9`,
+    ],
+  );
+});
+
+test("with no bot the card asks for one; a hook retried after a change does not fail, and the change registered itself", async () => {
+  const project = fakeProject();
+  await project.publish(5);
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "telegram:registry:/@5",
+      payload: {
+        integration: "telegram",
+        card: card({ kind: "attention", text: "Connect a bot" }, "Connect"),
+      },
+    },
+  ]);
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.publish(5); // the same event again, now with a bot: its card's key is spent
+  assert.deepEqual(
+    project.registry().map((event) => [event.type, event.idempotencyKey]),
+    [
+      [CONFIGURED, "telegram:registry:/@5"],
+      [CONNECTION_CONFIGURED, undefined],
+      [CONFIGURED, undefined],
+      [CONNECTION_CONFIGURED, `telegram:registry:${BOT}:/@5`],
+    ],
+  );
+});
+
+test("connecting a bot registers its row and the card again; letting people in or out updates the row; disconnecting removes it", async () => {
+  const project = fakeProject();
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: { integration: "telegram", connection: BOT, row: row("0 people") },
+    },
+    {
+      type: CONFIGURED,
+      payload: { integration: "telegram", card: card({ kind: "ok" }, "Manage") },
+    },
+  ]);
+
+  // someone waits, and is let in on the page; then an invite lets in another
+  const secret = (project.secrets[`/secrets/telegram-webhook-${BOT}`] as any).material;
+  await project.hook(`/${BOT}`, { update_id: 1, message: message({}, { id: 555 }) }, secret);
+  await project.page("/_/allow", { form: { bot: BOT, id: "555" } });
+  assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "1 person" });
+  const made = await project.page("/_/invite", { form: { bot: BOT } });
+  const code = new URL(made.headers.get("location")!, "https://x.example/_/").searchParams.get(
+    "invite",
+  );
+  await project.hook(
+    `/${BOT}`,
+    { update_id: 2, message: message({ text: `/start ${code}` }, { id: 77 }) },
+    secret,
+  );
+  assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "2 people" });
+  await project.page("/_/remove", { form: { bot: BOT, id: "555" } });
+  assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "1 person" });
+
+  const before = project.registry().length;
+  await project.page("/_/disconnect", { form: { bot: BOT } });
+  assert.deepEqual(project.registry().slice(before), [
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: { integration: "telegram", connection: BOT, row: null },
+    },
+    {
+      type: CONFIGURED,
+      payload: {
+        integration: "telegram",
+        card: card({ kind: "attention", text: "Connect a bot" }, "Connect"),
+      },
+    },
+  ]);
+});
+
+test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
+  const project = fakeProject(undefined, "tg");
+  await project.page("/_/connect", { form: { token: TOKEN } });
+  assert.deepEqual(project.registry()[0]!.payload.row, row("0 people", "tg"));
+  assert.deepEqual(project.registry()[1]!.payload.card, card({ kind: "ok" }, "Manage", "tg"));
+  const before = project.appended.length;
+  for (const type of ["telegram/update", "events.iterate.com/agent/context-added"])
+    await project.integration.processEvent!({
+      event: { type, path: STREAM, offset: 3 },
+      itx: project.itx,
+    });
+  assert.equal(project.appended.length, before);
 });

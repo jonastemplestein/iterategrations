@@ -3,11 +3,12 @@
 A Telegram bot for an iterate project, with a **Connect Telegram** page of its own. People write to the
 bot in a private chat, or in a group, and each chat has an agent that answers.
 
-It is project code: one partial `fetch`, `serveTelegram`, in the project's config worker, and `fetch`
-and nothing else. The project never sends the bot's token anywhere but api.telegram.org. The token is
-kept as a secret, and iterate's egress swaps it in: the agent only ever sends a placeholder naming
-the secret. Telegram puts the token in the URL path (`/bot<token>/<method>`), so the placeholder
-goes there.
+It is project code: one element, `telegram()`, in the `integrations` array of the project's config
+worker, which hands it the requests on the project's `telegram` routing slug, and every event. It
+reaches Telegram with `fetch` alone. The project never sends the bot's token anywhere but
+api.telegram.org. The token is kept as a secret, and iterate's egress swaps it in: the agent only
+ever sends a placeholder naming the secret. Telegram puts the token in the URL path
+(`/bot<token>/<method>`), so the placeholder goes there.
 
 - **The page** (members only, at the project's `telegram` address, `/_/`): the BotFather steps, a form
   for the token, invite links, the people waiting to be let in, who is in, and a Disconnect button.
@@ -19,46 +20,42 @@ goes there.
   rest as context.
 - **Invites:** a one-time link, `t.me/<bot>?start=<code>`. The person opens it and taps Start. The bot
   says "You're in." Nobody types a user id. That is how a wife, a colleague or a second phone joins.
+- **The Dash:** the project's Integrations page shows a Telegram card ("Connect a bot" until there is
+  one) and a row per bot: its username, how many people are let in, and buttons to the page and to
+  the bot in Telegram.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one branch of `fetch`.
+never take a secret in chat). The only code to commit is one dependency and one element of
+`worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
 Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
-(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
-`worker.ts`, probes the result as a worker, and commits it. `serveTelegram` is a partial `fetch`: it
-answers the requests that are Telegram's (the project's `telegram` routing slug) and returns `null` for
-every other, so the branch is the same four lines wherever it goes.
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `telegram()` to the
+`integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-telegram";
-const SLUG = "telegram";
-const IMPORT = 'import { serveTelegram } from "iterate-telegram";';
-const BRANCH = `const telegramResponse = await serveTelegram(request, {
-  withItx: async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
-    using itx = this.getItx();
-    return await call(itx);
-  },
-  requireMember: (request) => this.auth.require(request),
-});
-if (telegramResponse) return telegramResponse;`;
+const IMPORT = 'import { telegram } from "iterate-telegram";';
+const ELEMENT = "telegram()";
 const MEMBER = "";
 const FILES = {};
 ```
 
-The project must have the agents app installed (`installAgents`, as the default template does). Check
-that the receiver is live. It answers a path it does not know with `404`, and that is the proof:
+`telegram({ slug: "tg" })` answers another routing slug, and `telegram({ deliver: "events" })` hands
+each message to the project's own agents (below). The project must have the agents app installed
+(`installAgents`, as the default template does). Check that it is live. The webhook takes only
+`POST`, so a `GET` is answered `405`, and that is the proof:
 
 ```js
 async (itx) => {
   const url = await itx.url({ routingSlug: "telegram", path: "/nope" });
-  const res = await itx.fetch(new Request(url, { method: "POST" }));
-  return { url, status: res.status }; // 404 = the receiver is there and refused. Anything else: not published yet
+  const res = await itx.fetch(new Request(url));
+  return { url, status: res.status }; // 405 = the package is there. 404: not published yet
 };
 ```
 
@@ -115,6 +112,11 @@ state is in the project's own `kv` (the root's; a sub-context has none): `telegr
 `telegram/<bot>/allowed/<user id>`, `telegram/<bot>/pending/<user id>`, `telegram/<bot>/invite/<code>`,
 and `telegram/bots/<bot>` for each connected bot.
 
+What the Dash lists is on `/integrations` (iterate/integrations): `integration/configured` for the
+card and `integration/connection-configured` for each bot's row, connection `<bot>`. The package
+registers both again after every publish, and again whenever a bot is connected or disconnected or
+someone is let in or out.
+
 ## Good to know
 
 - **The token passes through the page once.** The form posts it to the project's own worker, which
@@ -139,8 +141,9 @@ and `telegram/bots/<bot>` for each connected bot.
 ## When the project has agents of its own
 
 By default each chat gets an agent here, and the agent answers by calling the Bot API. A project with
-agents of its own (a chief of staff that already answers WhatsApp, say) passes `deliver: "events"`
-to `serveTelegram`. The package then keeps the door: who is let in, invites, welcomes, who waits.
+agents of its own (a chief of staff that already answers WhatsApp, say) lists
+`telegram({ deliver: "events" })` instead. The package then keeps the door: who is let in, invites,
+welcomes, who waits.
 For each message from someone who is let in it records `telegram/message-accepted` on
 `/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The project routes that event
 to its agents and sends their answers itself, with `api`, `placeholder` and `splitText`, which the
