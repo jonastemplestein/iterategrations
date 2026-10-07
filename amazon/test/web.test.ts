@@ -135,6 +135,44 @@ test("visible address choice may change; hidden authentication fields cannot", a
   assert.equal(body.get("addressID"), "b");
   assert.equal(body.get("requestToken"), "secret");
 });
+test("consumer checkout confirms the saved card with private widget fields and public context", async () => {
+  const payment = `<html><head><meta name="anti-csrftoken-a2z" content="private-page-csrf"></head><body><p>Test Mastercard 4242</p><form method="post" action="/checkout/p/p-test/pay/continue?referrer=cart&amp;cartItemCount=1"><input type="hidden" name="ppw-widgetState" value="private-widget-state"><input type="hidden" name="ppw-widgetRequest" value="private-widget-request"><input type="hidden" name="ppw-jsEnabled" value="true"></form></body></html>`;
+  const { api, calls } = fake((request) => {
+    const path = new URL(request.url).pathname;
+    if (path === "/gp/cart/view.html") return new Response(basket);
+    if (request.method === "POST")
+      return Response.json({ panels: [{ id: "checkout-review", content: review() }] });
+    return new Response(payment);
+  });
+  const checkout = await api.startCheckout();
+  assert.equal(checkout.stage, "payment");
+  assert.equal(checkout.forms[0]?.purpose, "pay/continue");
+  assert(!JSON.stringify(checkout).includes("private-"));
+  const refreshed = await api.getCheckout({ step: "payment" });
+  assert.equal(refreshed.stage, "payment");
+  await assert.rejects(
+    api.continueCheckout({
+      checkoutId: refreshed.id,
+      formId: 0,
+      values: { "ppw-widgetRequest": "another-card" },
+    }),
+    /invalid_checkout_field/,
+  );
+  const approved = await api.continueCheckout({ checkoutId: refreshed.id, formId: 0 });
+  assert.equal(approved.readyToOrder, true);
+  assert.equal(approved.totalPence, 1089);
+  const sent = calls.find((request) => request.method === "POST")!;
+  assert.equal(new URL(sent.url).pathname, "/checkout/p/p-test/pay/continue");
+  const body = new URLSearchParams(await sent.text());
+  assert.equal(body.get("ppw-widgetState"), "private-widget-state");
+  assert.equal(body.get("ppw-widgetRequest"), "private-widget-request");
+  assert.equal(body.get("pipelineType"), "Chewbacca");
+  assert.equal(body.get("cartItemCount"), "1");
+  assert.equal(body.get("referrer"), "cart");
+  assert.equal(sent.headers.get("anti-csrftoken-a2z"), "private-page-csrf");
+  assert(!JSON.stringify(approved).includes("private-"));
+  assert.equal(calls.filter((request) => request.method === "POST").length, 1);
+});
 test("purchase checks cap, exact total and a freshly unchanged review", async () => {
   let changed = false;
   const { api, calls } = fake(
