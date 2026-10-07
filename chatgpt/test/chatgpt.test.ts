@@ -161,6 +161,9 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   let html = await res.text();
   assert.match(html, /Connect ChatGPT/);
   assert.match(res.headers.get("content-security-policy")!, /default-src 'none'/);
+  // no other site can frame it
+  assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
 
   res = await project.page("/start", { method: "POST" });
   assert.equal(res.status, 303);

@@ -199,7 +199,10 @@ export async function servePage(
       {
         headers: {
           ...html,
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'`,
+          // no other site may frame it: a framed form would post from this origin and pass the
+          // member gate (default-src does not cover frame-ancestors)
+          "x-frame-options": "DENY",
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );

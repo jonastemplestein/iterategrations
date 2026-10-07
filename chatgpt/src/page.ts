@@ -110,7 +110,10 @@ export async function servePage(
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'`,
+          // no other site may frame it: a framed form would post from this origin and pass the
+          // member gate (default-src does not cover frame-ancestors)
+          "x-frame-options": "DENY",
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );

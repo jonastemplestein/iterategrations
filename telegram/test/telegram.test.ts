@@ -424,6 +424,9 @@ test("with no bot the page shows the BotFather steps and the token form", async 
   assert.match(html, /<form method="post" action="connect">/);
   assert.match(res.headers.get("content-security-policy")!, /form-action 'self'/);
   assert.match(res.headers.get("content-security-policy")!, /script-src 'nonce-[A-Za-z0-9+/=]+'/);
+  // no other site can frame it
+  assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
   // without its slash the page's relative links would lead off it
   const bare = await project.page("/_");
   assert.equal(bare.status, 308);
