@@ -1,6 +1,6 @@
 # Adding a package to a project
 
-The recipes for `pebble/`, `waitrose/`, `monzo/`, `jmap/` and `telegram/` all end the same way: the
+The recipes for `pebble/`, `waitrose/`, `monzo/`, `jmap/`, `telegram/` and `chatgpt/` all end the same way: the
 package goes into the project's config repo (`/repos/config`), as a dependency and as a few lines in
 `worker.ts`. This is the one script that does it, so a recipe gives only its own values.
 
