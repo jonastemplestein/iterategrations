@@ -4,6 +4,7 @@ packages:
   - monzo
   - whatsapp
   - whatsapp-calls
+  - phone-calls
   - herdr
   - jmap
   - telegram
