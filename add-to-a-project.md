@@ -7,6 +7,7 @@ so a recipe gives only its own values.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
+To write and publish a package of your own, read [adding-an-integration.md](adding-an-integration.md).
 
 ## What it does
 

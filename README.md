@@ -33,7 +33,8 @@ project's root). How an integration reaches a project depends on what it is:
   page. [`add-to-a-project.md`](add-to-a-project.md) is the one script that pins it (a full pkg.pr.new
   commit), adds it to `package.json` and the array, probes the patched repo as a worker, commits it and
   waits for the platform to publish. Each recipe gives the values to put in its first block, then what
-  to do next (a secret, a webhook, a page).
+  to do next (a secret, a webhook, a page). Writing and publishing a package of your own:
+  [`adding-an-integration.md`](adding-an-integration.md).
 - **Lent from your own computer** (WhatsApp, WhatsApp calls, Herdr: "run with `iterate provide`"): one
   command lends it to the project as `itx.<name>`. Each recipe says what to run and has a sample call.
 - **Through zero-trust-mcp** (Monzo's sign-in, Yoto): [`zero-trust-mcp.md`](zero-trust-mcp.md) connects
