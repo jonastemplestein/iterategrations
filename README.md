@@ -16,13 +16,14 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`herdr/`](herdr)                   | none: a Herdr plugin, or `iterate provide` | Your Herdr as `itx.jonas.herdr`: one `call(method, params)` for Herdr's whole socket API, and its events on a stream (news durable, focus ephemeral). |
 | [`jmap/`](jmap)                     | `iterate-jmap`                             | A mailbox over JMAP (Fastmail by default): send from it (filed in Sent), search, threads; and Fastmail Masked Email, throwaway addresses on demand.   |
 | [`telegram/`](telegram)             | `iterate-telegram`                         | A Telegram bot with its own Connect Telegram page: private chats and groups, each handed to an agent; invite links to let people in.                  |
+| [`chatgpt/`](chatgpt)               | `iterate-chatgpt`                          | Bring your own ChatGPT: a Connect ChatGPT page, and model requests paid by the subscription instead of an API key.                                    |
 
 ## Adding one to a project
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root). How an integration reaches a project depends on what it is:
 
-- **A package** (`iterate-…` in the table: Pebble, Waitrose, Monzo, JMAP, Telegram) runs in the
+- **A package** (`iterate-…` in the table: Pebble, Waitrose, Monzo, JMAP, Telegram, ChatGPT) runs in the
   project's own config worker. [`add-to-a-project.md`](add-to-a-project.md) is the one script that
   pins it (a full pkg.pr.new commit), adds it to `package.json` and `worker.ts`, probes the patched repo
   as a worker, commits it and waits for the platform to publish. Each recipe gives the values to put in
