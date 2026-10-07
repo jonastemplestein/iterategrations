@@ -147,6 +147,35 @@ type server struct {
 
 	ready      sync.Once
 	registered chan struct{} // closed once the registration loop has unregistered (or never registered)
+
+	// registrar is the one address ("ip:port") REGISTER and placed calls go to while a registration
+	// lasts. The registrar's name has two servers, and a nonce from one is refused by the other: a
+	// request challenged by one and retried at the other failed, so a refresh lapsed every few
+	// minutes (2026-10-07).
+	registrar atomic.Value
+}
+
+// destination answers where requests go: the test's Proxy, else the registration's registrar.
+func (s *server) destination() string {
+	if s.conf.Proxy != "" {
+		return s.conf.Proxy
+	}
+	registrar, _ := s.registrar.Load().(string)
+	return registrar
+}
+
+// pickRegistrar picks one of the registrar's addresses, IPv4 first, for the next registration.
+func (s *server) pickRegistrar() (string, error) {
+	if s.conf.Proxy != "" {
+		return s.conf.Proxy, nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(s.ctx, "ip4", s.conf.Domain)
+	if err != nil || len(ips) == 0 {
+		return "", fmt.Errorf("resolve the registrar %s: %w", s.conf.Domain, err)
+	}
+	registrar := net.JoinHostPort(ips[0].String(), "5060")
+	s.registrar.Store(registrar)
+	return registrar, nil
 }
 
 func newID() string {
@@ -203,18 +232,22 @@ func (s *server) registerLoop() {
 	recipient := sip.Uri{Scheme: "sip", User: s.conf.Number, Host: s.conf.Domain}
 	pause := 5 * time.Second
 	for {
-		t, err := s.dg.RegisterTransaction(s.ctx, recipient, diago.RegisterOptions{
-			Username:  s.conf.Number,
-			Password:  s.conf.Password,
-			ProxyHost: s.conf.Proxy,
-			Expiry:    s.conf.Expiry,
-		})
+		var t *diago.RegisterTransaction
+		registrar, err := s.pickRegistrar()
+		if err == nil {
+			t, err = s.dg.RegisterTransaction(s.ctx, recipient, diago.RegisterOptions{
+				Username:  s.conf.Number,
+				Password:  s.conf.Password,
+				ProxyHost: registrar,
+				Expiry:    s.conf.Expiry,
+			})
+		}
 		if err == nil {
 			err = t.Register(s.ctx)
 		}
 		if err == nil {
 			pause = 5 * time.Second
-			s.log.Info().Str("registrar", s.conf.Domain).Str("contact", t.Origin.Contact().Address.String()).Msg("registered (200 OK to REGISTER)")
+			s.log.Info().Str("registrar", s.conf.Domain).Str("at", registrar).Str("contact", t.Origin.Contact().Address.String()).Msg("registered (200 OK to REGISTER)")
 			s.ready.Do(func() { s.emit(map[string]any{"event": "ready", "self": s.conf.Number}) })
 			err = s.keepRegistered(t)
 			if s.ctx.Err() != nil {
@@ -572,8 +605,8 @@ func (s *server) place(target string, ring time.Duration) {
 		return
 	}
 	defer d.Close()
-	if s.conf.Proxy != "" {
-		d.InviteRequest.SetDestination(s.conf.Proxy)
+	if destination := s.destination(); destination != "" {
+		d.InviteRequest.SetDestination(destination)
 	}
 	ringing, cancel := context.WithCancel(s.ctx)
 	defer cancel()

@@ -107,6 +107,8 @@ type CallMetrics = {
   voiceEnds: string[];
   /** The bridge's own count: frames (20 ms) played and heard, gaps in an answer, the deepest queue. */
   bridge: Record<string, number> | null;
+  /** Times the lend's link to the project was lost mid-call and the call carried over to the new one. */
+  linkMoves: number;
 };
 
 type Placed = { callId: string; ringing: true; streamPath: string };
@@ -134,6 +136,14 @@ type ActiveCall = {
   over: boolean;
   placed: PromiseWithResolvers<Placed> | null;
   noted: Promise<void> | null;
+  /** THE GOODBYE BACKSTOP's state: whether the latest thing each side said was a goodbye, when the
+   *  voice's queued answer ends, when the person last made a sound, and the pending hang-up. */
+  personSaidBye: boolean;
+  voiceSaidBye: boolean;
+  voicePlaysUntil: number;
+  personHeardAt: number;
+  byeTimer: ReturnType<typeof setTimeout> | null;
+  endedAfterGoodbyes: boolean;
 };
 
 /** A line of `jeeves-phone serve`'s stdout (serve.go). */
@@ -286,10 +296,17 @@ const newCall = (
     speakerMs: 0,
     voiceEnds: [],
     bridge: null,
+    linkMoves: 0,
   },
   over: false,
   placed: null,
   noted: null,
+  personSaidBye: false,
+  voiceSaidBye: false,
+  voicePlaysUntil: 0,
+  personHeardAt: 0,
+  byeTimer: null,
+  endedAfterGoodbyes: false,
 });
 
 /** The project's note for this caller's next call: the phone's own key, else WhatsApp's. */
@@ -310,6 +327,67 @@ async function takeNote(project: Project, current: ActiveCall): Promise<void> {
     } catch (error) {
       console.error(`phone-calls: the note ${key} was not read: ${String(error)}`);
     }
+  }
+}
+
+/** A goodbye, in what either side says. */
+const GOODBYE =
+  /\b(good-?bye|bye(-bye)?|cheerio|ta-ra|see (you|ya)|(speak|talk) (to you )?(soon|later)|good ?night)\b/i;
+/** How long the line stays quiet after the voice's goodbye has played before the backstop hangs up. */
+const GOODBYE_GRACE_MS = 2_500;
+/** A microphone frame louder than this (mean absolute PCM16 sample) is the person making a sound. */
+const PERSON_SOUND_LEVEL = 700;
+
+/** THE GOODBYE BACKSTOP. The voice's model is told to end the call itself once goodbyes are said,
+ *  and sometimes does not: on 2026-10-07 it said "Bye" back and stayed on the line until the
+ *  person asked it to hang up. So once the latest thing each side said is a goodbye, the call is
+ *  hung up when the voice's goodbye has played and the line has been quiet for a moment. Anything
+ *  else either side says calls it off; a sound from the person puts it off. */
+function armGoodbye(current: ActiveCall): void {
+  if (current.byeTimer) clearTimeout(current.byeTimer);
+  current.byeTimer = null;
+  if (
+    !current.personSaidBye ||
+    !current.voiceSaidBye ||
+    current.answeredAt === null ||
+    current.over
+  )
+    return;
+  const wait = Math.max(0, current.voicePlaysUntil - Date.now()) + GOODBYE_GRACE_MS;
+  current.byeTimer = setTimeout(() => {
+    current.byeTimer = null;
+    if (current.over || !current.personSaidBye || !current.voiceSaidBye) return;
+    if (Date.now() - current.personHeardAt < GOODBYE_GRACE_MS) return armGoodbye(current);
+    console.error(`phone-calls: both sides said goodbye to ${current.who}; hanging up`);
+    current.endedAfterGoodbyes = true;
+    tell({ hangup: true });
+  }, wait);
+}
+
+/** Mean absolute sample of a frame of 16-bit little-endian PCM, base64. */
+function soundLevel(pcm: string): number {
+  const bytes = Buffer.from(pcm, "base64");
+  let sum = 0;
+  for (let i = 0; i + 1 < bytes.length; i += 2) sum += Math.abs(bytes.readInt16LE(i));
+  return bytes.length >= 2 ? sum / (bytes.length / 2) : 0;
+}
+
+/** The lend's link to the project was lost and `iterate provide` reconnected: the call in progress
+ *  carries over to the new link, so it does not go silent. Jeeves's links are dropped every few
+ *  minutes (the platform Worker's isolate is shed, 2026-10-07). */
+async function carryOver(current: ActiveCall, project: Project): Promise<void> {
+  if (current.over) return;
+  current.metrics.linkMoves += 1;
+  const voice = current.voice;
+  if (!voice) return; // a voice being connected times out on its own
+  console.error(
+    `phone-calls: the link was lost mid-call with ${current.who}; carrying the call over`,
+  );
+  try {
+    await voice.moveTo(project);
+  } catch (error) {
+    console.error(`phone-calls: the call could not be carried over (${String(error)}); hanging up`);
+    tell({ hangup: true });
   }
 }
 
@@ -337,9 +415,17 @@ async function connectVoice(
       if (current.voice !== mine) return;
       // nobody is listening until the call is answered: what the voice says before is dropped
       if (current.answeredAt === null) return;
-      if (frame.clearSpeakerBufferBeforeFrame) tell({ clear: true });
-      if (frame.pcm) tell({ pcm: frame.pcm, ...(frame.lastFrameOfAnswer && { last: true }) });
-      else if (frame.lastFrameOfAnswer) tell({ last: true });
+      if (frame.clearSpeakerBufferBeforeFrame) {
+        tell({ clear: true });
+        current.voicePlaysUntil = Date.now();
+      }
+      if (frame.pcm) {
+        tell({ pcm: frame.pcm, ...(frame.lastFrameOfAnswer && { last: true }) });
+        // PCM16 at 16 kHz is 32 bytes a millisecond; base64 carries 3 bytes in every 4 characters
+        const ms = (frame.pcm.replace(/=+$/, "").length * 3) / 4 / 32;
+        current.voicePlaysUntil = Math.max(Date.now(), current.voicePlaysUntil) + ms;
+        if (current.byeTimer) armGoodbye(current);
+      } else if (frame.lastFrameOfAnswer) tell({ last: true });
     },
     onFact: (fact) => {
       if (fact.type === "events.iterate.com/voice-agent/conversation-accepted") accepted.resolve();
@@ -347,10 +433,16 @@ async function connectVoice(
         console.error(
           `phone-calls: the live model reported: ${fact.payload.message.slice(0, 300)}`,
         );
-      if (fact.type === "events.iterate.com/voice-agent/utterance-transcribed")
+      if (fact.type === "events.iterate.com/voice-agent/utterance-transcribed") {
         current.said.push(`Person: ${fact.payload.text}`);
-      if (fact.type === "events.iterate.com/voice-agent/answer-transcribed")
+        current.personSaidBye = GOODBYE.test(fact.payload.text);
+        armGoodbye(current);
+      }
+      if (fact.type === "events.iterate.com/voice-agent/answer-transcribed") {
         current.said.push(`Voice: ${fact.payload.text}`);
+        current.voiceSaidBye = GOODBYE.test(fact.payload.text);
+        armGoodbye(current);
+      }
       if (
         fact.type !== "events.iterate.com/voice-agent/call-ended" ||
         current.voice !== mine ||
@@ -371,7 +463,8 @@ async function connectVoice(
         return;
       }
       console.error(`phone-calls: the voice ended (${reason}); reconnecting it`);
-      connectVoice(project, current, true).catch((error: unknown) => {
+      // the newest link: the one this voice started on may have been replaced since
+      connectVoice(itx ?? project, current, true).catch((error: unknown) => {
         console.error(`phone-calls: the voice could not be reconnected: ${String(error)}`);
         tell({ hangup: true });
       });
@@ -439,6 +532,7 @@ async function connectVoice(
 async function finished(current: ActiveCall, reason: string, answered: boolean): Promise<void> {
   if (current.over) return;
   current.over = true;
+  if (current.byeTimer) clearTimeout(current.byeTimer);
   if (active === current) active = null;
   if (itx) clearBusy(itx);
   current.placed?.reject(new Error(`The call could not be placed (${reason}).`));
@@ -457,6 +551,7 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
     ...(current.test && { test: true }),
     answered,
     reason,
+    ...(current.endedAfterGoodbyes && { endedAfterGoodbyes: true }),
     seconds,
     streamPath: current.streamPaths.at(-1) ?? null,
     streamPaths: current.streamPaths,
@@ -588,7 +683,10 @@ async function incoming(event: BridgeEvent): Promise<void> {
 function onBridgeEvent(event: BridgeEvent): void {
   const current = active;
   if (event.event === "mic") {
-    if (event.pcm) current?.voice?.sendMicFrame(event.pcm);
+    if (!event.pcm || !current) return;
+    current.voice?.sendMicFrame(event.pcm);
+    if (current.byeTimer && soundLevel(event.pcm) > PERSON_SOUND_LEVEL)
+      current.personHeardAt = Date.now();
     return;
   }
   if (event.event === "ready") {
@@ -679,7 +777,9 @@ function startBridge(): void {
 }
 
 export default async function provide(connection: { itx: Project }) {
+  const reconnected = itx !== undefined;
   itx = connection.itx;
+  if (reconnected && active) void carryOver(active, connection.itx);
   // `iterate provide` calls this again on each reconnection: the line stays as it is
   if (!bridgeStarted) startBridge();
   bridgeStarted = true;
@@ -705,7 +805,7 @@ export default async function provide(connection: { itx: Project }) {
         : null;
     },
     __describe: () => ({
-      instructions: `Phone calls on the agents' own number (+44 7441 138737), over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, in a context of its own (streamPath, under /agents/voice/phone-<their digits>/): it says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It rings and answers only: ${numbers}.`,
+      instructions: `Phone calls on the agents' own number (+44 7441 138737), over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, in a context of its own (streamPath, under /agents/voice/phone-<their digits>/): it says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
       functions: ["call", "hangup", "status"],
     }),
   };

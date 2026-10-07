@@ -17,7 +17,8 @@ line before the phone rings or the call is picked up.
 
 `jeeves-phone` is Go, on [sipgo](https://github.com/emiago/sipgo) and
 [diago](https://github.com/emiago/diago): it registers the number with `voiceless.aa.net.uk`
-(digest auth, again every 225 seconds), and carries G.711 A-law at 8 kHz, 20 ms a packet, to and
+(digest auth, again every 225 seconds, always at the one of its two servers it registered with: a
+nonce from one is refused by the other), and carries G.711 A-law at 8 kHz, 20 ms a packet, to and
 from 16 kHz PCM16 (`codec.go`: a 63-tap low-pass, then every other sample, and back).
 
 **A caller ID is a claim.** On the phone network a caller's number can be faked. The lend still
@@ -106,4 +107,12 @@ pnpm test:go     # the codec, the playout queue, and the bridge against a SIP pe
   a process that stops unregisters itself, and a call then goes to the number's fallback.
 - A call that is up and carries nothing from the line for six seconds is ended ("answered, but no
   audio flowed"), as is one whose line goes silent for twenty. It is not rung again, unlike WhatsApp.
+- **A call survives a lost link.** When `iterate provide` reconnects mid-call, the call carries
+  over: its microphone frames go over the new link, and its subscription resumes after the last
+  fact it saw. The voice's audio from the gap (about a second) is lost. `call-ended` counts the
+  moves as `metrics.linkMoves`.
+- **Goodbyes end the call.** The voice is told to hang up once goodbyes are said, and sometimes
+  does not. When the latest thing each side said is a goodbye, the lend hangs up 2.5 s after the
+  voice's goodbye has played, unless the person makes a sound; `call-ended` then has
+  `endedAfterGoodbyes: true`.
 - DTMF (keys pressed) arrives and is logged, nothing more.
