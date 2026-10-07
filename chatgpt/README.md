@@ -3,8 +3,8 @@
 Bring your own ChatGPT: a **Connect ChatGPT** page of its own, and Responses API requests that a
 ChatGPT plan pays for (Plus or Pro), not an API key.
 
-It is project code: one partial `fetch`, `serveChatgpt`, in the project's config worker, plus a few
-helpers that build the request. It uses OpenAI's
+It is project code: one element, `chatgpt()`, in the `integrations` array of the project's config
+worker, plus a few helpers that build the request. It uses OpenAI's
 [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for open-source
 tools. There is no OAuth app to register: the page signs in as `dynamic_agent_client`, and OpenAI
 registers a public client for that person during the consent. The tokens are one secret,
@@ -19,6 +19,10 @@ token and keeps the rotated refresh token.
 - **The requests:** `chatgptResponses(itx, body)` sends the body you would send to
   `https://api.openai.com/v1/responses`, adjusted for the plan (see below).
   `chatgptText(itx, { model, input })` returns the answer as text.
+- **The Dash:** the project's Integrations page shows a ChatGPT card ("Connect ChatGPT" until it is
+  connected, with a button to the page) and, once connected, the account's row: its address and
+  plan. The package registers both again after every publish, and whenever the page connects or
+  disconnects.
 
 ## Set it up
 
@@ -28,24 +32,19 @@ never take a secret in chat: the person signs in at OpenAI, and nothing here ask
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values:
+Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It adds the import
+and `chatgpt()` to the `integrations` array of `worker.ts`:
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-chatgpt";
-const SLUG = "chatgpt";
-const IMPORT = 'import { serveChatgpt } from "iterate-chatgpt";';
-const BRANCH = `const chatgptResponse = await serveChatgpt(request, {
-  withItx: async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
-    using itx = this.getItx();
-    return await call(itx);
-  },
-  requireMember: (request) => this.auth.require(request),
-});
-if (chatgptResponse) return chatgptResponse;`;
+const IMPORT = 'import { chatgpt } from "iterate-chatgpt";';
+const ELEMENT = "chatgpt()";
 const MEMBER = "";
 const FILES = {};
 ```
+
+`chatgpt({ slug: "openai" })` answers another routing slug.
 
 Check that it is live. The page answers members only, so a request with no sign-in is refused, and
 that is the proof:

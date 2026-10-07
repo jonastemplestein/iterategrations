@@ -16,10 +16,14 @@ export type ChatgptItx = {
     delete(path: string): Promise<unknown>;
     list(): Promise<{ path: string }[]>;
   };
+  cd(path: string): {
+    append(event: {
+      type: string;
+      idempotencyKey?: string;
+      payload: Record<string, unknown>;
+    }): Promise<unknown>;
+  };
 };
-
-/** What a project's code is handed to run: `(call) => { using itx = this.getItx(); return call(itx); }` */
-export type WithItx = <T>(call: (itx: ChatgptItx) => T) => Promise<Awaited<T>>;
 
 /** OpenAI's Sign in with ChatGPT for open-source tools
  *  (https://developers.openai.com/siwc/token-sharing-open-source). A person lets an app spend their

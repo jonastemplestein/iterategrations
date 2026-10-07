@@ -8,8 +8,8 @@ import {
   SECRET,
   startLogin,
   type ChatgptItx,
-  type WithItx,
 } from "./auth.js";
+import { register } from "./registry.js";
 import { chatgptModels, chatgptText } from "./request.js";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
@@ -88,15 +88,20 @@ async function card(itx: ChatgptItx): Promise<string> {
 }
 
 /** The members-only page: connect ChatGPT, see who is connected, test it, disconnect. Every write
- *  is a plain form POST answered with a redirect back to the page. */
-export async function servePage(request: Request, withItx: WithItx): Promise<Response> {
+ *  is a plain form POST answered with a redirect back to the page. Connecting and disconnecting
+ *  register the connection on the Dash again; `slug` is the routing slug its buttons lead to. */
+export async function servePage(
+  request: Request,
+  itx: ChatgptItx,
+  slug: string,
+): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\//, "");
 
   if (request.method === "GET" && path === "") {
     const error = url.searchParams.get("error");
     const tested = url.searchParams.get("test");
-    const body = await withItx((itx) => card(itx));
+    const body = await card(itx);
     return new Response(
       `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>ChatGPT</title><style>${STYLE}</style></head><body><h1>ChatGPT</h1>${
         error ? `<p class="error">${esc(error)}</p>` : ""
@@ -114,24 +119,32 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
 
   try {
     if (path === "start") {
-      await withItx((itx) => startLogin(itx));
+      await startLogin(itx);
       return redirect();
     }
     if (path === "finish") {
       const pasted = (await request.formData()).get("callback");
-      await withItx((itx) => finishLogin(itx, typeof pasted === "string" ? pasted : ""));
+      await finishLogin(itx, typeof pasted === "string" ? pasted : "");
+      await register(itx, slug);
       return redirect();
     }
-    if (path === "cancel" || path === "disconnect") {
-      await withItx((itx) => disconnect(itx));
+    if (path === "cancel") {
+      await disconnect(itx);
+      return redirect();
+    }
+    if (path === "disconnect") {
+      await disconnect(itx);
+      await register(itx, slug);
       return redirect();
     }
     if (path === "test") {
-      const text = await withItx(async (itx) => {
-        const model = testModelOf(await chatgptModels(itx).catch(() => null));
-        return `${model}: ${(await chatgptText(itx, { model, input: "Reply with the single word: ready", effort: "low" })).trim()}`;
+      const model = testModelOf(await chatgptModels(itx).catch(() => null));
+      const answer = await chatgptText(itx, {
+        model,
+        input: "Reply with the single word: ready",
+        effort: "low",
       });
-      return redirect(flash("test", text));
+      return redirect(flash("test", `${model}: ${answer.trim()}`));
     }
     return new Response("Not found\n", { status: 404 });
   } catch (error) {
