@@ -273,6 +273,17 @@ test("chatgptText reads the stream, models lists ids, and a failure says what Op
     { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
   ]);
   assert.deepEqual(await chatgptModels(project.itx), ["gpt-5.5", "gpt-5.4"]);
+  // a plan's token gets Codex's shape, and hidden models stay unlisted
+  const codexShaped: any = {
+    fetch: async () =>
+      Response.json({
+        models: [
+          { slug: "gpt-6.1-sol", visibility: "list" },
+          { slug: "gpt-reserve", visibility: "hide" },
+        ],
+      }),
+  };
+  assert.deepEqual(await chatgptModels(codexShaped), ["gpt-6.1-sol"]);
 
   const broken = fakeProject({ apiStatus: 429 });
   await assert.rejects(
