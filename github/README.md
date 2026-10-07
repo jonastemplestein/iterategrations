@@ -63,10 +63,11 @@ async (itx) => itx.url({ routingSlug: "github", path: "/_/" });
 Say: "Open this, sign in, and follow the steps." The page walks them through it:
 
 1. **Create the App** at <https://github.com/settings/apps/new>, or for an organization at
-   `https://github.com/organizations/<org>/settings/apps/new`, with:
+   `https://github.com/organizations/<org>/settings/apps/new`, with (`<address>` is the project's
+   `github` address, `itx.url({ routingSlug: "github" })`):
    - **Homepage URL:** the page's own address.
-   - **Setup URL:** `<github address>/callback`, with **Redirect on update** ticked.
-   - **Webhook URL:** `<github address>/webhook`, and a **webhook secret** they make up
+   - **Setup URL:** `<address>/callback`, with **Redirect on update** ticked.
+   - **Webhook URL:** `<address>/webhook`, and a **webhook secret** they make up
      (`openssl rand -hex 32`).
    - **Permissions** and **events:** what the project needs, and no more. Ask the person what the
      project should do (read code, comment on issues, review pull requests) and name the permissions
