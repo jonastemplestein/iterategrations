@@ -139,6 +139,12 @@ export async function startInstall(itx: Pick<GithubItx, "kv" | "secrets">): Prom
   if (!app) throw new Error("Save the App ID and slug first");
   if (!(await hasAppSecret(itx)))
     throw new Error("Save the App's private key and webhook secret first");
+  // an install that never came back leaves its nonce behind: those over an hour old go
+  for (const key of (await itx.kv.list(PENDING)).keys) {
+    const value = await itx.kv.get(key);
+    if (!value || Date.now() - (JSON.parse(value) as { at: number }).at >= NONCE_TTL_MS)
+      await itx.kv.delete(key);
+  }
   const nonce = hex(16);
   await itx.kv.put(`${PENDING}${nonce}`, JSON.stringify({ at: Date.now() }));
   return `https://github.com/apps/${app.slug}/installations/new?state=${nonce}`;
@@ -154,7 +160,8 @@ export async function spendNonce(itx: Pick<GithubItx, "kv">, nonce: string): Pro
 }
 
 /** Record an installation GitHub sent back: its secret, one proof call that also names the account,
- *  and the kv entry. A proof that fails deletes the secret again and throws, keeping nothing.
+ *  and the kv entry. A proof that fails throws, and deletes the secret again unless the installation
+ *  was connected before (an update): a failure at GitHub must not break one that works.
  *
  *  The secret holds the App ID and a placeholder for the App's key, which the platform reads from
  *  `/secrets/github-app` at each mint: one App secret serves every installation. No proof that the
@@ -164,6 +171,7 @@ export async function connectInstallation(itx: GithubItx, installationId: string
   const app = await readApp(itx);
   if (!app) throw new Error("Save the App ID and slug first");
   const path = secretOf(installationId);
+  const known = (await itx.kv.get(`${INSTALLATIONS}${installationId}`)) !== null;
   await itx.secrets.set(
     path,
     { appId: app.appId, privateKey: `getSecret("${APP_SECRET}", { field: "privateKey" })` },
@@ -198,7 +206,7 @@ export async function connectInstallation(itx: GithubItx, installationId: string
       );
     account = body?.repositories?.[0]?.owner?.login ?? `installation ${installationId}`;
   } catch (error) {
-    await itx.secrets.delete(path).catch(() => undefined);
+    if (!known) await itx.secrets.delete(path).catch(() => undefined);
     throw error;
   }
   const installation: Installation = { account, at: new Date().toISOString() };

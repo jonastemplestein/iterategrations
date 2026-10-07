@@ -201,6 +201,18 @@ const NOT_READY = card(
   "Connect",
 );
 
+/** A project with installation 42 connected through the page. */
+async function connected() {
+  const project = fakeProject();
+  await project.setUp();
+  await project.callback({
+    installation_id: "42",
+    setup_action: "install",
+    state: await project.install(),
+  });
+  return project;
+}
+
 // ------------------------------------------------------------- the integration
 
 test("it answers its own routing slug, github unless another is given; anything but its page, callback and webhook is a 404", async () => {
@@ -474,19 +486,36 @@ test("a proof GitHub refuses deletes the secret again, shows the error, and list
   assert.match(html, /class="error">GitHub refused installation 42/);
 });
 
-// ---------------------------------------------------------------- the webhook
-
-/** A project with installation 42 connected through the page. */
-async function connected() {
-  const project = fakeProject();
-  await project.setUp();
-  await project.callback({
+test("an update whose proof fails keeps the installation it had: a failure at GitHub breaks nothing that works", async () => {
+  const project = await connected();
+  const kept = structuredClone(project.secrets["/secrets/github-42"]);
+  project.github.refuse = 502;
+  const res = await project.callback({
     installation_id: "42",
-    setup_action: "install",
+    setup_action: "update",
     state: await project.install(),
   });
-  return project;
-}
+  assert.match(location(res), /error=GitHub refused installation 42 \(HTTP 502/);
+  assert.deepEqual(project.secrets["/secrets/github-42"], kept);
+  assert.equal(JSON.parse(project.kv["github/installations/42"]!).account, "acme");
+});
+
+test("Install forgets the nonces of installs that never came back, after an hour", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const stale = await project.install();
+  project.kv[`github/pending/${stale}`] = JSON.stringify({ at: Date.now() - 61 * 60 * 1000 });
+  const fresh = await project.install();
+  const next = await project.install();
+  assert.deepEqual(
+    Object.keys(project.kv)
+      .filter((key) => key.startsWith("github/pending/"))
+      .sort(),
+    [`github/pending/${fresh}`, `github/pending/${next}`].sort(),
+  );
+});
+
+// ---------------------------------------------------------------- the webhook
 
 test("a signed delivery lands once on its installation's stream, keyed by its delivery id: a redelivery adds nothing", async () => {
   const project = await connected();
