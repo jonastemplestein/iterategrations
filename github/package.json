@@ -1,0 +1,24 @@
+{
+  "name": "iterate-github",
+  "version": "0.0.0",
+  "description": "A project's own GitHub App for an iterate project: a Connect GitHub page, the setup callback, and the webhook as events",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/github.d.ts",
+      "default": "./dist/github.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp pack && vp test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

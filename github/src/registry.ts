@@ -1,0 +1,110 @@
+import {
+  hasAppSecret,
+  INSTALLATIONS,
+  listInstallations,
+  readApp,
+  type GithubItx,
+  type Installation,
+} from "./app.js";
+
+/** THE DASH'S INTEGRATIONS PAGE lists what a project's packages register on its `/integrations`
+ *  context (iterate/integrations): one card per package, and one row per connection under it. Both
+ *  are set semantics: a change appends the whole card or row again, and a null row takes one away.
+ *  The install hook registers everything again (`project/worker-updated`), so a registry that was
+ *  emptied, or is older than the package, heals at the next publish. */
+
+/** What the platform appends on `/` after it publishes a commit of the config repo: the install
+ *  hook. */
+export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+
+/** The package's name on the Dash. */
+const INTEGRATION = "github";
+
+/** One registry fact. `key`, in the install hook, is made of the triggering event's path and
+ *  offset, so a retry appends nothing new. A conflict on it means this event's registration landed
+ *  already, perhaps with what was true then: what changed since appended its own, with no key. */
+async function append(
+  itx: GithubItx,
+  type: string,
+  payload: Record<string, unknown>,
+  key?: string,
+): Promise<void> {
+  try {
+    await itx
+      .cd("/integrations")
+      .append({ type, ...(key ? { idempotencyKey: key } : {}), payload });
+  } catch (error) {
+    if (!key || (error as { code?: unknown } | null)?.code !== "IDEMPOTENCY_CONFLICT") throw error;
+  }
+}
+
+/** Registers the card: whether the App is set up (its ID and slug, and its secrets), and the
+ *  button to the page on `slug`. */
+export async function registerCard(itx: GithubItx, slug: string, key?: string): Promise<void> {
+  const ready = Boolean(await readApp(itx)) && (await hasAppSecret(itx));
+  await append(
+    itx,
+    "events.iterate.com/integration/configured",
+    {
+      integration: INTEGRATION,
+      card: {
+        title: "GitHub",
+        description:
+          "The project's own GitHub App: each installation's webhook deliveries as events, and GitHub's API as the installation, with tokens the platform mints.",
+        status: ready
+          ? { kind: "ok" }
+          : { kind: "attention", text: "Create a GitHub App and paste its secrets" },
+        actions: [{ label: ready ? "Manage" : "Connect", routingSlug: slug, path: "/_/" }],
+      },
+    },
+    key,
+  );
+}
+
+/** One connection's row: an installation (its account, a link to it at GitHub), or a request an
+ *  owner has yet to approve. */
+const rowOf = (slug: string, connection: string, installation: Installation) => {
+  const manage = { label: "Manage", routingSlug: slug, path: "/_/" };
+  if (installation.requested)
+    return {
+      account: installation.account,
+      status: { kind: "attention", text: "Awaiting an owner's approval" },
+      actions: [manage],
+      details: { Requested: installation.at.slice(0, 10) },
+    };
+  const login = /^[A-Za-z0-9-]{1,39}$/.test(installation.account) ? installation.account : null;
+  return {
+    account: installation.account,
+    status: { kind: "ok" },
+    actions: login ? [manage, { label: "Open", url: `https://github.com/${login}` }] : [manage],
+    details: { Installation: connection },
+  };
+};
+
+/** Sets a connection's row as the kv has it, or takes it away (null) when the kv has none. */
+export async function registerRow(
+  itx: GithubItx,
+  slug: string,
+  connection: string,
+  key?: string,
+): Promise<void> {
+  const value = await itx.kv.get(`${INSTALLATIONS}${connection}`);
+  await append(
+    itx,
+    "events.iterate.com/integration/connection-configured",
+    {
+      integration: INTEGRATION,
+      connection,
+      row: value ? rowOf(slug, connection, JSON.parse(value) as Installation) : null,
+    },
+    key,
+  );
+}
+
+/** The install hook's registration: the card and a row per installation the kv keeps, each keyed
+ *  by the triggering event (`at` is its path and offset), so a retry appends nothing new. */
+export async function registerAll(itx: GithubItx, slug: string, at: string): Promise<void> {
+  await registerCard(itx, slug, `github:registry:${at}`);
+  for (const { connection } of await listInstallations(itx))
+    await registerRow(itx, slug, connection, `github:registry:${connection}:${at}`);
+}
