@@ -1,36 +1,56 @@
-import { CODEX_BASE, SECRET, type ChatgptItx } from "./auth.js";
+import { RESOURCE, SECRET, type ChatgptItx } from "./auth.js";
 
-/** The headers a ChatGPT model request carries. Neither token is here: both are placeholders, and
- *  iterate's egress swaps in the real values on the way to chatgpt.com, and only there. */
-export function chatgptHeaders(sessionId?: string): Record<string, string> {
+/** The headers a model request carries. The token is a placeholder: iterate's egress swaps in the
+ *  real value on the way to api.openai.com, and only there. */
+export function chatgptHeaders(): Record<string, string> {
   return {
     authorization: `Bearer getSecret("${SECRET}", { field: "accessToken" })`,
-    "chatgpt-account-id": `getSecret("${SECRET}", { field: "accountId" })`,
     "content-type": "application/json",
     accept: "text/event-stream",
-    originator: "iterate",
-    ...(sessionId ? { session_id: sessionId } : {}),
   };
 }
 
-/** What ChatGPT's backend refuses that the public API takes: it answers only a stream, keeps
- *  nothing (`store: false`) and has no output cap or sampling knobs. A body for api.openai.com
- *  becomes one for ChatGPT. */
+/** What a plan's token may not send (https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). */
+const REFUSED = [
+  "background",
+  "conversation",
+  "max_output_tokens",
+  "max_tool_calls",
+  "metadata",
+  "moderation",
+  "multi_agent",
+  "prompt",
+  "prompt_cache_retention",
+  "safety_identifier",
+  "temperature",
+  "top_logprobs",
+  "top_p",
+  "truncation",
+  "user",
+  "previous_response_id",
+];
+
+/** What the plan's token takes that api.openai.com's own key does not need: it answers only a
+ *  stream, keeps nothing (`store: false`), wants `input` as a list, and refuses a few fields. A body
+ *  for a plain API key becomes one for the plan. */
 export function chatgptBody(body: Record<string, unknown>): Record<string, unknown> {
-  const { max_output_tokens: _cap, temperature: _t, top_p: _p, ...rest } = body;
-  return { instructions: "", ...rest, stream: true, store: false };
+  const rest = Object.fromEntries(Object.entries(body).filter(([key]) => !REFUSED.includes(key)));
+  if (typeof rest.input === "string")
+    rest.input = [
+      { type: "message", role: "user", content: [{ type: "input_text", text: rest.input }] },
+    ];
+  return { ...rest, stream: true, store: false };
 }
 
-/** One Responses API request to a ChatGPT subscription: the same body as for
- *  `https://api.openai.com/v1/responses` (`chatgptBody` adjusts it), sent to
- *  `https://chatgpt.com/backend-api/codex/responses`. */
+/** One Responses API request paid by a ChatGPT plan: the body you would send to
+ *  `https://api.openai.com/v1/responses` (`chatgptBody` adjusts it). */
 export function chatgptRequest(
   body: Record<string, unknown>,
-  options: { signal?: AbortSignal; sessionId?: string } = {},
+  options: { signal?: AbortSignal } = {},
 ): Request {
-  return new Request(`${CODEX_BASE}/responses`, {
+  return new Request(`${RESOURCE}/responses`, {
     method: "POST",
-    headers: chatgptHeaders(options.sessionId),
+    headers: chatgptHeaders(),
     body: JSON.stringify(chatgptBody(body)),
     ...(options.signal ? { signal: options.signal } : {}),
   });
@@ -41,7 +61,7 @@ export function chatgptRequest(
 export function chatgptResponses(
   itx: Pick<ChatgptItx, "fetch">,
   body: Record<string, unknown>,
-  options: { signal?: AbortSignal; sessionId?: string } = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<Response> {
   return itx.fetch(chatgptRequest(body, options));
 }
@@ -83,7 +103,7 @@ export async function* serverEvents(body: ReadableStream<Uint8Array>): AsyncGene
 }
 
 /** A whole answer as text, for a caller that wants no stream: `chatgptText(itx, { model, input })`.
- *  Throws what ChatGPT says when the request fails. */
+ *  Throws what OpenAI says when the request fails. */
 export async function chatgptText(
   itx: Pick<ChatgptItx, "fetch">,
   request: {
@@ -97,14 +117,7 @@ export async function chatgptText(
   const { signal, effort, ...rest } = request;
   const response = await chatgptResponses(
     itx,
-    {
-      ...rest,
-      input:
-        typeof rest.input === "string"
-          ? [{ type: "message", role: "user", content: [{ type: "input_text", text: rest.input }] }]
-          : rest.input,
-      ...(effort ? { reasoning: { effort } } : {}),
-    },
+    { ...rest, ...(effort ? { reasoning: { effort } } : {}) },
     { signal },
   );
   if (!response.ok || !response.body)
@@ -123,18 +136,14 @@ export async function chatgptText(
   return text;
 }
 
-/** The model names this ChatGPT account may use (`GET …/codex/models`). */
+/** The model names the plan's token can see (`GET /v1/models`). */
 export async function chatgptModels(itx: Pick<ChatgptItx, "fetch">): Promise<string[]> {
   const response = await itx.fetch(
-    new Request(`${CODEX_BASE}/models?client_version=1.0.0`, {
-      headers: {
-        authorization: chatgptHeaders().authorization!,
-        "chatgpt-account-id": chatgptHeaders()["chatgpt-account-id"]!,
-        originator: "iterate",
-      },
+    new Request(`${RESOURCE}/models`, {
+      headers: { authorization: chatgptHeaders().authorization! },
     }),
   );
   if (!response.ok) throw new Error(`models: HTTP ${response.status}`);
-  const body = (await response.json()) as { models?: { slug?: string }[] };
-  return (body.models ?? []).flatMap((model) => (model.slug ? [model.slug] : []));
+  const body = (await response.json()) as { data?: { id?: string }[] };
+  return (body.data ?? []).flatMap((model) => (model.id ? [model.id] : []));
 }

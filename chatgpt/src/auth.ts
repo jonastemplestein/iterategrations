@@ -21,33 +21,37 @@ export type ChatgptItx = {
 /** What a project's code is handed to run: `(call) => { using itx = this.getItx(); return call(itx); }` */
 export type WithItx = <T>(call: (itx: ChatgptItx) => T) => Promise<Awaited<T>>;
 
-/** ChatGPT's sign-in, and the client id every Codex sign-in uses (Codex CLI, opencode). */
+/** OpenAI's Sign in with ChatGPT for open-source tools
+ *  (https://developers.openai.com/siwc/token-sharing-open-source). A person lets an app spend their
+ *  ChatGPT plan on Responses API requests. There is nothing to register: the app signs in as
+ *  `dynamic_agent_client`, and OpenAI registers a public client of its own for that person during the
+ *  consent and names it in the callback (`client_id`, an `oaiapp_…`). Refreshes use that one. */
 export const ISSUER = "https://auth.openai.com";
-export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-/** Where a ChatGPT subscription's model requests go: the Responses API, as Codex calls it. */
-export const CODEX_BASE = "https://chatgpt.com/backend-api/codex";
-/** The secret that holds the tokens: `accessToken`, `refreshToken` and `accountId`. */
+export const AUTHORIZE_URL: string = `${ISSUER}/api/accounts/authorize`;
+export const TOKEN_URL: string = `${ISSUER}/api/accounts/oauth/token`;
+export const DYNAMIC_CLIENT_ID = "dynamic_agent_client";
+/** The only redirect a public client gets: a loopback address. Nothing listens there. The browser
+ *  fails to load it, and the person pastes its address into the page. */
+export const REDIRECT_URI = "http://127.0.0.1:1455/auth/callback";
+/** Requests for this resource are what the plan pays for. The code exchange is refused without it
+ *  (`invalid_grant`), and the code is spent. */
+export const RESOURCE = "https://api.openai.com/v1";
+export const SCOPE =
+  "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
+const DIRECT_SCOPE = "chatgpt.tokens.use.direct";
+/** The secret that holds the tokens: `accessToken`, `refreshToken` and `clientId`. */
 export const SECRET = "/secrets/chatgpt";
 /** The only origins the tokens are ever sent to. */
-export const PIN: string[] = ["https://chatgpt.com", "https://auth.openai.com"];
+export const PIN: string[] = ["https://api.openai.com", "https://auth.openai.com"];
 
-/** The kv keys: the sign-in in progress, and who is signed in (nothing secret). */
+/** The kv keys: the sign-in in progress, who is signed in (nothing secret), this project's host id. */
 export const PENDING_KEY = "chatgpt/pending";
 export const ACCOUNT_KEY = "chatgpt/account";
+export const HOST_KEY = "chatgpt/host";
 
-/** A sign-in the person has not finished: Codex's device code, good for 15 minutes. */
-export type Pending = {
-  deviceAuthId: string;
-  userCode: string;
-  /** Seconds between polls. */
-  interval: number;
-  expiresAt: number;
-};
-export type Account = { accountId: string; email?: string; plan?: string; at: string };
-export type Tokens = { idToken: string; accessToken: string; refreshToken: string };
-
-/** The URL the person opens, and types the code at. */
-export const VERIFICATION_URL: string = `${ISSUER}/codex/device`;
+/** A sign-in the person has not finished. The verifier stays here, in the project. */
+export type Pending = { url: string; state: string; verifier: string; expiresAt: number };
+export type Account = { id: string; email?: string; plan?: string; at: string };
 
 /** The claims of a JWT, or undefined for anything that is not one. Never verified: the token came
  *  straight from OpenAI's token endpoint over TLS, and the claims only label the account. */
@@ -65,48 +69,38 @@ export function claimsOf(token: string | undefined): Record<string, any> | undef
   }
 }
 
-/** The ChatGPT account an id token names. The account id is what `chatgpt-account-id` carries; a
- *  workspace (Business, Enterprise) has its own. */
-export function accountOf(tokens: Pick<Tokens, "idToken" | "accessToken">): Account {
-  const claims = claimsOf(tokens.idToken) ?? {};
-  const access = claimsOf(tokens.accessToken) ?? {};
-  const auth = claims["https://api.openai.com/auth"] ?? access["https://api.openai.com/auth"] ?? {};
-  const accountId: unknown = auth.chatgpt_account_id ?? claims.organizations?.[0]?.id;
-  if (typeof accountId !== "string" || accountId === "")
-    throw new Error("OpenAI's answer names no ChatGPT account. Is this a ChatGPT login?");
-  const email: unknown =
-    claims.email ?? claims["https://api.openai.com/profile"]?.email ?? access.email;
-  const plan: unknown = auth.chatgpt_plan_type;
+/** The account an id token names: its OpenID `sub` (it differs for each sign-in), its address, and
+ *  the plan when the token says. */
+export function accountOf(idToken: string | undefined): Account {
+  const claims = claimsOf(idToken) ?? {};
+  if (typeof claims.sub !== "string" || claims.sub === "")
+    throw new Error("OpenAI's answer names no account");
+  const plan: unknown = claims["https://api.openai.com/auth"]?.chatgpt_plan_type;
   return {
-    accountId,
-    ...(typeof email === "string" ? { email } : {}),
+    id: claims.sub,
+    ...(typeof claims.email === "string" ? { email: claims.email } : {}),
     ...(typeof plan === "string" ? { plan } : {}),
     at: new Date().toISOString(),
   };
 }
 
 /** The exchange code the secret refreshes itself with (the platform runs it in a jail whose only
- *  egress is the secret's pin): on a 401 from ChatGPT, trade the refresh token for new tokens.
- *  OpenAI rotates the refresh token, so the answer's is kept; the platform keeps what this returns. */
-export const EXCHANGE_SOURCE: string = `const ISSUER = ${JSON.stringify(ISSUER)};
-const CLIENT_ID = ${JSON.stringify(CLIENT_ID)};
-const claims = (jwt) => {
-  try {
-    const part = String(jwt).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, "=")));
-  } catch {
-    return {};
-  }
-};
+ *  egress is the secret's pin): on a 401 from OpenAI, trade the refresh token for new tokens with the
+ *  client OpenAI registered. OpenAI rotates the refresh token, so the answer's is kept; the platform
+ *  keeps what this returns. */
+export const EXCHANGE_SOURCE: string = `const TOKEN_URL = ${JSON.stringify(TOKEN_URL)};
+const RESOURCE = ${JSON.stringify(RESOURCE)};
 export async function exchange(material, fetch) {
-  if (!material.refreshToken) throw new Error("the secret holds no refresh token");
-  const response = await fetch(ISSUER + "/oauth/token", {
+  if (!material.refreshToken || !material.clientId)
+    throw new Error("the secret holds no refresh token or client id");
+  const response = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
+      client_id: material.clientId,
       refresh_token: material.refreshToken,
-      client_id: CLIENT_ID,
+      resource: RESOURCE,
     }).toString(),
   });
   if (!response.ok) {
@@ -114,49 +108,63 @@ export async function exchange(material, fetch) {
     const code = (body.error && body.error.code) || body.code || body.error || "";
     throw new Error(
       "ChatGPT refused the refresh (" + response.status + (typeof code === "string" && code ? " " + code : "") +
-        "): sign in again on the Connect ChatGPT page",
+        "): connect ChatGPT again",
     );
   }
   const tokens = await response.json();
   if (!tokens.access_token) throw new Error("ChatGPT's refresh answered with no access token");
-  const account = (claims(tokens.id_token)["https://api.openai.com/auth"] || {}).chatgpt_account_id;
   return {
     ...material,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token || material.refreshToken,
-    accountId: account || material.accountId,
   };
 }
 `;
 
-const json = (body: unknown): RequestInit => ({
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(body),
-});
+const base64url = (bytes: Uint8Array): string =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+const randomValue = (): string => base64url(crypto.getRandomValues(new Uint8Array(32)));
 
-/** Ask OpenAI for a device code. The person opens `VERIFICATION_URL`, signs in and types it. */
-export async function startLogin(itx: Pick<ChatgptItx, "fetch" | "kv">): Promise<Pending> {
-  const response = await itx.fetch(
-    new Request(`${ISSUER}/api/accounts/deviceauth/usercode`, json({ client_id: CLIENT_ID })),
+/** OpenAI attributes the plan's usage to an "agent host", named by an opaque id of ours that stays
+ *  the same: a random UUID, made once and kept. */
+async function hostIdOf(itx: Pick<ChatgptItx, "kv">): Promise<string> {
+  let id = await itx.kv.get(HOST_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    await itx.kv.put(HOST_KEY, id);
+  }
+  return `urn:uuid:${id}`;
+}
+
+/** Begin a sign-in: the consent URL the person opens. Nothing is sent to OpenAI yet. */
+export async function startLogin(itx: Pick<ChatgptItx, "kv">): Promise<Pending> {
+  const verifier = randomValue();
+  const state = randomValue();
+  const challenge = base64url(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
   );
-  if (response.status === 404)
-    throw new Error(
-      "ChatGPT has device code sign-in switched off for this account. In ChatGPT, open Settings, Security, and turn on device code authorization for Codex. A workspace admin may have to turn it on.",
-    );
-  if (!response.ok) throw new Error(`ChatGPT would not start a sign-in (HTTP ${response.status})`);
-  const body = (await response.json()) as {
-    device_auth_id?: string;
-    user_code?: string;
-    usercode?: string;
-    interval?: string | number;
-  };
-  const userCode = body.user_code ?? body.usercode;
-  if (!body.device_auth_id || !userCode) throw new Error("ChatGPT answered with no device code");
+  const url = new URL(AUTHORIZE_URL);
+  url.search = new URLSearchParams({
+    client_id: DYNAMIC_CLIENT_ID,
+    // what the consent page calls the app; the person may rename it there
+    agent_name_hint: "iterate",
+    ext_agent_host_id: await hostIdOf(itx),
+    response_type: "code",
+    redirect_uri: REDIRECT_URI,
+    resource: RESOURCE,
+    scope: SCOPE,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    nonce: randomValue(),
+  }).toString();
   const pending: Pending = {
-    deviceAuthId: body.device_auth_id,
-    userCode,
-    interval: Math.max(Number(body.interval) || 5, 2),
+    url: url.toString(),
+    state,
+    verifier,
     expiresAt: Date.now() + 15 * 60_000,
   };
   await itx.kv.put(PENDING_KEY, JSON.stringify(pending));
@@ -175,73 +183,78 @@ export async function readAccount(itx: Pick<ChatgptItx, "kv">): Promise<Account 
   return value ? (JSON.parse(value) as Account) : null;
 }
 
-/** Keep a signed-in account: its tokens as the secret (pinned to ChatGPT and OpenAI's sign-in,
- *  refreshed by `EXCHANGE_SOURCE`), and who it is in the kv. */
-export async function connect(itx: ChatgptItx, tokens: Tokens): Promise<Account> {
-  const account = accountOf(tokens);
-  await itx.secrets.set(
-    SECRET,
-    {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      accountId: account.accountId,
-    },
-    { urls: PIN, refresh: { kind: "worker", source: EXCHANGE_SOURCE } },
-  );
-  await itx.kv.put(ACCOUNT_KEY, JSON.stringify(account));
-  await itx.kv.delete(PENDING_KEY);
-  return account;
+/** What the person pasted: the address the browser could not load. */
+function callbackOf(pasted: string, pending: Pending): { code: string; clientId: string } {
+  let url: URL;
+  try {
+    url = new URL(pasted.trim());
+  } catch {
+    throw new Error("Paste the whole address from the browser's address bar.");
+  }
+  const expected = new URL(REDIRECT_URI);
+  if (url.origin !== expected.origin || url.pathname !== expected.pathname)
+    throw new Error(`The address must start with ${REDIRECT_URI}`);
+  const error = url.searchParams.get("error");
+  if (error)
+    throw new Error(
+      `ChatGPT did not connect: ${url.searchParams.get("error_description") ?? error}`,
+    );
+  if (url.searchParams.get("state") !== pending.state)
+    throw new Error("That address belongs to another sign-in. Start again.");
+  const code = url.searchParams.get("code");
+  const clientId = url.searchParams.get("client_id")?.trim();
+  if (!code) throw new Error("The address holds no authorization code. Start again.");
+  if (!clientId) throw new Error("OpenAI's address names no client. Start again.");
+  return { code, clientId };
 }
 
-export type Poll = { status: "none" | "waiting" } | { status: "connected"; account: Account };
-
-/** One look at a sign-in in progress. Waiting while the person has not typed the code (OpenAI
- *  answers 403 or 404); once they have, the authorization code becomes tokens and they are kept. */
-export async function pollLogin(itx: ChatgptItx): Promise<Poll> {
+/** Finish a sign-in: the pasted address holds the code and the client OpenAI registered. The code
+ *  becomes tokens, which are kept as the secret (pinned to the API and OpenAI's sign-in, refreshed by
+ *  `EXCHANGE_SOURCE`), and the person's account in the kv. */
+export async function finishLogin(itx: ChatgptItx, pasted: string): Promise<Account> {
   const pending = await readPending(itx);
-  if (!pending) return { status: "none" };
+  if (!pending) throw new Error("No sign-in is open. Start again.");
+  const { code, clientId } = callbackOf(pasted, pending);
+  // the code is good once, so the sign-in ends here, whatever OpenAI answers
+  await itx.kv.delete(PENDING_KEY);
   const answer = await itx.fetch(
-    new Request(
-      `${ISSUER}/api/accounts/deviceauth/token`,
-      json({ device_auth_id: pending.deviceAuthId, user_code: pending.userCode }),
-    ),
-  );
-  if (answer.status === 403 || answer.status === 404) return { status: "waiting" };
-  if (!answer.ok) {
-    await itx.kv.delete(PENDING_KEY);
-    throw new Error(`ChatGPT's sign-in failed (HTTP ${answer.status}). Start again.`);
-  }
-  const code = (await answer.json()) as { authorization_code: string; code_verifier: string };
-  const exchanged = await itx.fetch(
-    new Request(`${ISSUER}/oauth/token`, {
+    new Request(TOKEN_URL, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
         grant_type: "authorization_code",
-        code: code.authorization_code,
-        redirect_uri: `${ISSUER}/deviceauth/callback`,
-        client_id: CLIENT_ID,
-        code_verifier: code.code_verifier,
+        client_id: clientId,
+        code,
+        code_verifier: pending.verifier,
+        redirect_uri: REDIRECT_URI,
+        resource: RESOURCE,
       }).toString(),
     }),
   );
-  if (!exchanged.ok) {
-    await itx.kv.delete(PENDING_KEY);
-    throw new Error(`ChatGPT would not hand over tokens (HTTP ${exchanged.status}). Start again.`);
-  }
-  const tokens = (await exchanged.json()) as {
-    id_token: string;
-    access_token: string;
-    refresh_token: string;
+  if (!answer.ok)
+    throw new Error(
+      `OpenAI would not hand over tokens (HTTP ${answer.status}: ${(await answer.text()).slice(0, 200)}). Start again.`,
+    );
+  const tokens = (await answer.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    id_token?: string;
+    scope?: string;
   };
-  return {
-    status: "connected",
-    account: await connect(itx, {
-      idToken: tokens.id_token,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-    }),
-  };
+  if (!tokens.access_token || !tokens.refresh_token)
+    throw new Error("OpenAI's answer holds no access or refresh token. Start again.");
+  if (!tokens.scope?.split(/\s+/).includes(DIRECT_SCOPE))
+    throw new Error(
+      "OpenAI did not grant the plan's usage to this sign-in. Is this a Plus or Pro personal account?",
+    );
+  const account = accountOf(tokens.id_token);
+  await itx.secrets.set(
+    SECRET,
+    { accessToken: tokens.access_token, refreshToken: tokens.refresh_token, clientId },
+    { urls: PIN, refresh: { kind: "worker", source: EXCHANGE_SOURCE } },
+  );
+  await itx.kv.put(ACCOUNT_KEY, JSON.stringify(account));
+  return account;
 }
 
 export async function disconnect(itx: ChatgptItx): Promise<void> {

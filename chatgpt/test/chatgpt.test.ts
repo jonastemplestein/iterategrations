@@ -1,6 +1,5 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: a kv, secrets, and an egress
-// to a pretend OpenAI (its device sign-in and token endpoint) and a pretend ChatGPT backend, which
-// record every request.
+// to a pretend OpenAI (its token endpoint and its API), which record every request.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import {
@@ -17,17 +16,18 @@ const b64 = (value: unknown): string =>
   btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const jwt = (claims: unknown): string => `${b64({ alg: "none" })}.${b64(claims)}.sig`;
 const ID_TOKEN = jwt({
+  sub: "user-1",
   email: "jonas@example.com",
-  "https://api.openai.com/auth": { chatgpt_account_id: "acct-1", chatgpt_plan_type: "pro" },
+  "https://api.openai.com/auth": { chatgpt_plan_type: "pro" },
 });
+const SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 
 type Call = { url: string; method: string; headers: Headers; body: string };
 
-function fakeProject(options: { deviceOpen?: boolean; chatgptStatus?: number } = {}) {
+function fakeProject(options: { scope?: string; apiStatus?: number } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const calls: Call[] = [];
-  let typed = false; // the person typed the code at OpenAI
   const itx: any = {
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
@@ -49,26 +49,17 @@ function fakeProject(options: { deviceOpen?: boolean; chatgptStatus?: number } =
       };
       calls.push(call);
       const { pathname, origin } = new URL(request.url);
-      if (origin === "https://auth.openai.com") {
-        if (pathname === "/api/accounts/deviceauth/usercode")
-          return options.deviceOpen === false
-            ? new Response("no", { status: 404 })
-            : Response.json({ device_auth_id: "dev-1", user_code: "ABCD-1234", interval: "5" });
-        if (pathname === "/api/accounts/deviceauth/token")
-          return typed
-            ? Response.json({ authorization_code: "auth-code", code_verifier: "verifier" })
-            : new Response("pending", { status: 403 });
-        if (pathname === "/oauth/token")
-          return Response.json({
-            id_token: ID_TOKEN,
-            access_token: "access-1",
-            refresh_token: "refresh-1",
-          });
-      }
-      if (origin === "https://chatgpt.com") {
-        if (options.chatgptStatus) return new Response("nope", { status: options.chatgptStatus });
-        if (pathname.endsWith("/models"))
-          return Response.json({ models: [{ slug: "gpt-5.5" }, { slug: "gpt-5.4" }] });
+      if (origin === "https://auth.openai.com" && pathname === "/api/accounts/oauth/token")
+        return Response.json({
+          id_token: ID_TOKEN,
+          access_token: "access-1",
+          refresh_token: "refresh-1",
+          scope: options.scope ?? SCOPE,
+        });
+      if (origin === "https://api.openai.com") {
+        if (options.apiStatus) return new Response("nope", { status: options.apiStatus });
+        if (pathname === "/v1/models")
+          return Response.json({ data: [{ id: "gpt-5.5" }, { id: "gpt-5.4" }] });
         return new Response(
           [
             `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "re" })}\n\n`,
@@ -83,36 +74,48 @@ function fakeProject(options: { deviceOpen?: boolean; chatgptStatus?: number } =
     },
   };
   const withItx = async (call: (itx: any) => unknown) => call(itx);
-  const page = async (path: string, method = "GET", headers: Record<string, string> = {}) => {
+  const page = async (path: string, init: RequestInit = {}) => {
     const res = await serveChatgpt(
       new Request(`https://chatgpt--jeeves.example${path}`, {
-        method,
-        headers: { "x-iterate-routing-slug": "chatgpt", ...headers },
+        ...init,
+        headers: { "x-iterate-routing-slug": "chatgpt", ...(init.headers as object) },
       }),
       { withItx: withItx as any, requireMember: () => null },
     );
     assert.ok(res, "a request on the chatgpt slug is answered");
     return res;
   };
-  return {
-    itx,
-    secrets,
-    kv,
-    calls,
-    page,
-    typeCode: () => void (typed = true),
-  };
+  const paste = (address: string) =>
+    page("/finish", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ callback: address }).toString(),
+    });
+  return { itx, secrets, kv, calls, page, paste };
+}
+
+/** The address OpenAI's consent ends on, for the sign-in the page opened. */
+function callbackFor(html: string, extra: Record<string, string> = {}): string {
+  const href = /href="([^"]*authorize[^"]*)"/.exec(html)![1]!.replace(/&amp;/g, "&");
+  const state = new URL(href).searchParams.get("state")!;
+  const query = new URLSearchParams({
+    code: "auth-code",
+    state,
+    client_id: "oaiapp_issued",
+    ...extra,
+  });
+  return `http://127.0.0.1:1455/auth/callback?${query.toString()}`;
 }
 
 test("another slug is not ours, and a non-member is refused", async () => {
   const project = fakeProject();
   const other = await serveChatgpt(
-    new Request("https://x.example/_/", { headers: { "x-iterate-routing-slug": "telegram" } }),
+    new Request("https://x.example/", { headers: { "x-iterate-routing-slug": "telegram" } }),
     { withItx: (async (c: any) => c(project.itx)) as any, requireMember: () => null },
   );
   assert.equal(other, null);
   const refused = await serveChatgpt(
-    new Request("https://x.example/_/", { headers: { "x-iterate-routing-slug": "chatgpt" } }),
+    new Request("https://x.example/", { headers: { "x-iterate-routing-slug": "chatgpt" } }),
     {
       withItx: (async (c: any) => c(project.itx)) as any,
       requireMember: () => new Response("sign in", { status: 401 }),
@@ -122,96 +125,121 @@ test("another slug is not ours, and a non-member is refused", async () => {
   assert.deepEqual(project.calls, []);
 });
 
-test("the page offers Connect, then shows the code, then the account", async () => {
+test("the page offers Connect, then the consent link and a paste box, then the account", async () => {
   const project = fakeProject();
-  let res = await project.page("/_/");
+  let res = await project.page("/");
   let html = await res.text();
   assert.match(html, /Connect ChatGPT/);
-  assert.match(res.headers.get("content-security-policy")!, /script-src 'nonce-/);
+  assert.match(res.headers.get("content-security-policy")!, /default-src 'none'/);
 
-  res = await project.page("/_/start", "POST");
+  res = await project.page("/start", { method: "POST" });
   assert.equal(res.status, 303);
-  html = await (await project.page("/_/")).text();
-  assert.match(html, /ABCD-1234/);
-  assert.match(html, /auth\.openai\.com\/codex\/device/);
-  assert.match(html, /<script nonce=/, "the page polls by itself");
+  html = await (await project.page("/")).text();
+  assert.match(html, /Open ChatGPT sign-in/);
+  assert.match(html, /name="callback"/);
 
-  // not typed yet: waiting, nothing stored
-  let answer: any = await (
-    await project.page("/_/poll", "POST", { accept: "application/json" })
-  ).json();
-  assert.deepEqual(answer, { status: "waiting" });
+  const consent = new URL(/href="([^"]*authorize[^"]*)"/.exec(html)![1]!.replace(/&amp;/g, "&"));
+  assert.equal(consent.origin + consent.pathname, "https://auth.openai.com/api/accounts/authorize");
+  const query = consent.searchParams;
+  assert.equal(query.get("client_id"), "dynamic_agent_client");
+  assert.equal(query.get("redirect_uri"), "http://127.0.0.1:1455/auth/callback");
+  assert.equal(query.get("resource"), "https://api.openai.com/v1");
+  assert.equal(query.get("code_challenge_method"), "S256");
+  assert.match(query.get("ext_agent_host_id")!, /^urn:uuid:[0-9a-f-]{36}$/);
+  assert.ok(query.get("scope")!.split(" ").includes("chatgpt.tokens.use.direct"));
   assert.deepEqual(project.secrets, {});
+  assert.deepEqual(project.calls, [], "nothing is sent to OpenAI before the person pastes");
 
-  project.typeCode();
-  answer = await (await project.page("/_/poll", "POST", { accept: "application/json" })).json();
-  assert.equal(answer.status, "connected");
-  assert.equal(answer.account.email, "jonas@example.com");
+  res = await project.paste(callbackFor(html));
+  assert.equal(res.status, 303);
+  assert.doesNotMatch(res.headers.get("location")!, /error/);
 
   const secret = project.secrets["/secrets/chatgpt"]!;
   assert.deepEqual(secret.material, {
     accessToken: "access-1",
     refreshToken: "refresh-1",
-    accountId: "acct-1",
+    clientId: "oaiapp_issued",
   });
-  assert.deepEqual(secret.options.urls, ["https://chatgpt.com", "https://auth.openai.com"]);
+  assert.deepEqual(secret.options.urls, ["https://api.openai.com", "https://auth.openai.com"]);
   assert.equal(secret.options.refresh.kind, "worker");
   assert.equal(secret.options.refresh.source, EXCHANGE_SOURCE);
-  assert.equal(project.kv["chatgpt/pending"], undefined, "the device code is spent");
+  assert.equal(project.kv["chatgpt/pending"], undefined, "the sign-in is spent");
 
-  // the code exchange sent the verifier OpenAI issued, with the device redirect
-  const exchange = project.calls.find((c) => c.url === "https://auth.openai.com/oauth/token")!;
+  // the exchange names OpenAI's issued client, the verifier kept here, and the resource
+  const exchange = (project.calls as Call[]).find((c) => c.url.endsWith("/oauth/token"))!;
   const form = new URLSearchParams(exchange.body);
   assert.equal(form.get("grant_type"), "authorization_code");
+  assert.equal(form.get("client_id"), "oaiapp_issued");
   assert.equal(form.get("code"), "auth-code");
-  assert.equal(form.get("code_verifier"), "verifier");
-  assert.equal(form.get("redirect_uri"), "https://auth.openai.com/deviceauth/callback");
-  assert.equal(form.get("client_id"), "app_EMoamEEZ73f0CkXaXp7hrann");
+  assert.equal(form.get("resource"), "https://api.openai.com/v1");
+  assert.equal(form.get("redirect_uri"), "http://127.0.0.1:1455/auth/callback");
+  assert.ok(form.get("code_verifier")!.length >= 43);
 
-  html = await (await project.page("/_/")).text();
+  html = await (await project.page("/")).text();
   assert.match(html, /jonas@example\.com/);
   assert.match(html, /pro/);
   assert.match(html, /gpt-5\.5/);
   assert.doesNotMatch(html, /access-1|refresh-1/, "no token is ever shown");
 });
 
-test("a refused sign-in is shown on the page", async () => {
-  const project = fakeProject({ deviceOpen: false });
-  const res = await project.page("/_/start", "POST");
-  assert.equal(res.status, 303);
-  assert.match(decodeURIComponent(res.headers.get("location")!), /device code authorization/);
-  const html = await (await project.page(res.headers.get("location")!.replace("./", "/_/"))).text();
-  assert.match(html, /class="error"/);
+test("a bad paste is shown on the page, and the sign-in survives it", async () => {
+  const project = fakeProject();
+  await project.page("/start", { method: "POST" });
+  const html = await (await project.page("/")).text();
+  const good = callbackFor(html);
+
+  for (const [bad, message] of [
+    ["not an address", /whole address/],
+    ["http://127.0.0.1:9/other?code=x", /must start with/],
+    [good.replace(/state=[^&]*/, "state=other"), /another sign-in/],
+    [callbackFor(html, { error: "access_denied" }), /did not connect: access_denied/],
+  ] as const) {
+    const res = await project.paste(bad);
+    assert.match(decodeURIComponent(res.headers.get("location")!), message);
+  }
+  assert.deepEqual(project.calls, []);
+  assert.ok(project.kv["chatgpt/pending"], "still waiting for a good address");
+
+  const shown = await (
+    await project.page((await project.paste("nope")).headers.get("location")!.replace("./", "/"))
+  ).text();
+  assert.match(shown, /class="error"/);
 });
 
-test("test it asks ChatGPT, and disconnect forgets everything", async () => {
-  const project = fakeProject();
-  await project.page("/_/start", "POST");
-  project.typeCode();
-  await project.page("/_/poll", "POST", { accept: "application/json" });
+test("a sign-in without the plan's scope is refused and keeps no secret", async () => {
+  const project = fakeProject({ scope: "openid profile email" });
+  await project.page("/start", { method: "POST" });
+  const res = await project.paste(callbackFor(await (await project.page("/")).text()));
+  assert.match(decodeURIComponent(res.headers.get("location")!), /Plus or Pro/);
+  assert.deepEqual(project.secrets, {});
+  assert.equal(project.kv["chatgpt/pending"], undefined, "the code is spent either way");
+});
 
-  const tested = await project.page("/_/test", "POST");
+test("test it asks OpenAI, and disconnect forgets everything", async () => {
+  const project = fakeProject();
+  await project.page("/start", { method: "POST" });
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+
+  const tested = await project.page("/test", { method: "POST" });
   assert.match(decodeURIComponent(tested.headers.get("location")!), /gpt-5\.5: ready/);
-  const sent = project.calls.find((c) => c.url.endsWith("/codex/responses"))!;
+  const sent = (project.calls as Call[]).find(
+    (c) => c.url === "https://api.openai.com/v1/responses",
+  )!;
   assert.equal(sent.method, "POST");
 
-  await project.page("/_/disconnect", "POST");
+  await project.page("/disconnect", { method: "POST" });
   assert.deepEqual(project.secrets, {});
   assert.equal(project.kv["chatgpt/account"], undefined);
-  assert.match(await (await project.page("/_/")).text(), /Connect ChatGPT/);
+  assert.match(await (await project.page("/")).text(), /Connect ChatGPT/);
+  assert.equal((await project.page("/anything-else", { method: "POST" })).status, 404);
 });
 
-test("a model request carries placeholders for both tokens, and a body ChatGPT takes", async () => {
-  const headers = chatgptHeaders("session-1");
-  assert.equal(
-    headers.authorization,
-    'Bearer getSecret("/secrets/chatgpt", { field: "accessToken" })',
-  );
-  assert.equal(
-    headers["chatgpt-account-id"],
-    'getSecret("/secrets/chatgpt", { field: "accountId" })',
-  );
-  assert.equal(headers.session_id, "session-1");
+test("a model request carries a placeholder for the token, and a body the plan takes", async () => {
+  assert.deepEqual(chatgptHeaders(), {
+    authorization: 'Bearer getSecret("/secrets/chatgpt", { field: "accessToken" })',
+    "content-type": "application/json",
+    accept: "text/event-stream",
+  });
 
   assert.deepEqual(
     chatgptBody({
@@ -219,23 +247,25 @@ test("a model request carries placeholders for both tokens, and a body ChatGPT t
       input: [],
       max_output_tokens: 5,
       temperature: 1,
+      top_p: 1,
+      user: "u",
+      previous_response_id: "r",
       store: true,
       stream: false,
+      tools: [{ type: "function" }],
     }),
-    { instructions: "", model: "m", input: [], stream: true, store: false },
+    { model: "m", input: [], stream: true, store: false, tools: [{ type: "function" }] },
   );
-  assert.equal(
-    chatgptBody({ model: "m", instructions: "be brief" }).instructions,
-    "be brief",
-    "the caller's instructions win",
-  );
+  assert.deepEqual(chatgptBody({ model: "m", input: "hi" }).input, [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+  ]);
 
   const request = chatgptRequest({ model: "gpt-5.5", input: [] });
-  assert.equal(request.url, "https://chatgpt.com/backend-api/codex/responses");
+  assert.equal(request.url, "https://api.openai.com/v1/responses");
   assert.equal(request.method, "POST");
 });
 
-test("chatgptText reads the stream, models lists slugs, and a failure says what ChatGPT said", async () => {
+test("chatgptText reads the stream, models lists ids, and a failure says what OpenAI said", async () => {
   const project = fakeProject();
   assert.equal(await chatgptText(project.itx, { model: "gpt-5.5", input: "hi" }), "ready");
   const body = JSON.parse(project.calls.at(-1)!.body);
@@ -244,7 +274,7 @@ test("chatgptText reads the stream, models lists slugs, and a failure says what 
   ]);
   assert.deepEqual(await chatgptModels(project.itx), ["gpt-5.5", "gpt-5.4"]);
 
-  const broken = fakeProject({ chatgptStatus: 429 });
+  const broken = fakeProject({ apiStatus: 429 });
   await assert.rejects(
     chatgptText(broken.itx, { model: "gpt-5.5", input: "hi" }),
     /chatgpt\/gpt-5\.5 429: nope/,
@@ -259,40 +289,42 @@ async function runExchange(material: any, fetch: (url: string, init: any) => Pro
   return exchange(material, fetch);
 }
 
-test("the exchange code trades the refresh token and keeps the rotated one", async () => {
+test("the exchange code trades the refresh token with OpenAI's client and keeps the rotated one", async () => {
   const seen: any[] = [];
   const next = await runExchange(
-    { accessToken: "old", refreshToken: "r-old", accountId: "acct-1" },
+    { accessToken: "old", refreshToken: "r-old", clientId: "oaiapp_issued" },
     async (url, init) => {
       seen.push({ url, form: new URLSearchParams(init.body) });
-      return Response.json({
-        id_token: jwt({ "https://api.openai.com/auth": { chatgpt_account_id: "acct-2" } }),
-        access_token: "new",
-        refresh_token: "r-new",
-      });
+      return Response.json({ access_token: "new", refresh_token: "r-new" });
     },
   );
-  assert.equal(seen[0].url, "https://auth.openai.com/oauth/token");
+  assert.equal(seen[0].url, "https://auth.openai.com/api/accounts/oauth/token");
   assert.equal(seen[0].form.get("grant_type"), "refresh_token");
+  assert.equal(seen[0].form.get("client_id"), "oaiapp_issued");
   assert.equal(seen[0].form.get("refresh_token"), "r-old");
-  assert.deepEqual(next, { accessToken: "new", refreshToken: "r-new", accountId: "acct-2" });
+  assert.equal(seen[0].form.get("resource"), "https://api.openai.com/v1");
+  assert.deepEqual(next, { accessToken: "new", refreshToken: "r-new", clientId: "oaiapp_issued" });
 
-  // an answer with no new refresh token or id token keeps what the secret had
+  // an answer with no new refresh token keeps the one the secret had
   const kept = await runExchange(
-    { accessToken: "old", refreshToken: "r-old", accountId: "acct-1" },
+    { accessToken: "old", refreshToken: "r-old", clientId: "oaiapp_issued" },
     async () => Response.json({ access_token: "newer" }),
   );
-  assert.deepEqual(kept, { accessToken: "newer", refreshToken: "r-old", accountId: "acct-1" });
+  assert.deepEqual(kept, {
+    accessToken: "newer",
+    refreshToken: "r-old",
+    clientId: "oaiapp_issued",
+  });
 });
 
-test("a refused refresh says to sign in again, naming OpenAI's code but never a token", async () => {
+test("a refused refresh says to connect again, naming OpenAI's code but never a token", async () => {
   await assert.rejects(
-    runExchange({ refreshToken: "r-secret" }, async () =>
+    runExchange({ refreshToken: "r-secret", clientId: "oaiapp_issued" }, async () =>
       Response.json({ error: { code: "refresh_token_reused" } }, { status: 401 }),
     ),
     (error: Error) =>
       /401 refresh_token_reused/.test(error.message) &&
-      /sign in again/.test(error.message) &&
+      /connect ChatGPT again/.test(error.message) &&
       !error.message.includes("r-secret"),
   );
   await assert.rejects(

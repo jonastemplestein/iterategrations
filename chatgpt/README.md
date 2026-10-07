@@ -1,23 +1,24 @@
 # ChatGPT
 
-Bring your own ChatGPT: a **Connect ChatGPT** page of its own, and model requests that a ChatGPT
-subscription pays for (Plus, Pro, Business or Enterprise), not an API key.
+Bring your own ChatGPT: a **Connect ChatGPT** page of its own, and Responses API requests that a
+ChatGPT plan pays for (Plus or Pro), not an API key.
 
 It is project code: one partial `fetch`, `serveChatgpt`, in the project's config worker, plus a few
-helpers that build the request. It signs in the way the Codex CLI does (OpenAI's device code flow),
-so there is no OAuth app to register and no callback to host. The tokens are one secret,
-`/secrets/chatgpt`, pinned to `chatgpt.com` and `auth.openai.com`. The agent only ever sends
-placeholders: iterate's egress swaps in the real tokens. When ChatGPT answers 401, the platform runs
-the secret's exchange code (this package's `EXCHANGE_SOURCE`), which trades the refresh token for new
-tokens and keeps the rotated refresh token.
+helpers that build the request. It uses OpenAI's
+[Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for open-source
+tools. There is no OAuth app to register: the page signs in as `dynamic_agent_client`, and OpenAI
+registers a public client for that person during the consent. The tokens are one secret,
+`/secrets/chatgpt`, pinned to `api.openai.com` and `auth.openai.com`. The agent only ever sends a
+placeholder: iterate's egress swaps in the real token. When OpenAI answers 401, the platform runs the
+secret's exchange code (this package's `EXCHANGE_SOURCE`), which trades the refresh token for a new
+token and keeps the rotated refresh token.
 
-- **The page** (members only, at the project's `chatgpt` address, `/_/`): a Connect button, the code
-  to type at OpenAI, who is connected and their plan, the models the account can use, a **Test it**
-  button, a Disconnect button, and a usage snippet.
+- **The page** (members only, at the project's `chatgpt` address): a Connect button, the consent
+  link and a box for the address OpenAI sends the browser to, who is connected and their plan, the
+  models the token can see, a **Test it** button, a Disconnect button, and a usage snippet.
 - **The requests:** `chatgptResponses(itx, body)` sends the body you would send to
-  `https://api.openai.com/v1/responses` to
-  `https://chatgpt.com/backend-api/codex/responses`. `chatgptText(itx, { model, input })` returns the
-  answer as text.
+  `https://api.openai.com/v1/responses`, adjusted for the plan (see below).
+  `chatgptText(itx, { model, input })` returns the answer as text.
 
 ## Set it up
 
@@ -51,7 +52,7 @@ that is the proof:
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "chatgpt", path: "/_/" });
+  const url = await itx.url({ routingSlug: "chatgpt", path: "/" });
   const res = await itx.fetch(new Request(url, { redirect: "manual" }));
   return { url, status: res.status }; // 401/302/403: the page is there and wants a member. 404: not published yet
 };
@@ -60,21 +61,20 @@ async (itx) => {
 ### 2. Send the person to the page
 
 ```js
-async (itx) => itx.url({ routingSlug: "chatgpt", path: "/_/" });
+async (itx) => itx.url({ routingSlug: "chatgpt", path: "/" });
 ```
 
-Say: "Open this, sign in, press **Connect ChatGPT**, then open the link it shows and type the code."
-The page notices by itself when they have. If OpenAI says device code sign-in is off, the person turns
-on **device code authorization for Codex** in ChatGPT's Settings, Security (a workspace admin may have
-to).
+Say: "Open this, sign in, press **Connect ChatGPT**, then open the consent link. When your browser
+fails to load `http://127.0.0.1:1455/…`, copy that whole address and paste it in the box."
+The person needs a **personal Plus or Pro** ChatGPT account. OpenAI offers the plan's usage in a
+preview for those. A Team or Business workspace may be refused.
 
-Then press **Test it** on the page: it asks the account's first model for one word.
+Then press **Test it** on the page: it asks one model for one word.
 
 ### 3. Make the project's own model calls use it
 
 The package makes the connection. A project whose agents call `https://api.openai.com/v1/responses`
-with `Bearer getSecret("/secrets/openai")` switches to ChatGPT by sending the same body to
-`chatgptRequest`'s URL with `chatgptHeaders()`:
+with `Bearer getSecret("/secrets/openai")` switches to the plan like this:
 
 ```ts
 import { chatgptResponses } from "iterate-chatgpt";
@@ -94,20 +94,27 @@ const response = await itx.fetch(
 const response = await chatgptResponses(itx, body, { signal });
 ```
 
-`chatgptResponses` forces `stream: true` and `store: false` (ChatGPT's backend takes only that), drops
-`max_output_tokens`, `temperature` and `top_p` (it has no such knobs), and leaves everything else
-alone: `tools`, `reasoning`, `include: ["reasoning.encrypted_content"]` and `prompt_cache_key` are
-the Responses API's own. Usage is not billed in dollars: it counts against the plan's Codex limits.
+`chatgptResponses` forces `stream: true` and `store: false`, makes a string `input` a list, and drops
+the fields OpenAI refuses for a plan's token (`max_output_tokens`, `temperature`, `top_p`,
+`previous_response_id`, `metadata`, `user`, and the others in
+[the preview limits](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)).
+Everything else is the Responses API's own: `tools`, `reasoning`, `prompt_cache_key`. The plan does
+not take image generation, file search, the code interpreter, computer use or hosted MCP tools.
 
 ## Good to know
 
-- **It is Codex's sign-in.** The client id is the Codex CLI's, because OpenAI offers no way to
-  register a client for a ChatGPT subscription. OpenAI can change or limit this at any time; read the
-  plan's terms before pointing a company's agents at a person's subscription.
-- **One connection per project:** `/secrets/chatgpt`. Connecting again replaces it.
-- **The tokens pass through the page once.** The page's worker receives them from OpenAI, keeps them
-  as the secret and never shows them.
-- **A refresh token can die.** If the person signs out of ChatGPT everywhere, or the token is used
-  twice, a request answers 401 and the refresh says "sign in again": press **Connect ChatGPT** again.
-- **Models** are whatever the account may use. The page lists them (`chatgptModels(itx)` does too).
-- **Not built:** a second subscription, the realtime voice API, and counting a request's cost.
+- **Only the Responses API.** Voice (Realtime, GPT-Live) and transcription refuse the token. Keep
+  `/secrets/openai` for them.
+- **Plus or Pro, personal, in a preview.** OpenAI says that to offer this in a paid or hosted app,
+  you fill in [its interest form](https://openai.com/form/sign-in-with-chatgpt-interest). A person
+  using their own plan in their own project is the open-source case.
+- **Why a paste.** OpenAI sends a public client back only to a loopback address, so the browser
+  cannot reach the project. The page asks for the address instead. The address holds a code that
+  works once, and the page keeps the PKCE verifier, so a pasted address is useless to anyone else.
+- **One connection per project:** `/secrets/chatgpt`. Connecting again replaces it. Each connection
+  is a new app in the person's ChatGPT settings, where they can set its weekly limit and remove it.
+- **A refresh token can die.** If the person removes the app in ChatGPT, a request answers 401 and
+  the refresh says "connect ChatGPT again": press **Connect ChatGPT** again.
+- **Models** are whatever the token can see. The page lists them (`chatgptModels(itx)` does too).
+- **Not built:** revoking the app at OpenAI on Disconnect (the revoke call needs the token in the
+  request body, which egress never fills in), a second plan, and counting a request's cost.
