@@ -142,3 +142,6 @@ without the person's say-so for that order.
 - Waitrose's login refuses a request that already carries a token, so the exchange sends none.
 - Adapted from [jonastemplestein/waitrose](https://github.com/jonastemplestein/waitrose), which is
   the same client as a CLI.
+- To remove it: take the element and its imports out of `worker.ts`, and delete `/secrets/waitrose`.
+  The Dash takes nothing away itself, so once that commit is live, take the card off with its null:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "waitrose", card: null } })`.

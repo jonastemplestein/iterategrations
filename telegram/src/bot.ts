@@ -151,8 +151,9 @@ export async function listPeople<T>(
 
 /** Connect a bot from the token @BotFather gave: check it, keep it as a secret, make the webhook
  *  secret (kept, never shown), register `webhookBase/<name>` with Telegram, and list the bot on the
- *  Dash's Integrations page with links to `slug`'s page. Connecting the same bot again rotates the
- *  webhook secret. Answers the bot's name here. */
+ *  Dash's Integrations page with links to `slug`'s page: the card first, since a row stands under
+ *  its card alone. Connecting the same bot again rotates the webhook secret. Answers the bot's name
+ *  here. */
 export async function connectBot(
   itx: TelegramItx,
   token: string,
@@ -196,8 +197,8 @@ export async function connectBot(
   await itx.kv.delete(`${REMOVED}${name}`);
   await itx.kv.put(keyOf(name, "bot"), JSON.stringify(info));
   await itx.kv.put(`${BOTS}${name}`, me.username);
-  await registerBot(itx, name, slug);
   await registerCard(itx, slug);
+  await registerBot(itx, name, slug);
   return { name, username: me.username };
 }
 

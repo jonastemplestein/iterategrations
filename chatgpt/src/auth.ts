@@ -261,8 +261,13 @@ export async function finishLogin(itx: ChatgptItx, pasted: string): Promise<Acco
   return account;
 }
 
+/** Forget the connection: the secret first, then who was signed in. A secret that is already gone
+ *  (`SECRET_NOT_SET`, as when a sign-in is cancelled) is what was wanted; any other failure is
+ *  thrown, and the account stays, so nothing says ChatGPT is disconnected while its tokens work. */
 export async function disconnect(itx: ChatgptItx): Promise<void> {
-  await itx.secrets.delete(SECRET).catch(() => undefined);
+  await itx.secrets.delete(SECRET).catch((error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code !== "SECRET_NOT_SET") throw error;
+  });
   await itx.kv.delete(ACCOUNT_KEY);
   await itx.kv.delete(PENDING_KEY);
 }

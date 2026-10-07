@@ -174,10 +174,16 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
   other request keeps waiting. If GitHub does not come back with it, press **Install** again and
   **Save** on GitHub's page, then **Forget** the request.
 - **Disconnect** deletes the installation's secret, then forgets it here. A secret that cannot be
-  deleted is shown as an error, and the installation stays listed, so Disconnect again can finish. A
-  row the Dash could not be told to take away is taken away by Disconnect again, or at the next
-  publish: until then `own-github/removed/<connection>` in the kv marks it. The App stays
-  installed at GitHub: only its account can uninstall it.
+  deleted is shown as an error, and the installation stays listed, so Disconnect again can finish.
+  The Dash only shows what the package registered and takes nothing away itself, so a row goes only
+  when the package appends its null. A row the Dash could not be told to take away is taken away by
+  Disconnect again, or at the next publish: until then `own-github/removed/<connection>` in the kv
+  marks it. The App stays installed at GitHub: only its account can uninstall it.
+- **Removing it.** Disconnect each installation and Forget each request on the page, take
+  `github()` and its import out of `worker.ts`, and delete `/secrets/own-github-app`. Once that
+  commit is live, take the card off with its null, which takes any row left with it:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "github", card: null } })`. Then delete the App
+  at GitHub, or keep it for another project.
 - **Its own names.** Everything the package keeps starts with `own-github`: the secrets
   `/secrets/own-github-app` and `/secrets/own-github-<installation id>`, the streams
   `/integrations/own-github/<installation id>`, and the kv keys `own-github/…`. iterate's shared

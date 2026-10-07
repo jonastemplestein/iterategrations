@@ -438,6 +438,7 @@ test("pasting a token checks it, keeps it as a secret, and registers the webhook
   const res = await project.page("/_/connect", { form: { token: ` ${TOKEN} ` } });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "./?connected=Iterate_Bot");
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
   assert.deepEqual(project.secrets[`/secrets/telegram-${BOT}`], {
     material: { token: TOKEN },
     options: { urls: ["https://api.telegram.org"] },
@@ -819,24 +820,24 @@ test("with no bot the card asks for one; a hook retried after a change does not 
     project.registry().map((event) => [event.type, event.idempotencyKey]),
     [
       [CONFIGURED, "telegram:registry:/@5"],
-      [CONNECTION_CONFIGURED, undefined],
       [CONFIGURED, undefined],
+      [CONNECTION_CONFIGURED, undefined],
       [CONNECTION_CONFIGURED, `telegram:registry:${BOT}:/@5`],
     ],
   );
 });
 
-test("connecting a bot registers its row and the card again; letting people in or out updates the row; disconnecting removes it", async () => {
+test("connecting a bot registers the card again and then its row (a row stands under its card alone); letting people in or out updates the row; disconnecting removes it", async () => {
   const project = fakeProject();
   await project.page("/_/connect", { form: { token: TOKEN } });
   assert.deepEqual(project.registry(), [
     {
-      type: CONNECTION_CONFIGURED,
-      payload: { integration: "telegram", connection: BOT, row: row("0 people") },
-    },
-    {
       type: CONFIGURED,
       payload: { integration: "telegram", card: card({ kind: "ok" }, "Manage") },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: { integration: "telegram", connection: BOT, row: row("0 people") },
     },
   ]);
 
@@ -878,8 +879,8 @@ test("connecting a bot registers its row and the card again; letting people in o
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const project = fakeProject(undefined, "tg");
   await project.page("/_/connect", { form: { token: TOKEN } });
-  assert.deepEqual(project.registry()[0]!.payload.row, row("0 people", "tg"));
-  assert.deepEqual(project.registry()[1]!.payload.card, card({ kind: "ok" }, "Manage", "tg"));
+  assert.deepEqual(project.registry()[0]!.payload.card, card({ kind: "ok" }, "Manage", "tg"));
+  assert.deepEqual(project.registry()[1]!.payload.row, row("0 people", "tg"));
   const before = project.appended.length;
   for (const type of ["telegram/update", "events.iterate.com/agent/context-added"])
     await project.integration.processEvent!({

@@ -277,8 +277,10 @@ export async function serveCallback(
   const issued = await issuedNonce(itx, state);
   if (!issued) return back(refused);
   try {
+    // the card before any row: a row stands under its card alone
     if (action === "request") {
       const connection = await recordRequest(itx, state);
+      await registerCard(itx, slug);
       await registerRow(itx, slug, connection);
       return back(flashOf("requested", "1"));
     }
@@ -290,8 +292,8 @@ export async function serveCallback(
         await forget(itx, issued.request);
         await registerRemoval(itx, slug, issued.request);
       }
-      await registerRow(itx, slug, id);
       await registerCard(itx, slug);
+      await registerRow(itx, slug, id);
       return back(flashOf("connected", account));
     }
     return back(flashOf("error", "GitHub sent back no installation. Press Install again."));

@@ -134,3 +134,11 @@ Pebble's; iterate transcribes nothing. Requests are verified with the app's sign
 (`itx.secrets.verifyHmac`, 5-minute window); the contract is Pebble's
 [INDEX_WEBHOOK_API.md](https://github.com/coredevices/mobileapp/blob/main/experimental/src/commonMain/kotlin/coredevices/ring/external/indexwebhook/INDEX_WEBHOOK_API.md).
 The whole request is held in memory to verify it: fine for spoken notes.
+
+## Removing it
+
+Delete the webhook in the Pebble app (Index 01 Settings, Webhook), take `pebble()` and its import out
+of `worker.ts`, and delete `/secrets/pebble-webhook`. The Dash takes nothing away itself, so once
+that commit is live, take the card off with its null:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "pebble", card: null } })`. The recordings stay on `/pebble`
+and in the project's files.

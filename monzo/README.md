@@ -219,5 +219,11 @@ On the stream `/monzo/<account name>`:
 - Monzo asks the person to reconfirm API access about every 90 days. That affects the MCP tools
   (run step 2 of zero-trust-mcp.md again), not a webhook that is already registered.
 - To stop an account: call `delete_webhook` through the same connection, then
-  `itx.secrets.delete("/secrets/monzo-webhook-<name>")`, and take its row off the Dash:
+  `itx.secrets.delete("/secrets/monzo-webhook-<name>")`, and take its row off the Dash (which takes
+  nothing away itself):
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/connection-configured", payload: { integration: "monzo", connection: "<name>", row: null } })`.
+- To remove the package: stop each account, take `monzo()` and its import out of `worker.ts`, and
+  once that commit is live take the card off with its null, which takes any row left with it:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "monzo", card: null } })`. Delete the sign-in,
+  `/secrets/monzo`, with `itx.secrets.delete("/secrets/monzo")` unless the project's agents still use
+  Monzo's MCP tools.

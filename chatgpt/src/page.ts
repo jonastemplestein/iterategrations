@@ -33,8 +33,16 @@ const STYLE = `
 const post = (action: string, label: string, quiet = false): string =>
   `<form method="post" action="${action}"><button${quiet ? ' class="quiet"' : ""}>${label}</button></form>`;
 
+/** A form's answer: back to the page, which no other site may frame either. */
 const redirect = (query = ""): Response =>
-  new Response(null, { status: 303, headers: { location: `./${query}` } });
+  new Response(null, {
+    status: 303,
+    headers: {
+      location: `./${query}`,
+      "x-frame-options": "DENY",
+      "content-security-policy": "frame-ancestors 'none'",
+    },
+  });
 const flash = (key: "error" | "test", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 

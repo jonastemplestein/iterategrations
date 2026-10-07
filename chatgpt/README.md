@@ -22,7 +22,8 @@ token and keeps the rotated refresh token.
 - **The Dash:** the project's Integrations page shows a ChatGPT card ("Connect ChatGPT" until it is
   connected, with a button to the page) and, once connected, the account's row: its address and
   plan. The package registers both again after every publish, and whenever the page connects or
-  disconnects.
+  disconnects. The Dash takes nothing away itself: Disconnect appends the row's null, and if that
+  append fails, the next publish appends it again.
 
 ## Set it up
 
@@ -117,3 +118,8 @@ not take image generation, file search, the code interpreter, computer use or ho
 - **Models** are whatever the token can see. The page lists them (`chatgptModels(itx)` does too).
 - **Not built:** revoking the app at OpenAI on Disconnect (the revoke call needs the token in the
   request body, which egress never fills in), a second plan, and counting a request's cost.
+- **Disconnect** deletes `/secrets/chatgpt` first. If it cannot be deleted, the page says so and
+  ChatGPT stays connected, so Disconnect again can finish.
+- **Removing it.** Disconnect on the page, take `chatgpt()` and its import out of `worker.ts`, and
+  once that commit is live take the card off with its null, which takes any row left with it:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "chatgpt", card: null } })`.

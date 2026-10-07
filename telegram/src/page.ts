@@ -158,8 +158,16 @@ const connectForm = (first: boolean) => `<section>
   <p class="muted">The token goes into this project's secrets and is only ever sent to api.telegram.org. Use an account that belongs to the company to make the bot: that account owns it.</p>
 </section>`;
 
+/** A form's answer: back to the page, which no other site may frame either. */
 const redirect = (query = ""): Response =>
-  new Response(null, { status: 303, headers: { location: `./${query}` } });
+  new Response(null, {
+    status: 303,
+    headers: {
+      location: `./${query}`,
+      "x-frame-options": "DENY",
+      "content-security-policy": "frame-ancestors 'none'",
+    },
+  });
 const flash = (key: "error" | "connected", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 

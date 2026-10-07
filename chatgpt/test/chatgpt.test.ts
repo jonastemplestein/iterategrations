@@ -32,6 +32,7 @@ function fakeProject(options: { scope?: string; apiStatus?: number; slug?: strin
   const calls: Call[] = [];
   const appended: { path: string; event: any }[] = [];
   const scopes = { opened: 0, disposed: 0 };
+  const faults = { deletes: false };
   const itx: any = {
     cd: (path: string) => ({
       append: async (event: any) => {
@@ -49,7 +50,15 @@ function fakeProject(options: { scope?: string; apiStatus?: number; slug?: strin
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
         void (secrets[path] = { material, options }),
-      delete: async (path: string) => void delete secrets[path],
+      delete: async (path: string) => {
+        if (faults.deletes)
+          throw Object.assign(new Error("the secret store is unavailable"), {
+            code: "UNAVAILABLE",
+          });
+        if (!secrets[path])
+          throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
+        delete secrets[path];
+      },
       list: async () => Object.keys(secrets).map((path) => ({ path })),
     },
     kv: {
@@ -117,7 +126,7 @@ function fakeProject(options: { scope?: string; apiStatus?: number; slug?: strin
     });
   /** What was registered on `/integrations` for the Dash, in order. */
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
-  return { integration, itx, secrets, kv, calls, scopes, page, paste, publish, registry };
+  return { integration, itx, secrets, kv, calls, scopes, faults, page, paste, publish, registry };
 }
 
 /** The address OpenAI's consent ends on, for the sign-in the page opened. */
@@ -470,4 +479,27 @@ test("connecting registers the card and the account's row; disconnecting takes t
     itx: project.itx,
   });
   assert.equal(project.registry().length, count, "the hook ignores every other event");
+});
+
+test("a Disconnect whose secret cannot be deleted says so, and ChatGPT stays connected for another try", async () => {
+  const project = fakeProject();
+  await project.page("/start", { method: "POST" });
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+  const before = project.registry().length;
+  project.faults.deletes = true;
+  const failed = await project.page("/disconnect", { method: "POST" });
+  assert.match(
+    decodeURIComponent(failed.headers.get("location")!),
+    /error=the secret store is unavailable/,
+  );
+  assert.ok(project.secrets["/secrets/chatgpt"], "the tokens stay, and say so");
+  assert.ok(project.kv["chatgpt/account"]);
+  assert.equal(project.registry().length, before, "no row is taken away");
+  assert.match(await (await project.page("/")).text(), /jonas@example\.com/);
+  project.faults.deletes = false;
+  await project.page("/disconnect", { method: "POST" });
+  assert.deepEqual(project.secrets, {});
+  // and a sign-in cancelled before it held any secret is fine
+  await project.page("/start", { method: "POST" });
+  assert.equal((await project.page("/cancel", { method: "POST" })).headers.get("location"), "./");
 });

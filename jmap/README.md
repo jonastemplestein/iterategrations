@@ -203,3 +203,10 @@ const all = await masked.list();
 The fastest way in is a Fastmail rule that forwards a copy of each message to the project's own
 address, `<project>@<its email domain>`, where it lands as an event straight away. The other way is
 to poll: `search({ after: <the last time> })` on a schedule.
+
+## Removing it
+
+Take `jmap()`, the `mailbox()` member and their imports out of `worker.ts`, delete `mail.ts`, and
+delete `/secrets/fastmail` (and revoke the token in Fastmail). The Dash takes nothing away itself, so
+once that commit is live, take the card off with its null:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "jmap", card: null } })`.

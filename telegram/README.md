@@ -117,10 +117,11 @@ card and `integration/connection-configured` for each bot's row, connection `<bo
 registers both again after every publish, and again whenever a bot is connected or disconnected or
 someone is let in or out.
 
-Disconnect deletes the bot's two secrets first. One that cannot be deleted is shown as an error, and
-the bot stays listed, so Disconnect again can finish. A row the Dash could not be told to take away
-is taken away by Disconnect again, or at the next publish: until then `telegram/removed/<bot>` in the
-kv marks it.
+The Dash only shows what the package registered and takes nothing away itself: a row goes only when
+the package appends its null. Disconnect deletes the bot's two secrets first. One that cannot be
+deleted is shown as an error, and the bot stays listed, so Disconnect again can finish. A row the
+Dash could not be told to take away is taken away by Disconnect again, or at the next publish: until
+then `telegram/removed/<bot>` in the kv marks it.
 
 ## Good to know
 
@@ -142,6 +143,14 @@ kv marks it.
 - **Another bot:** paste a second token on the page.
 - **Rotating a token:** `/token` in @BotFather, then paste the new token on the page: connecting
   again also makes a new webhook secret.
+
+## Removing it
+
+Disconnect each bot on the page, then take `telegram()` and its import out of `worker.ts`. The Dash
+takes nothing away itself, so once that commit is live, take the card off with its null, which
+takes any row left with it:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "telegram", card: null } })`. Who was let in stays in the
+kv under `telegram/<bot>/`, for a bot connected again; delete those keys to forget them too.
 
 ## When the project has agents of its own
 

@@ -480,12 +480,13 @@ test("the callback for an install sets the installation's secret, proves it with
   assert.equal(claims[0]!.path, "/integrations/own-github");
   assert.equal(claims[0]!.event.idempotencyKey, `own-github:nonce:${nonce}`);
   assert.equal(claims[0]!.event.payload.nonce, nonce);
+  // the card first: a row stands under its card alone
   assert.deepEqual(project.registry().slice(before), [
+    { type: CONFIGURED, payload: { integration: "github", card: READY } },
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "github", connection: "42", row: row() },
     },
-    { type: CONFIGURED, payload: { integration: "github", card: READY } },
   ]);
   const html = await (await project.page("/_/?connected=acme")).text();
   assert.match(html, /Installed on acme/);
