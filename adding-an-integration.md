@@ -141,9 +141,10 @@ that claim has (a random value: the same event again is a no-op, so two identica
 both pass), prove a new installation through a temporary secret before replacing a working one,
 and clear only the pending request the callback's nonce names.
 
-**An API key with no page** (Monzo, Pebble, Waitrose, JMAP). The package's README recipe has the agent
-collect the key into a secret pinned to the service's origin; the install hook registers a card that
-says "Set up by your coding agent: see the recipe" until that secret exists. Where there are
+**An API key, and a page that shows its status** (Monzo, Pebble, Waitrose, JMAP). The package's
+README recipe has the agent collect the key into a secret pinned to the service's origin; the install
+hook registers a card that says "Set up by your coding agent: see the recipe" until that secret
+exists, and the page at `/` shows whether it does, with the URLs a person pastes at the service. Where there are
 accounts to name, the recipe's own script appends a row for each (Monzo's does). Outbound calls
 spend the key as a placeholder, in plain `fetch`, by the README's examples.
 
