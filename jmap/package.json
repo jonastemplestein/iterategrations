@@ -1,16 +1,12 @@
 {
   "name": "iterate-jmap",
   "version": "0.0.0",
-  "description": "A small JMAP client (RFC 8620, RFC 8621) over fetch, and Fastmail's Masked Email, for an iterate project",
+  "description": "The Mailbox (JMAP) card on an iterate project's Dash; agents call Fastmail's JMAP API with fetch, by the README's recipe",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./masked-email": {
-      "types": "./dist/masked-email.d.ts",
-      "default": "./dist/masked-email.js"
     }
   },
   "files": [
@@ -19,9 +15,6 @@
   "scripts": {
     "build": "vp pack",
     "test": "vp pack && vp test"
-  },
-  "dependencies": {
-    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260925.1",
