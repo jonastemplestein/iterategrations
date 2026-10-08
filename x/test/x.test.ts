@@ -3,12 +3,13 @@
 // platform's do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the
 // platform runs them for a client of the project's own (a signed state, the redirect composed under
 // the ingress, the client secret's placeholder refused unless its secret is pinned to the token
-// endpoint, any `expectAccount` refused since X's token answer names no account, and the same
-// callback again answering the same), a kv, appends that refuse a key used twice for another event
-// (as the platform does; the same event again is a no-op), and its egress: the global `fetch` of a
-// loaded worker, which swaps an account's token in for its placeholder, sends it only to the
-// secret's pinned origins, and reaches a pretend X. `faults` makes a secret's delete or an append on
-// /integrations fail. `host` is the worker hosting the package: a scope per `getItx`, counted.
+// endpoint, the account named at `account`'s endpoint (a pretend X's users/me, called with the new
+// token) and another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and the
+// same callback again answering the same), a kv, appends that refuse a key used twice for another
+// event (as the platform does; the same event again is a no-op), and its egress: the global `fetch`
+// of a loaded worker, which records every call, since the package makes none. `faults` makes a
+// secret's delete or an append on /integrations fail. `host` is the worker hosting the package: a
+// scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "vite-plus/test";
@@ -33,6 +34,19 @@ type Person = { id: string; username: string };
 const ADA: Person = { id: "1001", username: "fake_ada" };
 const GRACE: Person = { id: "1002", username: "fake_grace" };
 type Call = { url: string; headers: Record<string, string> };
+/** The account `completeOAuth` answers: its id, and its name when the endpoint has one. */
+type Named = { id: string; name: string | null };
+
+/** The account a JSON answer names at a lookup's dotted paths, as the platform reads it: a
+ *  non-empty id, and the name when its path finds a non-empty string. */
+function accountAt(json: unknown, lookup: { id: string; name?: string }): Named {
+  const at = (path: string) => path.split(".").reduce<any>((value, key) => value?.[key], json);
+  const id = at(lookup.id);
+  if (typeof id !== "string" || !id)
+    throw new Error(`the account endpoint named no account at ${lookup.id}`);
+  const name = lookup.name ? at(lookup.name) : null;
+  return { id, name: typeof name === "string" && name ? name : null };
+}
 
 /** The kv key the package keeps an attempt under: the SHA-256 of its state. */
 const pendingKey = (state: string) =>
@@ -51,16 +65,18 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   // it composes the redirect URI under (the deployment's ingress, never a primary hostname)
   const platform = {
     attempts: {} as Record<string, { options: any; state: string }>,
-    answers: {} as Record<string, { path: string; scopes: string[] }>,
+    answers: {} as Record<string, { path: string; scopes: string[]; account?: Named }>,
     redirectOrigin: ORIGIN,
     states: 0,
+    /** Whether it calls `account`'s endpoint: a platform older than the option ignores it, and
+     *  names no account. */
+    lookups: true,
   };
-  // X: whom each code and token is for, and a failure for its users/me to answer with
+  // X: whom each code and token is for
   const x_ = {
     codes: {} as Record<string, Person>,
     tokens: {} as Record<string, Person>,
     mints: 0,
-    usersMe: 0,
   };
   const faults = { deletes: false, registry: 0 };
   /** Every secret path the package began OAuth on, and every kv key it wrote, for the names test. */
@@ -121,14 +137,19 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
           throw new Error("no pending attempt matches this callback — begin again");
         const person = x_.codes[input.code];
         if (!person) throw new Error("the token endpoint answered 400 (invalid_request)");
-        // X's answer carries no ID token, so an account to hold it to cannot be checked
-        const expected = attempt.options.expectAccount;
-        if (expected)
-          throw new Error(
-            `the provider's answer names no account, so it cannot be checked against this connection's (${expected})`,
-          );
         const accessToken = `a-made-up-token-${++x_.mints}`;
         x_.tokens[accessToken] = person;
+        // the account endpoint, called with the new token before anything is stored
+        const lookup = platform.lookups ? attempt.options.account : undefined;
+        const account = lookup && namedAt(lookup, accessToken);
+        const expected = attempt.options.expectAccount;
+        if (expected && account?.id !== expected)
+          throw Object.assign(
+            new Error(
+              `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
+            ),
+            { code: "IDENTITY_CONFLICT" },
+          );
         secrets[path] = {
           material: {
             clientId: attempt.options.clientId,
@@ -146,7 +167,11 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
           },
         };
         delete platform.attempts[path];
-        const answer = { path, scopes: attempt.options.scope.split(" ") };
+        const answer = {
+          path,
+          scopes: attempt.options.scope.split(" "),
+          ...(account && { account }),
+        };
         platform.answers[input.state] = answer;
         return answer;
       },
@@ -180,34 +205,21 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
       },
     }),
   };
-  /** The project's egress, a loaded worker's global `fetch`: an account's token swapped in for its
-   *  placeholder, and sent only to the origins its secret is pinned to. */
+  /** What `account`'s endpoint names for a token, read at its paths as the platform reads them: X
+   *  answers only at users/me. */
+  const namedAt = (lookup: { url: string; id: string; name?: string }, token: string): Named => {
+    if (lookup.url !== USERS_ME) throw new Error("the account lookup answered 404");
+    const person = x_.tokens[token]!;
+    return accountAt(
+      { data: { id: person.id, name: "A made-up name", username: person.username } },
+      lookup,
+    );
+  };
+  /** The project's egress, a loaded worker's global `fetch`: the platform names every account, so
+   *  the package calls no service, and each call is recorded and refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
     calls.push({ url: request.url, headers: Object.fromEntries(request.headers) });
-    const path =
-      /^Bearer getSecret\("(\/secrets\/own-x-[^"]+)", \{ field: "accessToken" \}\)$/.exec(
-        request.headers.get("authorization") ?? "",
-      )?.[1];
-    const secret = path ? secrets[path] : undefined;
-    if (!secret) return new Response(`no stored project secret for ${path}\n`, { status: 502 });
-    if (!secret.options.urls.includes(new URL(request.url).origin))
-      return new Response(`${path} is not pinned to ${request.url}\n`, { status: 502 });
-    if (x_.usersMe)
-      return Response.json(
-        {
-          title: "Too Many Requests",
-          detail: "Too Many Requests",
-          type: "about:blank",
-          status: x_.usersMe,
-        },
-        { status: x_.usersMe },
-      );
-    const person = x_.tokens[secret.material.accessToken]!;
-    if (request.url === USERS_ME)
-      return Response.json({
-        data: { id: person.id, name: "A made-up name", username: person.username },
-      });
     return new Response("unexpected\n", { status: 500 });
   };
   const integration = x(options);
@@ -518,7 +530,7 @@ test("no other site can frame the page's answers or the callback's", async () =>
 
 // ------------------------------------------------------------------ connect
 
-test("Connect needs the client ID and its secret; then it begins OAuth with X's endpoints, the callback, the scopes, the client's credentials in a Basic header and the client secret's placeholder, and keeps the attempt by its state", async () => {
+test("Connect needs the client ID and its secret; then it begins OAuth with X's endpoints, the callback, the scopes, the client's credentials in a Basic header, the client secret's placeholder and users/me, which names the account, and keeps the attempt by its state", async () => {
   const project = fakeProject();
   assert.match(
     location(await project.page("/connect", { form: {} })),
@@ -549,6 +561,7 @@ test("Connect needs the client ID and its secret; then it begins OAuth with X's 
         clientAuth: "client_secret_basic",
         scope: "tweet.read users.read offline.access",
         urls: URLS,
+        account: { url: USERS_ME, id: "data.id", name: "data.username" },
       },
     },
   ]);
@@ -620,7 +633,7 @@ test("after a Connect whose redirect URI is not the page's own address (a primar
 
 // --------------------------------------------------------------- the callback
 
-test("the callback completes the attempt, names the account with one users/me call through egress, keeps it, registers the card then the row, and sends the person back", async () => {
+test("the callback completes the attempt, keeps the account the platform named, registers the card then the row, and sends the person back; the package calls no service of its own", async () => {
   const project = fakeProject();
   await project.setUp();
   const state = await project.start();
@@ -634,12 +647,7 @@ test("the callback completes the attempt, names the account with one users/me ca
   assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   // the tokens went no further than the pin the package asked for
   assert.deepEqual(project.secrets[path]!.options.urls, URLS);
-  assert.deepEqual(project.calls, [
-    {
-      url: USERS_ME,
-      headers: { authorization: `Bearer getSecret("${path}", { field: "accessToken" })` },
-    },
-  ]);
+  assert.deepEqual(project.calls, []);
   const account = JSON.parse(project.kv[`own-x/accounts/${connection}`]!);
   assert.deepEqual(
     { ...account, at: undefined },
@@ -728,22 +736,31 @@ test("an exchange that fails deletes the pending secret, shows the error, and li
   assert.match(html, /None yet/);
 });
 
-test("a users/me call that fails deletes the new connection's secret, and lists nothing", async () => {
+test("a platform that names no account (one older than the account endpoint) connects nothing: the new connection's secret goes", async () => {
   const project = fakeProject();
   await project.setUp();
-  project.x.usersMe = 429;
+  project.platform.lookups = false;
   const before = project.registry().length;
   const res = await project.connect(ADA);
-  assert.match(
-    location(res),
-    /error=X's users\/me named no account \(HTTP 429: Too Many Requests\)/,
-  );
+  assert.match(location(res), /error=The platform named no account for these tokens/);
   assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
   assert.equal(
     Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
     0,
   );
   assert.equal(project.registry().length, before);
+});
+
+test("an account users/me names no username for is listed by its id, with no Open button", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const res = await project.connect({ id: "1004", username: "" });
+  assert.equal(res.headers.get("location"), "../?connected=1004");
+  const connection = project.lastConnection();
+  assert.equal(JSON.parse(project.kv[`own-x/accounts/${connection}`]!).account, "1004");
+  const { row: registered } = project.registry().at(-1)!.payload;
+  assert.equal(registered.account, "1004");
+  assert.deepEqual(registered.actions, [{ label: "Manage", routingSlug: "x", path: "/" }]);
 });
 
 test("the same account connected twice keeps one row: the older connection's secret and row go", async () => {
@@ -778,7 +795,7 @@ test("the same account connected twice keeps one row: the older connection's sec
 
 // --------------------------------------------------------------- reconnect
 
-test("Reconnect begins OAuth again on the same connection, with no expectAccount: X's token answer names no account, so the platform would refuse every reconnect held to one; the callback keeps the connection when X signs the same account in", async () => {
+test("Reconnect begins OAuth again on the same connection, held to its account (expectAccount, against the id users/me names); the callback keeps the connection", async () => {
   const { project, connection } = await connected();
   const path = `/secrets/own-x-${connection}`;
   const token = project.secrets[path]!.material.accessToken;
@@ -796,6 +813,8 @@ test("Reconnect begins OAuth again on the same connection, with no expectAccount
       clientAuth: "client_secret_basic",
       scope: "tweet.read users.read offline.access",
       urls: URLS,
+      account: { url: USERS_ME, id: "data.id", name: "data.username" },
+      expectAccount: "1001",
     },
   });
   assert.notEqual(project.secrets[path]!.material.accessToken, token, "new tokens");
@@ -819,46 +838,24 @@ test("Reconnect begins OAuth again on the same connection, with no expectAccount
   assert.equal(project.begun.length, begun);
 });
 
-test("a Reconnect that comes back as another account deletes those tokens, and the connection with them: the platform could not hold them to the account", async () => {
+test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: the page shows it, and nothing changes", async () => {
   const { project, connection } = await connected();
+  await project.connect(GRACE);
+  const secrets = structuredClone(project.secrets);
+  const kv = structuredClone(project.kv);
   const before = project.registry().length;
   const res = await project.connect(GRACE, connection);
   assert.match(
     location(res),
-    /error=X signed in @fake_grace, not @fake_ada\. Those tokens were deleted, and @fake_ada is no longer connected: sign in to X as @fake_ada, then connect it again\./,
+    /error=the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
-  assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-  assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
-  assert.equal(project.kv[`own-x/removed/${connection}`], undefined, "its null row landed");
-  assert.deepEqual(project.registry().slice(before), [
-    { type: CONNECTION_CONFIGURED, payload: { integration: "x", connection, row: null } },
-    { type: CONFIGURED, payload: { integration: "x", card: NO_ACCOUNT } },
-  ]);
-});
-
-test("a Reconnect whose users/me call fails deletes the new tokens, and the connection with them: no account vouches for them", async () => {
-  const { project, connection } = await connected();
-  project.x.usersMe = 503;
-  const res = await project.connect(ADA, connection);
-  assert.match(
-    location(res),
-    /error=X's users\/me named no account \(HTTP 503: Too Many Requests\)\. Those tokens were deleted, and @fake_ada is no longer connected/,
-  );
-  assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-  assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
-  assert.equal(project.registry().at(-2)!.payload.row, null);
-});
-
-test("a Reconnect as another account that is connected already takes only the reconnected connection: the other keeps its own tokens", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  const grace = project.lastConnection();
-  const kept = structuredClone(project.secrets[`/secrets/own-x-${grace}`]);
-  const res = await project.connect(GRACE, connection);
-  assert.match(location(res), /error=X signed in @fake_grace, not @fake_ada/);
-  assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-  assert.deepEqual(project.secrets[`/secrets/own-x-${grace}`], kept);
-  assert.equal(JSON.parse(project.kv[`own-x/accounts/${grace}`]!).account, "@fake_grace");
+  assert.deepEqual(project.secrets, secrets);
+  assert.deepEqual(project.kv, kv);
+  assert.equal(project.registry().length, before);
+  const html = await (await project.page(`/${res.headers.get("location")!.slice(3)}`)).text();
+  assert.match(html, /class="error">the provider authorized a different account \(1002\)/);
+  assert.match(html, /<b>@fake_ada<\/b>/);
+  assert.match(html, /<b>@fake_grace<\/b>/);
 });
 
 test("an account reconnected after a removal that did not finish keeps its row at the next publish", async () => {

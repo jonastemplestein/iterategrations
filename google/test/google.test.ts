@@ -3,12 +3,13 @@
 // platform's do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the
 // platform runs them for a client of the project's own (a signed state, the redirect composed under
 // the ingress, the client secret's placeholder refused unless its secret is pinned to the token
-// endpoint, another account refused when `expectAccount` names one, and the same callback again
-// answering the same), a kv, appends that refuse a key used twice for another event (as the
-// platform does; the same event again is a no-op), and its egress: the global `fetch` of a loaded
-// worker, which swaps an account's token in for its placeholder, sends it only to the secret's
-// pinned origins, and reaches a pretend Google. `faults` makes a secret's delete or an append on
-// /integrations fail. `host` is the worker hosting the package: a scope per `getItx`, counted.
+// endpoint, the account named at `account`'s endpoint (a pretend Google's userinfo, called with the
+// new token) and another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and
+// the same callback again answering the same), a kv, appends that refuse a key used twice for
+// another event (as the platform does; the same event again is a no-op), and its egress: the global
+// `fetch` of a loaded worker, which records every call, since the package makes none. `faults`
+// makes a secret's delete or an append on /integrations fail. `host` is the worker hosting the
+// package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "vite-plus/test";
@@ -41,6 +42,19 @@ type Person = { id: string; email: string };
 const ADA: Person = { id: "1001", email: "ada@example.com" };
 const GRACE: Person = { id: "1002", email: "grace@example.com" };
 type Call = { url: string; headers: Record<string, string> };
+/** The account `completeOAuth` answers: its id, and its name when the endpoint has one. */
+type Named = { id: string; name: string | null };
+
+/** The account a JSON answer names at a lookup's dotted paths, as the platform reads it: a
+ *  non-empty id, and the name when its path finds a non-empty string. */
+function accountAt(json: unknown, lookup: { id: string; name?: string }): Named {
+  const at = (path: string) => path.split(".").reduce<any>((value, key) => value?.[key], json);
+  const id = at(lookup.id);
+  if (typeof id !== "string" || !id)
+    throw new Error(`the account endpoint named no account at ${lookup.id}`);
+  const name = lookup.name ? at(lookup.name) : null;
+  return { id, name: typeof name === "string" && name ? name : null };
+}
 
 /** The kv key the package keeps an attempt under: the SHA-256 of its state. */
 const pendingKey = (state: string) =>
@@ -59,18 +73,18 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   // it composes the redirect URI under (the deployment's ingress, never a primary hostname)
   const platform = {
     attempts: {} as Record<string, { options: any; state: string }>,
-    answers: {} as Record<string, { path: string; scopes: string[] }>,
+    answers: {} as Record<string, { path: string; scopes: string[]; account?: Named }>,
     redirectOrigin: ORIGIN,
     states: 0,
-    /** Whether `expectAccount` is checked, as the platform does against Google's ID token. */
-    holdsAccount: true,
+    /** Whether it calls `account`'s endpoint: a platform older than the option ignores it, and
+     *  names no account. */
+    lookups: true,
   };
-  // Google: whom each code and token is for, and a failure for its userinfo to answer with
+  // Google: whom each code and token is for
   const google_ = {
     codes: {} as Record<string, Person>,
     tokens: {} as Record<string, Person>,
     mints: 0,
-    userinfo: 0,
   };
   const faults = { deletes: false, registry: 0 };
   /** Every secret path the package began OAuth on, and every kv key it wrote, for the names test. */
@@ -131,14 +145,19 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
           throw new Error("no pending attempt matches this callback — begin again");
         const person = google_.codes[input.code];
         if (!person) throw new Error("the token endpoint answered 400 (invalid_grant)");
-        // Google's answer carries an ID token, whose `sub` is the account's id
-        const expected = attempt.options.expectAccount;
-        if (platform.holdsAccount && expected && expected !== person.id)
-          throw new Error(
-            `the provider answered for another account (${person.id}) than this connection's (${expected}) — connect it as a new connection instead`,
-          );
         const accessToken = `a-made-up-token-${++google_.mints}`;
         google_.tokens[accessToken] = person;
+        // the account endpoint, called with the new token before anything is stored
+        const lookup = platform.lookups ? attempt.options.account : undefined;
+        const account = lookup && namedAt(lookup, accessToken);
+        const expected = attempt.options.expectAccount;
+        if (expected && account?.id !== expected)
+          throw Object.assign(
+            new Error(
+              `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
+            ),
+            { code: "IDENTITY_CONFLICT" },
+          );
         secrets[path] = {
           material: {
             clientId: attempt.options.clientId,
@@ -160,6 +179,7 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
         const answer = {
           path,
           scopes: attempt.options.scope.split(" ").map((scope: string) => long[scope] ?? scope),
+          ...(account && { account }),
         };
         platform.answers[input.state] = answer;
         return answer;
@@ -194,27 +214,18 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
       },
     }),
   };
-  /** The project's egress, a loaded worker's global `fetch`: an account's token swapped in for its
-   *  placeholder, and sent only to the origins its secret is pinned to. */
+  /** What `account`'s endpoint names for a token, read at its paths as the platform reads them:
+   *  Google answers only at its userinfo endpoint. */
+  const namedAt = (lookup: { url: string; id: string; name?: string }, token: string): Named => {
+    if (lookup.url !== USERINFO) throw new Error("the account lookup answered 404");
+    const person = google_.tokens[token]!;
+    return accountAt({ id: person.id, email: person.email, verified_email: true }, lookup);
+  };
+  /** The project's egress, a loaded worker's global `fetch`: the platform names every account, so
+   *  the package calls no service, and each call is recorded and refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
     calls.push({ url: request.url, headers: Object.fromEntries(request.headers) });
-    const path =
-      /^Bearer getSecret\("(\/secrets\/own-google-[^"]+)", \{ field: "accessToken" \}\)$/.exec(
-        request.headers.get("authorization") ?? "",
-      )?.[1];
-    const secret = path ? secrets[path] : undefined;
-    if (!secret) return new Response(`no stored project secret for ${path}\n`, { status: 502 });
-    if (!secret.options.urls.includes(new URL(request.url).origin))
-      return new Response(`${path} is not pinned to ${request.url}\n`, { status: 502 });
-    if (google_.userinfo)
-      return Response.json(
-        { error: { code: google_.userinfo, message: "Backend Error" } },
-        { status: google_.userinfo },
-      );
-    const person = google_.tokens[secret.material.accessToken]!;
-    if (request.url === USERINFO)
-      return Response.json({ id: person.id, email: person.email, verified_email: true });
     return new Response("unexpected\n", { status: 500 });
   };
   const integration = google(options);
@@ -524,7 +535,7 @@ test("no other site can frame the page's answers or the callback's", async () =>
 
 // ------------------------------------------------------------------ connect
 
-test("Connect needs the client ID and its secret; then it begins OAuth with Google's endpoints, the callback, the scopes, offline access and the client secret's placeholder, and keeps the attempt by its state", async () => {
+test("Connect needs the client ID and its secret; then it begins OAuth with Google's endpoints, the callback, the scopes, offline access, the client secret's placeholder and the userinfo endpoint that names the account, and keeps the attempt by its state", async () => {
   const project = fakeProject();
   assert.match(
     location(await project.page("/connect", { form: {} })),
@@ -555,6 +566,7 @@ test("Connect needs the client ID and its secret; then it begins OAuth with Goog
         scope: "openid email profile",
         urls: URLS,
         extra: { access_type: "offline", prompt: "consent" },
+        account: { url: USERINFO, id: "id", name: "email" },
       },
     },
   ]);
@@ -632,7 +644,7 @@ test("after a Connect whose redirect URI is not the page's own address (a primar
 
 // --------------------------------------------------------------- the callback
 
-test("the callback completes the attempt, names the account with one userinfo call through egress, keeps it, registers the card then the row, and sends the person back", async () => {
+test("the callback completes the attempt, keeps the account the platform named, registers the card then the row, and sends the person back; the package calls no service of its own", async () => {
   const project = fakeProject();
   await project.setUp();
   const state = await project.start();
@@ -646,12 +658,7 @@ test("the callback completes the attempt, names the account with one userinfo ca
   assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   // the tokens went no further than the pin the package asked for
   assert.deepEqual(project.secrets[path]!.options.urls, URLS);
-  assert.deepEqual(project.calls, [
-    {
-      url: USERINFO,
-      headers: { authorization: `Bearer getSecret("${path}", { field: "accessToken" })` },
-    },
-  ]);
+  assert.deepEqual(project.calls, []);
   const account = JSON.parse(project.kv[`own-google/accounts/${connection}`]!);
   assert.deepEqual(
     { ...account, at: undefined },
@@ -740,22 +747,29 @@ test("an exchange that fails deletes the pending secret, shows the error, and li
   assert.match(html, /None yet/);
 });
 
-test("a userinfo call that fails deletes the new connection's secret, and lists nothing", async () => {
+test("a platform that names no account (one older than the account endpoint) connects nothing: the new connection's secret goes", async () => {
   const project = fakeProject();
   await project.setUp();
-  project.google.userinfo = 500;
+  project.platform.lookups = false;
   const before = project.registry().length;
   const res = await project.connect(ADA);
-  assert.match(
-    location(res),
-    /error=Google's userinfo named no account \(HTTP 500: Backend Error\)/,
-  );
+  assert.match(location(res), /error=The platform named no account for these tokens/);
   assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-google-app"]);
   assert.equal(
     Object.keys(project.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
     0,
   );
   assert.equal(project.registry().length, before);
+});
+
+test("an account the userinfo endpoint names no address for is listed by its id", async () => {
+  const project = fakeProject();
+  await project.setUp();
+  const res = await project.connect({ id: "1004", email: "" });
+  assert.equal(res.headers.get("location"), "../?connected=1004");
+  const connection = project.lastConnection();
+  assert.equal(JSON.parse(project.kv[`own-google/accounts/${connection}`]!).account, "1004");
+  assert.equal(project.registry().at(-1)!.payload.row.account, "1004");
 });
 
 test("the same account connected twice keeps one row: the older connection's secret and row go", async () => {
@@ -808,6 +822,7 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
       scope: "openid email profile",
       urls: URLS,
       extra: { access_type: "offline", prompt: "consent", login_hint: "ada@example.com" },
+      account: { url: USERINFO, id: "id", name: "email" },
       expectAccount: "1001",
     },
   });
@@ -835,47 +850,24 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
   assert.equal(project.begun.length, begun);
 });
 
-test("a Reconnect that comes back as another account is refused before anything is stored: the connection stays as it was", async () => {
+test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: the page shows it, and nothing changes", async () => {
   const { project, connection } = await connected();
-  const path = `/secrets/own-google-${connection}`;
-  const kept = structuredClone(project.secrets[path]);
-  const account = project.kv[`own-google/accounts/${connection}`];
-  const before = project.registry().length;
-  const res = await project.connect(GRACE, connection);
-  assert.match(location(res), /error=the provider answered for another account \(1002\)/);
-  assert.deepEqual(project.secrets[path], kept);
-  assert.equal(project.kv[`own-google/accounts/${connection}`], account);
-  assert.equal(project.registry().length, before);
-});
-
-test("a Reconnect whose userinfo call fails keeps the account: the platform held its new tokens to it", async () => {
-  const { project, connection } = await connected();
-  const path = `/secrets/own-google-${connection}`;
-  const account = project.kv[`own-google/accounts/${connection}`];
-  project.google.userinfo = 503;
-  const res = await project.connect(ADA, connection);
-  assert.match(location(res), /error=Google's userinfo named no account \(HTTP 503/);
-  assert.ok(project.secrets[path]);
-  assert.equal(project.kv[`own-google/accounts/${connection}`], account);
-  assert.equal(project.kv[`own-google/removed/${connection}`], undefined);
-});
-
-test("should the platform ever store another account's tokens on a Reconnect, the callback deletes them, and the connection with them", async () => {
-  const { project, connection } = await connected();
-  project.platform.holdsAccount = false;
+  await project.connect(GRACE);
+  const secrets = structuredClone(project.secrets);
+  const kv = structuredClone(project.kv);
   const before = project.registry().length;
   const res = await project.connect(GRACE, connection);
   assert.match(
     location(res),
-    /error=Google signed in grace@example\.com, not ada@example\.com\. Those tokens were deleted, and ada@example\.com is no longer connected/,
+    /error=the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
-  assert.equal(project.secrets[`/secrets/own-google-${connection}`], undefined);
-  assert.equal(project.kv[`own-google/accounts/${connection}`], undefined);
-  assert.equal(project.kv[`own-google/removed/${connection}`], undefined, "its null row landed");
-  assert.deepEqual(project.registry().slice(before), [
-    { type: CONNECTION_CONFIGURED, payload: { integration: "google", connection, row: null } },
-    { type: CONFIGURED, payload: { integration: "google", card: NO_ACCOUNT } },
-  ]);
+  assert.deepEqual(project.secrets, secrets);
+  assert.deepEqual(project.kv, kv);
+  assert.equal(project.registry().length, before);
+  const html = await (await project.page(`/${res.headers.get("location")!.slice(3)}`)).text();
+  assert.match(html, /class="error">the provider authorized a different account \(1002\)/);
+  assert.match(html, /<b>ada@example\.com<\/b>/);
+  assert.match(html, /<b>grace@example\.com<\/b>/);
 });
 
 test("an account reconnected after a removal that did not finish keeps its row at the next publish", async () => {

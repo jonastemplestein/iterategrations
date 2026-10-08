@@ -115,7 +115,10 @@ Google's API references say what each call takes and which scope it needs: Gmail
 <https://developers.google.com/calendar/api/v3/reference>, Drive at
 <https://developers.google.com/drive/api/reference/rest/v3>.
 
-Which secret is which account: the page lists them, and so does the kv.
+Which secret is which account: the page lists them, and so does the kv. The platform names each
+account at Google's userinfo endpoint, with the new token, before it stores anything: `externalId`
+is the account's `id` there, and `account` its `email`. A Reconnect is held to the same account, so
+a secret always holds the tokens of the account the kv names.
 
 ```js
 async (itx) => {
@@ -147,14 +150,15 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
   refresh. To rotate it, add a new secret on the client's page at Google, save it through the page's
   link (**Replace it**), then delete the old one at Google. To move to another client, save its ID
   and its secret, then Reconnect each account.
-- **A row per account.** The page names each account with one call to Google's userinfo, through the
-  project's egress, right after the platform has stored its tokens. The same account connected again
-  replaces its older connection: that secret goes, and its row.
+- **A row per account.** The platform names each account at Google's userinfo endpoint, with the new
+  token, before it stores anything (`account` in `beginOAuth`), and the page keeps what it answers.
+  The same account connected again replaces its older connection: that secret goes, and its row.
 - **Reconnect** asks Google again on the same connection: for more scopes, or when the refresh token
   has stopped working. It is held to the same account: the platform refuses another account's tokens
-  before it stores them (`expectAccount`, against the ID token's `sub`), and Google is hinted to ask
-  for that account (`login_hint`). A change to `scopes` or `urls` reaches an account at its next
-  Reconnect: its grant and its pin are set when it connects.
+  before it stores them (`expectAccount`, against the id the userinfo endpoint names), the page
+  shows the refusal, and the account keeps its old tokens. Google is hinted to ask for that account
+  (`login_hint`). A change to `scopes` or `urls` reaches an account at its next Reconnect: its grant
+  and its pin are set when it connects.
 - **Testing lasts 7 days.** While the consent screen's publishing status is **Testing**, a refresh
   token for more than an account's name and address lapses after 7 days, and the account needs a
   Reconnect. Publish the app, or make it **Internal** for a Google Workspace organization's own
