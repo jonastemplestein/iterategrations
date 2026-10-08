@@ -119,8 +119,8 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
     <p>Open <a href="https://github.com/settings/apps/new">github.com/settings/apps/new</a> for your own account, or for an organization <code>github.com/organizations/&lt;org&gt;/settings/apps/new</code>. Fill in:</p>
     <ul>
       <li><b>GitHub App name:</b> any name that is free on GitHub; the project's is a good one.</li>
-      <li><b>Homepage URL:</b> this page:${copyRow(`${here}/_/`)}</li>
-      <li><b>Setup URL</b> (under Post installation), and tick <b>Redirect on update</b>:${copyRow(`${here}/callback`)}</li>
+      <li><b>Homepage URL:</b> this page:${copyRow(`${here}/`)}</li>
+      <li><b>Setup URL</b> (under Post installation), and tick <b>Redirect on update</b>:${copyRow(`${here}/oauth2/callback`)}</li>
       <li><b>Webhook:</b> Active. <b>Webhook URL:</b>${copyRow(`${here}/webhook`)}<b>Secret:</b> make one up (<code>openssl rand -hex 32</code>) and keep it for step 3.</li>
       <li><b>Permissions</b> and <b>Subscribe to events:</b> what the project needs, no more. Every event you subscribe to reaches the project.</li>
       <li><b>Where can this GitHub App be installed?</b> Only on this account, unless other accounts should install it.</li>
@@ -172,17 +172,14 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
   return `${flash}${step1}${step2}${step3}${step4}${step5}`;
 }
 
-/** The members-only page at `/_/`: the App's URLs to paste at GitHub, its ID and slug, the link that
+/** The members-only page at `/`: the App's URLs to paste at GitHub, its ID and slug, the link that
  *  collects its secrets, Install, and the installations with Disconnect. Every write is a plain form
  *  POST, answered with a redirect back to the page; Install's goes on to GitHub. `slug` is the
  *  routing slug the Dash's buttons lead to. */
 export async function servePage(request: Request, itx: GithubItx, slug: string): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/^\/_\/?/, "");
+  const path = url.pathname.replace(/^\//, "");
 
-  // `/_` would resolve the page's relative links against `/`
-  if (request.method === "GET" && url.pathname === "/_")
-    return new Response(null, { status: 308, headers: { location: "_/", ...NO_FRAMES } });
   if (request.method === "GET" && path === "") {
     // the URLs GitHub is given keep the base path a paths ingress strips
     const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
@@ -247,7 +244,7 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
   }
 }
 
-/** The App's setup URL, `/callback`, members only. After an install GitHub sends the person here
+/** The App's setup URL, `/oauth2/callback`, members only. After an install GitHub sends the person here
  *  with `installation_id`, `setup_action` (`install`, `update`, or `request` when an owner must
  *  approve it, with no installation yet) and the `state` the install link carried
  *  (https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-setup-url,
@@ -269,7 +266,7 @@ export async function serveCallback(
   const action = query.get("setup_action") ?? "";
   const id = query.get("installation_id") ?? "";
   const back = (flash: string): Response =>
-    new Response(null, { status: 303, headers: { location: `./_/${flash}`, ...NO_FRAMES } });
+    new Response(null, { status: 303, headers: { location: `../${flash}`, ...NO_FRAMES } });
   const refused = flashOf(
     "error",
     "GitHub came back from an install this page did not start, or that is over an hour old. Press Install again.",

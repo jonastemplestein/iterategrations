@@ -10,9 +10,9 @@ api.telegram.org. The token is kept as a secret, and iterate's egress swaps it i
 ever sends a placeholder naming the secret. Telegram puts the token in the URL path
 (`/bot<token>/<method>`), so the placeholder goes there.
 
-- **The page** (members only, at the project's `telegram` address, `/_/`): the BotFather steps, a form
+- **The page** (members only, at the project's `telegram` address, `/`): the BotFather steps, a form
   for the token, invite links, the people waiting to be let in, who is in, and a Disconnect button.
-- **The webhook** (the same address, `/<bot>`): Telegram's, checked with a secret.
+- **The webhook** (the same address, `/webhook/<bot>`): Telegram's, checked with a secret.
 - **Private chats:** a message from someone who is in wakes that chat's agent. The chat shows
   "typing". Someone who is not in is told once that the bot is private, and waits on the page.
 - **Groups:** add the bot to a group. People who are in can talk to it there. It answers when it is
@@ -53,7 +53,7 @@ each message to the project's own agents (below). The project must have the agen
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "telegram", path: "/nope" });
+  const url = await itx.url({ routingSlug: "telegram", path: "/webhook/nope" });
   const res = await itx.fetch(new Request(url));
   return { url, status: res.status }; // 405 = the package is there. 404: not published yet
 };
@@ -62,7 +62,7 @@ async (itx) => {
 ### 2. Send the person to the page
 
 ```js
-async (itx) => itx.url({ routingSlug: "telegram", path: "/_/" });
+async (itx) => itx.url({ routingSlug: "telegram", path: "/" });
 ```
 
 Say: "Open this, sign in, and follow the steps." That is all. The page tells them to open

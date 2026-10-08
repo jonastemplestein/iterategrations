@@ -79,7 +79,7 @@ The receiver takes only `POST`, so a `GET` is answered `405`, and that is the pr
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "monzo", path: "/nope/nope" });
+  const url = await itx.url({ routingSlug: "monzo", path: "/webhook/nope/nope" });
   const res = await itx.fetch(new Request(url));
   return { url, status: res.status }; // 405 = the receiver is there. 404: not published yet
 };
@@ -112,7 +112,7 @@ one (`uk_retail_joint`); a business account is `uk_business`.
 
 One script per account does it all: it makes the secret, stores it as
 `/secrets/monzo-webhook-<name>` (which the receiver checks with `itx.secrets.verifyEquals`), puts
-it in the URL `…/<name>/<secret>`, registers that URL with Monzo, and lists the account under the
+it in the URL `…/webhook/<name>/<secret>`, registers that URL with Monzo, and lists the account under the
 Monzo card on the Dash. The secret is never returned, so it never reaches the chat. Run it once per
 account, and again to rotate: it deletes this project's earlier webhook for that account first, so
 the old URL stops.
@@ -124,8 +124,8 @@ async (itx) => {
   const secret = [...crypto.getRandomValues(new Uint8Array(32))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  const mine = await itx.url({ routingSlug: "monzo", path: `/${name}/` });
-  const url = await itx.url({ routingSlug: "monzo", path: `/${name}/${secret}` });
+  const mine = await itx.url({ routingSlug: "monzo", path: `/webhook/${name}/` });
+  const url = await itx.url({ routingSlug: "monzo", path: `/webhook/${name}/${secret}` });
   const mcp = await itx.connectToMcp("<base>/monzo/mcp", {
     headers: { authorization: 'Bearer getSecret("/secrets/monzo", { field: "accessToken" })' },
   });

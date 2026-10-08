@@ -72,17 +72,17 @@ test("it answers the monzo routing slug; a webhook is public, so no member is as
   const project = fakeProject();
   assert.equal(project.integration.routingSlug, "monzo");
   const res = await project.serve(
-    post("/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
+    post("/webhook/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
   );
   assert.equal(res.status, 200);
-  await project.serve(post("/nope/nope", {}));
+  await project.serve(post("/webhook/nope/nope", {}));
   assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
 });
 
 test("a transaction.created for an account becomes one event on that account's stream, the transaction untouched", async () => {
   const project = fakeProject();
   const res = await project.serve(
-    post("/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
+    post("/webhook/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
   );
   assert.equal(res.status, 200);
   assert.deepEqual(project.appended, [
@@ -96,7 +96,7 @@ test("a transaction.created for an account becomes one event on that account's s
     },
   ]);
   await project.serve(
-    post("/jonas-personal/personal-secret", {
+    post("/webhook/jonas-personal/personal-secret", {
       type: "transaction.created",
       data: { ...transaction, id: "tx_0002" },
     }),
@@ -110,12 +110,13 @@ test("a transaction.created for an account becomes one event on that account's s
 test("an account's secret opens only that account: the other's, a wrong one, an unknown or malformed account, or nothing is a 404 that stores nothing", async () => {
   const project = fakeProject();
   for (const path of [
-    "/joint-account/personal-secret",
-    "/jonas-personal/joint-secret",
-    "/joint-account/joint-secretx",
-    "/elsewhere/joint-secret",
-    "/joint-account",
-    "/joint-account/",
+    "/webhook/joint-account/personal-secret",
+    "/webhook/jonas-personal/joint-secret",
+    "/webhook/joint-account/joint-secretx",
+    "/webhook/elsewhere/joint-secret",
+    "/joint-account/joint-secret",
+    "/webhook/joint-account",
+    "/webhook/joint-account/",
     "/",
     "",
     "/../joint-secret",
@@ -129,7 +130,7 @@ test("an account's secret opens only that account: the other's, a wrong one, an 
 
 test("a trailing path after the secret is fine; other event types are answered 200 and ignored; garbage is not stored", async () => {
   const project = fakeProject();
-  const url = "/joint-account/joint-secret";
+  const url = "/webhook/joint-account/joint-secret";
   const trailing = await project.serve(
     post(`${url}/anything`, { type: "transaction.created", data: transaction }),
   );

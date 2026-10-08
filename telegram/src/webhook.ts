@@ -230,7 +230,7 @@ async function route(
 
 /** Telegram's webhook. It POSTs one `Update` to the URL given to `setWebhook`, with the
  *  `secret_token` chosen there in the header `X-Telegram-Bot-Api-Secret-Token`, and resends until it
- *  gets a 2xx. The URL is `/<bot>`; the token is checked against `/secrets/telegram-webhook-<bot>`
+ *  gets a 2xx. The URL is `/webhook/<bot>`; the token is checked against `/secrets/telegram-webhook-<bot>`
  *  with `itx.secrets.verifyEquals`. An unknown bot or a wrong token looks like any other path: a 404
  *  that stores nothing. Each update is recorded as `telegram/update`, keyed by `update_id`; then
  *  `route` decides what it means. */
@@ -241,7 +241,7 @@ export async function receiveUpdate(
   slug: string,
 ): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
-  const [, bot = ""] = new URL(request.url).pathname.split("/").map(decodeURIComponent);
+  const [, , bot = ""] = new URL(request.url).pathname.split("/").map(decodeURIComponent);
   const presented = request.headers.get("x-telegram-bot-api-secret-token") ?? "";
   const known =
     BOT_NAME.test(bot) &&
