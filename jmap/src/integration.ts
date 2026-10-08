@@ -33,7 +33,7 @@ const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
 const cardOf = (token: boolean) => ({
   title: "Mailbox (JMAP)",
   description:
-    "The project's own mailbox over JMAP, Fastmail by default: send from it, search it, read whole threads, and make Masked Email addresses. Agents reach it as itx.config.mailbox().",
+    "The project's own Fastmail mailbox, over JMAP: agents send from it, search it, read whole threads and make Masked Email addresses, calling Fastmail's API with fetch and the token's placeholder.",
   status: token
     ? { kind: "ok" }
     : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
@@ -46,7 +46,8 @@ const cardOf = (token: boolean) => ({
  *  `const integrations: Integration[] = [jmap()];`
  *
  *  Its install hook (`project/worker-updated`) lists the mailbox on the Dash's Integrations page.
- *  The mailbox itself is the library (`connectJmap`) and the worker's `mailbox()` member. */
+ *  That is all it does: agents and the project's code call Fastmail's JMAP API with `fetch` and the
+ *  token's placeholder, as the README says. */
 export function jmap(): Integration {
   return {
     async processEvent({ event, itx }) {
