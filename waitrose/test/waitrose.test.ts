@@ -1,9 +1,11 @@
-// Runs against dist (the package as shipped): `pnpm test` builds first. The Waitrose class itself
-// extends workerd's RpcTarget, so it is exercised in an iterate project, not here.
+// Runs against dist (the package as shipped): `pnpm test` builds first. The Waitrose class extends
+// workerd's RpcTarget, which the tests load as a bare stand-in (vite.config.ts), so Cap'n Web itself
+// is exercised in an iterate project, not here.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import { WaitroseApi } from "../dist/client.js";
 import { EXCHANGE_SOURCE, exchange } from "../dist/exchange.js";
+import { Waitrose, waitrose } from "../dist/index.js";
 
 const AUTHORIZATION = 'Bearer getSecret("/secrets/waitrose", { field: "accessToken" })';
 const CONTEXT = {
@@ -184,4 +186,119 @@ test("the README's exchange block is the shipped EXCHANGE_SOURCE, less its expor
     readme.includes(EXCHANGE_SOURCE.replace(/^export /, "export ")),
     "README is out of date: paste EXCHANGE_SOURCE",
   );
+});
+
+// ------------------------------------------- the integration the worker hosts
+
+/** A project: the account's secret (or none), an egress that answers the shopping context, and
+ *  appends on `/integrations`. `host` is the worker hosting the package: a scope per `getItx`. */
+function fakeProject(secrets: string[] = ["/secrets/waitrose"]) {
+  const appended: { path: string; event: any }[] = [];
+  const outbound: Request[] = [];
+  const scopes = { opened: 0, disposed: 0 };
+  const itx: any = {
+    fetch: async (request: Request) => {
+      outbound.push(request);
+      return Response.json({ data: { shoppingContext: CONTEXT } });
+    },
+    secrets: { list: async () => secrets.map((path) => ({ path })) },
+    cd: (path: string) => ({
+      append: async (event: any) => {
+        const earlier = appended.find(
+          (a) => a.path === path && a.event.idempotencyKey === event.idempotencyKey,
+        );
+        if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
+        if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
+        appended.push({ path, event });
+      },
+    }),
+  };
+  const served: { request: Request; target: any }[] = [];
+  const integration = waitrose({
+    rpcResponse: (request, target) => {
+      served.push({ request, target });
+      return new Response("a Cap'n Web session");
+    },
+  });
+  const host = (member: boolean) => ({
+    getItx: () => {
+      scopes.opened++;
+      return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
+    },
+    auth: {
+      require: () => (member ? null : new Response("Sign in\n", { status: 401 })),
+    },
+  });
+  const publish = (offset: number) =>
+    integration.processEvent!({
+      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      itx,
+    });
+  return { integration, appended, outbound, scopes, served, host, publish };
+}
+
+test("waitrose() answers its routing slug for members only: a non-member gets what auth.require answers, and nothing is served", async () => {
+  const project = fakeProject();
+  assert.equal(project.integration.routingSlug, "waitrose");
+  const refused = await project.integration.fetch!(
+    new Request("https://waitrose--iterate.example/", { method: "POST" }),
+    project.host(false),
+  );
+  assert.equal(refused.status, 401);
+  assert.deepEqual(project.served, []);
+  assert.equal(project.scopes.opened, 0);
+});
+
+test("a member gets a Waitrose over rpcResponse, and each of its requests opens a scope of its own, since the target outlives the request", async () => {
+  const project = fakeProject();
+  const request = new Request("https://waitrose--iterate.example/", { method: "POST" });
+  const res = await project.integration.fetch!(request, project.host(true));
+  assert.equal(await res.text(), "a Cap'n Web session");
+  assert.equal(project.served.length, 1);
+  assert.equal(project.served[0]!.request, request);
+  const target = project.served[0]!.target;
+  assert.ok(target instanceof Waitrose);
+  assert.equal(project.scopes.opened, 0); // nothing was asked of the project yet
+  assert.deepEqual(await target.getShoppingContext(), CONTEXT);
+  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
+  assert.equal(project.outbound[0]!.headers.get("authorization"), AUTHORIZATION);
+});
+
+const card = (status: object) => ({
+  title: "Waitrose",
+  description:
+    "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout) as a Cap'n Web RPC target, signed in as the person's own account.",
+  status,
+  actions: [
+    {
+      label: "Recipe",
+      url: "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose",
+    },
+  ],
+});
+
+test("the install hook registers the card, keyed by the event's path and offset: attention until the account's secret exists, ok after", async () => {
+  const unset = fakeProject([]);
+  for (let attempt = 0; attempt < 2; attempt++) await unset.publish(5);
+  assert.deepEqual(unset.appended, [
+    {
+      path: "/integrations",
+      event: {
+        type: "events.iterate.com/integration/configured",
+        idempotencyKey: "waitrose:registry:/@5",
+        payload: {
+          integration: "waitrose",
+          card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        },
+      },
+    },
+  ]);
+  const set = fakeProject();
+  await set.publish(7);
+  assert.deepEqual(set.appended[0]!.event.payload.card, card({ kind: "ok" }));
+  await set.integration.processEvent!({
+    event: { type: "events.iterate.com/itx/woken", path: "/", offset: 8 },
+    itx: {} as any,
+  });
+  assert.equal(set.appended.length, 1); // every other event is ignored
 });

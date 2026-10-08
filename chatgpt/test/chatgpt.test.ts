@@ -1,15 +1,17 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: a kv, secrets, and an egress
-// to a pretend OpenAI (its token endpoint and its API), which record every request.
+// Runs against dist, the package as shipped. `fakeProject` is a project: a kv, secrets, appends
+// that refuse a key used twice for another event (as the platform does; the same event again is a
+// no-op), and an egress to a pretend OpenAI (its token endpoint and its API), which record every
+// request. `host` is the worker hosting the package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import {
+  chatgpt,
   chatgptBody,
   chatgptHeaders,
   chatgptModels,
   chatgptRequest,
   chatgptText,
   EXCHANGE_SOURCE,
-  serveChatgpt,
 } from "../dist/chatgpt.js";
 
 const b64 = (value: unknown): string =>
@@ -24,15 +26,39 @@ const SCOPE = "openid profile email offline_access resource.invoke chatgpt.token
 
 type Call = { url: string; method: string; headers: Headers; body: string };
 
-function fakeProject(options: { scope?: string; apiStatus?: number } = {}) {
+function fakeProject(options: { scope?: string; apiStatus?: number; slug?: string } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const calls: Call[] = [];
+  const appended: { path: string; event: any }[] = [];
+  const scopes = { opened: 0, disposed: 0 };
+  const faults = { deletes: false };
   const itx: any = {
+    cd: (path: string) => ({
+      append: async (event: any) => {
+        const earlier = appended.find(
+          (a) =>
+            a.path === path &&
+            event.idempotencyKey !== undefined &&
+            a.event.idempotencyKey === event.idempotencyKey,
+        );
+        if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
+        if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
+        appended.push({ path, event });
+      },
+    }),
     secrets: {
       set: async (path: string, material: unknown, options: unknown) =>
         void (secrets[path] = { material, options }),
-      delete: async (path: string) => void delete secrets[path],
+      delete: async (path: string) => {
+        if (faults.deletes)
+          throw Object.assign(new Error("the secret store is unavailable"), {
+            code: "UNAVAILABLE",
+          });
+        if (!secrets[path])
+          throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
+        delete secrets[path];
+      },
       list: async () => Object.keys(secrets).map((path) => ({ path })),
     },
     kv: {
@@ -73,25 +99,34 @@ function fakeProject(options: { scope?: string; apiStatus?: number } = {}) {
       return new Response("unexpected", { status: 500 });
     },
   };
-  const withItx = async (call: (itx: any) => unknown) => call(itx);
-  const page = async (path: string, init: RequestInit = {}) => {
-    const res = await serveChatgpt(
-      new Request(`https://chatgpt--jeeves.example${path}`, {
-        ...init,
-        headers: { "x-iterate-routing-slug": "chatgpt", ...(init.headers as object) },
-      }),
-      { withItx: withItx as any, requireMember: () => null },
-    );
-    assert.ok(res, "a request on the chatgpt slug is answered");
-    return res;
-  };
+  const integration = chatgpt(options.slug ? { slug: options.slug } : {});
+  const page = async (
+    path: string,
+    init: RequestInit = {},
+    requireMember: (request: Request) => Response | null = () => null,
+  ) =>
+    integration.fetch!(new Request(`https://chatgpt--jeeves.example${path}`, init), {
+      getItx: () => {
+        scopes.opened++;
+        return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
+      },
+      auth: { require: requireMember },
+    });
   const paste = (address: string) =>
     page("/finish", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ callback: address }).toString(),
     });
-  return { itx, secrets, kv, calls, page, paste };
+  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  const publish = (offset: number) =>
+    integration.processEvent!({
+      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      itx,
+    });
+  /** What was registered on `/integrations` for the Dash, in order. */
+  const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
+  return { integration, itx, secrets, kv, calls, scopes, faults, page, paste, publish, registry };
 }
 
 /** The address OpenAI's consent ends on, for the sign-in the page opened. */
@@ -107,22 +142,26 @@ function callbackFor(html: string, extra: Record<string, string> = {}): string {
   return `http://127.0.0.1:1455/auth/callback?${query.toString()}`;
 }
 
-test("another slug is not ours, and a non-member is refused", async () => {
+test("it answers its own routing slug, chatgpt unless another is given; a non-member is refused and opens no scope", async () => {
+  assert.equal(chatgpt().routingSlug, "chatgpt");
+  assert.equal(chatgpt({ slug: "openai" }).routingSlug, "openai");
   const project = fakeProject();
-  const other = await serveChatgpt(
-    new Request("https://x.example/", { headers: { "x-iterate-routing-slug": "telegram" } }),
-    { withItx: (async (c: any) => c(project.itx)) as any, requireMember: () => null },
-  );
-  assert.equal(other, null);
-  const refused = await serveChatgpt(
-    new Request("https://x.example/", { headers: { "x-iterate-routing-slug": "chatgpt" } }),
-    {
-      withItx: (async (c: any) => c(project.itx)) as any,
-      requireMember: () => new Response("sign in", { status: 401 }),
-    },
-  );
-  assert.equal(refused?.status, 401);
+  for (const [path, method] of [
+    ["/", "GET"],
+    ["/start", "POST"],
+  ] as const) {
+    const refused = await project.page(
+      path,
+      { method },
+      () => new Response("sign in", { status: 401 }),
+    );
+    assert.equal(refused.status, 401);
+  }
   assert.deepEqual(project.calls, []);
+  assert.deepEqual(project.kv, {});
+  assert.equal(project.scopes.opened, 0);
+  await project.page("/");
+  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
 });
 
 test("the page offers Connect, then the consent link and a paste box, then the account", async () => {
@@ -131,6 +170,9 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   let html = await res.text();
   assert.match(html, /Connect ChatGPT/);
   assert.match(res.headers.get("content-security-policy")!, /default-src 'none'/);
+  // no other site can frame it
+  assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
 
   res = await project.page("/start", { method: "POST" });
   assert.equal(res.status, 303);
@@ -342,4 +384,122 @@ test("a refused refresh says to connect again, naming OpenAI's code but never a 
     runExchange({}, async () => new Response("")),
     /no refresh token/,
   );
+});
+
+// --------------------------------------------- the Dash's Integrations page
+
+const card = (status: object, label: string, routingSlug = "chatgpt") => ({
+  title: "ChatGPT",
+  description:
+    "Bring your own ChatGPT: Responses API requests paid by a ChatGPT Plus or Pro plan, not an API key.",
+  status,
+  actions: [{ label, routingSlug, path: "/" }],
+});
+const row = (routingSlug = "chatgpt") => ({
+  account: "jonas@example.com",
+  status: { kind: "ok" },
+  actions: [{ label: "Manage", routingSlug, path: "/" }],
+  details: { Plan: "pro" },
+});
+const CONFIGURED = "events.iterate.com/integration/configured";
+const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
+
+test("the install hook registers the card and the connection's row, or takes the row away, keyed by the event's path and offset", async () => {
+  const project = fakeProject();
+  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "chatgpt:registry:/@5",
+      payload: {
+        integration: "chatgpt",
+        card: card({ kind: "attention", text: "Connect ChatGPT" }, "Connect"),
+      },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: "chatgpt:registry:account:/@5",
+      payload: { integration: "chatgpt", connection: "account", row: null },
+    },
+  ]);
+
+  await project.page("/start", { method: "POST" });
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+  const before = project.registry().length;
+  await project.publish(5); // the same event again, now connected: its keys are spent
+  assert.equal(project.registry().length, before);
+  await project.publish(9);
+  assert.deepEqual(project.registry().slice(before), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "chatgpt:registry:/@9",
+      payload: { integration: "chatgpt", card: card({ kind: "ok" }, "Manage") },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: "chatgpt:registry:account:/@9",
+      payload: { integration: "chatgpt", connection: "account", row: row() },
+    },
+  ]);
+});
+
+test("connecting registers the card and the account's row; disconnecting takes the row away; the buttons lead to the slug it answers on", async () => {
+  const project = fakeProject({ slug: "openai" });
+  await project.page("/start", { method: "POST" });
+  assert.deepEqual(project.registry(), [], "starting a sign-in registers nothing");
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      payload: { integration: "chatgpt", card: card({ kind: "ok" }, "Manage", "openai") },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: { integration: "chatgpt", connection: "account", row: row("openai") },
+    },
+  ]);
+
+  await project.page("/disconnect", { method: "POST" });
+  assert.deepEqual(project.registry().slice(2), [
+    {
+      type: CONFIGURED,
+      payload: {
+        integration: "chatgpt",
+        card: card({ kind: "attention", text: "Connect ChatGPT" }, "Connect", "openai"),
+      },
+    },
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: { integration: "chatgpt", connection: "account", row: null },
+    },
+  ]);
+  const count = project.registry().length;
+  await project.integration.processEvent!({
+    event: { type: "events.iterate.com/secret/set", path: "/secrets/chatgpt", offset: 3 },
+    itx: project.itx,
+  });
+  assert.equal(project.registry().length, count, "the hook ignores every other event");
+});
+
+test("a Disconnect whose secret cannot be deleted says so, and ChatGPT stays connected for another try", async () => {
+  const project = fakeProject();
+  await project.page("/start", { method: "POST" });
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+  const before = project.registry().length;
+  project.faults.deletes = true;
+  const failed = await project.page("/disconnect", { method: "POST" });
+  assert.match(
+    decodeURIComponent(failed.headers.get("location")!),
+    /error=the secret store is unavailable/,
+  );
+  assert.ok(project.secrets["/secrets/chatgpt"], "the tokens stay, and say so");
+  assert.ok(project.kv["chatgpt/account"]);
+  assert.equal(project.registry().length, before, "no row is taken away");
+  assert.match(await (await project.page("/")).text(), /jonas@example\.com/);
+  project.faults.deletes = false;
+  await project.page("/disconnect", { method: "POST" });
+  assert.deepEqual(project.secrets, {});
+  // and a sign-in cancelled before it held any secret is fine
+  await project.page("/start", { method: "POST" });
+  assert.equal((await project.page("/cancel", { method: "POST" })).headers.get("location"), "./");
 });

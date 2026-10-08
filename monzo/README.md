@@ -12,6 +12,11 @@ read but not keep), and **register a webhook** with its `register_webhook` tool.
 its webhooks, so the recipe puts an unguessable secret in each webhook's URL and generates it for
 the person: they never see or type it.
 
+The receiver is the package `iterate-monzo`: one element, `monzo()`, in the `integrations` array of
+the project's config worker. The project's Integrations page in the Dash shows a Monzo card ("Set up
+by your coding agent" until the sign-in exists, with a link to this recipe) and a row per account
+whose webhook step 4 registered.
+
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
@@ -47,42 +52,36 @@ a permissions error; ask them to open the app and approve, then try again.
 ## 2. Add the receiver to the project's config repo
 
 Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
-(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
-`worker.ts`, probes the result as a worker, and commits it:
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `monzo()` to the
+`integrations` array of `worker.ts`, probes the result as a worker, and commits it:
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-monzo";
-const SLUG = "monzo";
-const IMPORT = 'import { receiveMonzoTransaction } from "iterate-monzo";';
-const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "monzo")
-  return receiveMonzoTransaction(request, async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
-    using itx = this.getItx();
-    return await call(itx);
-  });`;
+const IMPORT = 'import { monzo } from "iterate-monzo";';
+const ELEMENT = "monzo()";
 const MEMBER = "";
 const FILES = {};
 ```
 
-The branch answers the project's `monzo` host. `receiveMonzoTransaction` takes the request and a
-function that hands it the project's `itx` for one call (`using` releases it when the block ends).
+`monzo()` answers the project's `monzo` host: the worker hands it every request there, and every
+event. Its install hook (`project/worker-updated`) puts the Monzo card on the Dash.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the branch above.
-To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) (about 40 lines, one type import) and
-commit it to `/repos/config` as `monzo.ts`; the branch then imports `receiveMonzoTransaction` from
-`"./monzo.ts"`. You own the copy.
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) (no imports) and commit it to
+`/repos/config` as `monzo.ts`; the import then reads `from "./monzo.ts"`. You own the copy.
 
 ### Check it's live
 
-The receiver answers a path it doesn't know with `404`, and that is the proof:
+The receiver takes only `POST`, so a `GET` is answered `405`, and that is the proof:
 
 ```js
 async (itx) => {
   const url = await itx.url({ routingSlug: "monzo", path: "/nope/nope" });
-  const res = await itx.fetch(new Request(url, { method: "POST" }));
-  return { url, status: res.status }; // 404 = the receiver is there and refused. Anything else: not published yet
+  const res = await itx.fetch(new Request(url));
+  return { url, status: res.status }; // 405 = the receiver is there. 404: not published yet
 };
 ```
 
@@ -113,9 +112,10 @@ one (`uk_retail_joint`); a business account is `uk_business`.
 
 One script per account does it all: it makes the secret, stores it as
 `/secrets/monzo-webhook-<name>` (which the receiver checks with `itx.secrets.verifyEquals`), puts
-it in the URL `…/<name>/<secret>`, and registers that URL with Monzo. The secret is never returned,
-so it never reaches the chat. Run it once per account, and again to rotate: it deletes this
-project's earlier webhook for that account first, so the old URL stops.
+it in the URL `…/<name>/<secret>`, registers that URL with Monzo, and lists the account under the
+Monzo card on the Dash. The secret is never returned, so it never reaches the chat. Run it once per
+account, and again to rotate: it deletes this project's earlier webhook for that account first, so
+the old URL stops.
 
 ```js
 async (itx) => {
@@ -137,6 +137,15 @@ async (itx) => {
       urls: ["https://monzo.invalid"],
     });
     const registered = await mcp.callTool("register_webhook", { account_id: accountId, url });
+    // the account's row under the Monzo card on the Dash (set semantics: the whole row again)
+    await itx.cd("/integrations").append({
+      type: "events.iterate.com/integration/connection-configured",
+      payload: {
+        integration: "monzo",
+        connection: name,
+        row: { account: name, status: { kind: "ok" }, details: { Account: accountId } },
+      },
+    });
     return { name, webhook: JSON.parse(JSON.stringify(registered).replaceAll(secret, "<secret>")) };
   } finally {
     await mcp.close();
@@ -209,4 +218,12 @@ On the stream `/monzo/<account name>`:
   webhook covers the one account it was registered for.
 - Monzo asks the person to reconfirm API access about every 90 days. That affects the MCP tools
   (run step 2 of zero-trust-mcp.md again), not a webhook that is already registered.
-- To stop an account: call `delete_webhook` through the same connection, then `itx.secrets.delete("/secrets/monzo-webhook-<name>")`.
+- To stop an account: call `delete_webhook` through the same connection, then
+  `itx.secrets.delete("/secrets/monzo-webhook-<name>")`, and take its row off the Dash (which takes
+  nothing away itself):
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/connection-configured", payload: { integration: "monzo", connection: "<name>", row: null } })`.
+- To remove the package: stop each account, take `monzo()` and its import out of `worker.ts`, and
+  once that commit is live take the card off with its null, which takes any row left with it:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "monzo", card: null } })`. Delete the sign-in,
+  `/secrets/monzo`, with `itx.secrets.delete("/secrets/monzo")` unless the project's agents still use
+  Monzo's MCP tools.

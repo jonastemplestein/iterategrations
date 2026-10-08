@@ -49,15 +49,18 @@ Send the person the returned `url` and wait until they say it is saved.
 An agent's script cannot import a package, so a thin class in the config repo wraps this one, and
 `worker.ts` hands it out as `itx.config.mailbox()` (the same shape as any capability of the config
 worker). Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the
-package (built by this repo's CI and served by pkg.pr.new, never npm), adds `mail.ts` and the
-`mailbox()` method, probes the result as a worker, and commits it:
+package (built by this repo's CI and served by pkg.pr.new, never npm), adds `mail.ts`, the
+`mailbox()` method and `jmap()` to the `integrations` array of `worker.ts`, probes the result as a
+worker, and commits it. `jmap()` has no host of its own: its install hook (`project/worker-updated`)
+puts a Mailbox card on the Dash's Integrations page ("Set up by your coding agent" until the token
+exists, with a link to this recipe).
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-jmap";
-const SLUG = "";
-const IMPORT = 'import { JmapMailbox } from "./mail.ts";';
-const BRANCH = "";
+const IMPORT = `import { jmap } from "iterate-jmap";
+import { JmapMailbox } from "./mail.ts";`;
+const ELEMENT = "jmap()";
 const MEMBER = `  /** The project's mailbox over JMAP (iterate-jmap): itx.config.mailbox().send({ … }) from a script. */
   mailbox() {
     return new JmapMailbox(async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
@@ -200,3 +203,10 @@ const all = await masked.list();
 The fastest way in is a Fastmail rule that forwards a copy of each message to the project's own
 address, `<project>@<its email domain>`, where it lands as an event straight away. The other way is
 to poll: `search({ after: <the last time> })` on a schedule.
+
+## Removing it
+
+Take `jmap()`, the `mailbox()` member and their imports out of `worker.ts`, delete `mail.ts`, and
+delete `/secrets/fastmail` (and revoke the token in Fastmail). The Dash takes nothing away itself, so
+once that commit is live, take the card off with its null:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "jmap", card: null } })`.

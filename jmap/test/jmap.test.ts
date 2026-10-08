@@ -2,7 +2,7 @@
 // the session, the upload URL and each method by name, and records every request.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
-import { connectJmap, JmapError, maskedEmails } from "../dist/index.js";
+import { connectJmap, jmap, JmapError, maskedEmails } from "../dist/index.js";
 
 const SESSION_URL = "https://jmap.test/session";
 const MAIL = "urn:ietf:params:jmap:mail";
@@ -436,4 +436,66 @@ test("every request goes to the session URL's own origin, though the session nam
   });
   await direct.mailboxes();
   assert.equal(asGiven.seen.at(-1)!.url, "https://regional.jmap.test/api/");
+});
+
+// --------------------------------------------- the Dash's Integrations page
+
+test("jmap() has no host of its own; its install hook registers the card, keyed by the event's path and offset, ok once the token exists", async () => {
+  const appended: { path: string; event: any }[] = [];
+  const secrets: string[] = [];
+  const itx: any = {
+    secrets: { list: async () => secrets.map((path) => ({ path })) },
+    cd: (path: string) => ({
+      append: async (event: any) => {
+        const earlier = appended.find((a) => a.event.idempotencyKey === event.idempotencyKey);
+        if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
+        if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
+        appended.push({ path, event });
+      },
+    }),
+  };
+  const integration = jmap();
+  assert.equal(integration.routingSlug, undefined);
+  assert.equal("fetch" in integration, false);
+  const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
+    integration.processEvent!({ event: { type, path: "/", offset }, itx });
+  const card = (status: object) => ({
+    title: "Mailbox (JMAP)",
+    description:
+      "The project's own mailbox over JMAP, Fastmail by default: send from it, search it, read whole threads, and make Masked Email addresses. Agents reach it as itx.config.mailbox().",
+    status,
+    actions: [
+      {
+        label: "Recipe",
+        url: "https://github.com/jonastemplestein/iterategrations/tree/main/jmap",
+      },
+    ],
+  });
+
+  for (let attempt = 0; attempt < 2; attempt++) await publish(5);
+  secrets.push("/secrets/fastmail");
+  await publish(5); // the same event again, now with the token: its key is spent, and that is fine
+  await publish(6);
+  await publish(7, "events.iterate.com/itx/woken"); // every other event is ignored
+  assert.deepEqual(appended, [
+    {
+      path: "/integrations",
+      event: {
+        type: "events.iterate.com/integration/configured",
+        idempotencyKey: "jmap:registry:/@5",
+        payload: {
+          integration: "jmap",
+          card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        },
+      },
+    },
+    {
+      path: "/integrations",
+      event: {
+        type: "events.iterate.com/integration/configured",
+        idempotencyKey: "jmap:registry:/@6",
+        payload: { integration: "jmap", card: card({ kind: "ok" }) },
+      },
+    },
+  ]);
 });

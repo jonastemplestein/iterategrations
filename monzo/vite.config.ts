@@ -7,7 +7,5 @@ export default defineConfig({
     unbundle: true,
     platform: "neutral",
     dts: true,
-    // its types come from iterate, which the project that installs this package has
-    deps: { neverBundle: [/^iterate(\/|$)/] },
   },
 });

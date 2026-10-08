@@ -4,6 +4,10 @@ Every recording you make with the ring lands in an iterate project: the transcri
 `pebble/recording-created` event on the `/pebble` stream, the audio as the file
 `/pebble/<recordingId>.m4a`.
 
+The receiver is the package `iterate-pebble`: one element, `pebble()`, in the `integrations` array
+of the project's config worker. The project's Integrations page in the Dash shows a Pebble card ("Set
+up by your coding agent" until the signing secret exists, with a link to this recipe).
+
 ## 0. Before you start: the ring and the app
 
 Ask the person which of these is not done yet, and walk them through it:
@@ -53,32 +57,27 @@ saved. Check that `(await itx.secrets.list()).map((s) => s.path)` includes `/sec
 ## 2. Add the receiver to the project's config repo
 
 Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
-(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and one branch to
-`worker.ts`, probes the result as a worker, and commits it:
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `pebble()` to the
+`integrations` array of `worker.ts`, probes the result as a worker, and commits it:
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-pebble";
-const SLUG = "pebble";
-const IMPORT = 'import { receivePebbleRecording } from "iterate-pebble";';
-const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "pebble")
-  return receivePebbleRecording(request, async <T>(call: (itx: any) => T): Promise<Awaited<T>> => {
-    using itx = this.getItx();
-    return await call(itx);
-  });`;
+const IMPORT = 'import { pebble } from "iterate-pebble";';
+const ELEMENT = "pebble()";
 const MEMBER = "";
 const FILES = {};
 ```
 
-The branch answers the project's `pebble` host. `receivePebbleRecording` takes the request and a
-function that hands it the project's `itx` for one call (`using` releases it when the block ends).
+`pebble()` answers the project's `pebble` host: the worker hands it every request there, and every
+event. Its install hook (`project/worker-updated`) puts the Pebble card on the Dash.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the branch above.
-To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) (71 lines, no dependencies) and
-commit it to `/repos/config` as `pebble.ts`; the branch then imports `receivePebbleRecording` from
-`"./pebble.ts"`. You own the copy, so you can change it.
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) (no dependencies) and commit it to
+`/repos/config` as `pebble.ts`; the import then reads `from "./pebble.ts"`. You own the copy, so you
+can change it.
 
 ## 3. Get the webhook URL
 
@@ -135,3 +134,11 @@ Pebble's; iterate transcribes nothing. Requests are verified with the app's sign
 (`itx.secrets.verifyHmac`, 5-minute window); the contract is Pebble's
 [INDEX_WEBHOOK_API.md](https://github.com/coredevices/mobileapp/blob/main/experimental/src/commonMain/kotlin/coredevices/ring/external/indexwebhook/INDEX_WEBHOOK_API.md).
 The whole request is held in memory to verify it: fine for spoken notes.
+
+## Removing it
+
+Delete the webhook in the Pebble app (Index 01 Settings, Webhook), take `pebble()` and its import out
+of `worker.ts`, and delete `/secrets/pebble-webhook`. The Dash takes nothing away itself, so once
+that commit is live, take the card off with its null:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "pebble", card: null } })`. The recordings stay on `/pebble`
+and in the project's files.

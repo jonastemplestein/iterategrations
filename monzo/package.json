@@ -19,7 +19,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260925.1",
     "@types/node": "^24.0.0",
-    "iterate": "https://pkg.pr.new/iterate/iterate/iterate@d285b9c",
     "typescript": "^7.0.2"
   }
 }

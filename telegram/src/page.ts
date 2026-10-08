@@ -9,13 +9,15 @@ import {
   makeInvite,
   placeholder,
   readJson,
+  registerBot,
+  removing,
   say,
   keyOf,
   WELCOME,
   type BotInfo,
   type Pending,
   type Person,
-  type WithItx,
+  type TelegramItx,
 } from "./bot.js";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
@@ -92,11 +94,7 @@ const post = (action: string, fields: Record<string, string>, label: string, qui
 const personLine = (p: Person & { id: string }) =>
   `${esc(p.name)}${p.username ? ` <span class="muted">@${esc(p.username)}</span>` : ""}`;
 
-async function botCard(
-  itx: Parameters<Parameters<WithItx>[0]>[0],
-  bot: string,
-  invite: string | null,
-): Promise<string> {
+async function botCard(itx: TelegramItx, bot: string, invite: string | null): Promise<string> {
   const info = await readJson<BotInfo>(itx, bot, "bot");
   const readsAll = await api<{ can_read_all_group_messages?: boolean }>(
     itx,
@@ -160,33 +158,47 @@ const connectForm = (first: boolean) => `<section>
   <p class="muted">The token goes into this project's secrets and is only ever sent to api.telegram.org. Use an account that belongs to the company to make the bot: that account owns it.</p>
 </section>`;
 
+/** A form's answer: back to the page, which no other site may frame either. */
 const redirect = (query = ""): Response =>
-  new Response(null, { status: 303, headers: { location: `./${query}` } });
+  new Response(null, {
+    status: 303,
+    headers: {
+      location: `./${query}`,
+      "x-frame-options": "DENY",
+      "content-security-policy": "frame-ancestors 'none'",
+    },
+  });
 const flash = (key: "error" | "connected", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 
 /** The members-only page at `/_/`: connect a bot, make invite links, let people in or out. Every
- *  write is a plain form POST, answered with a redirect back to the page. */
-export async function servePage(request: Request, withItx: WithItx): Promise<Response> {
+ *  write is a plain form POST, answered with a redirect back to the page. `slug` is the routing slug
+ *  the Dash's buttons lead to. */
+export async function servePage(
+  request: Request,
+  itx: TelegramItx,
+  slug: string,
+): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/_\/?/, "");
   const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
 
+  // `/_` would resolve the page's relative links against `/`
+  if (request.method === "GET" && url.pathname === "/_")
+    return new Response(null, { status: 308, headers: { location: "_/" } });
   if (request.method === "GET" && path === "") {
     const error = url.searchParams.get("error");
     const connected = url.searchParams.get("connected");
     const invite = url.searchParams.get("invite");
     const inviteBot = url.searchParams.get("bot");
-    const body = await withItx(async (itx) => {
-      const bots = await listBots(itx);
-      let live: string | null = null; // an invite is shown only if it exists, for a bot that does
-      if (invite && inviteBot && bots.includes(inviteBot) && /^[0-9a-f]{32}$/.test(invite))
-        live = (await itx.kv.get(keyOf(inviteBot, `invite/${invite}`))) ? invite : null;
-      const cards = await Promise.all(
-        bots.map((bot) => botCard(itx, bot, bot === inviteBot ? live : null)),
-      );
-      return `${cards.join("")}${connectForm(bots.length === 0)}`;
-    });
+    const bots = await listBots(itx);
+    let live: string | null = null; // an invite is shown only if it exists, for a bot that does
+    if (invite && inviteBot && bots.includes(inviteBot) && /^[0-9a-f]{32}$/.test(invite))
+      live = (await itx.kv.get(keyOf(inviteBot, `invite/${invite}`))) ? invite : null;
+    const cards = await Promise.all(
+      bots.map((bot) => botCard(itx, bot, bot === inviteBot ? live : null)),
+    );
+    const body = `${cards.join("")}${connectForm(bots.length === 0)}`;
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
     return new Response(
       `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Telegram</title><style>${STYLE}</style></head><body><h1>Telegram</h1>${
@@ -195,13 +207,14 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
       {
         headers: {
           ...html,
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'`,
+          // no other site may frame it: a framed form would post from this origin and pass the
+          // member gate (default-src does not cover frame-ancestors)
+          "x-frame-options": "DENY",
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );
   }
-  if (request.method === "GET" && url.pathname === "/_")
-    return new Response(null, { status: 308, headers: { location: "_/" } });
   if (request.method !== "POST") return new Response("Not found\n", { status: 404 });
 
   const form = await request.formData();
@@ -214,29 +227,33 @@ export async function servePage(request: Request, withItx: WithItx): Promise<Res
   const basePath = request.headers.get("x-iterate-base-path") || "";
   try {
     if (path === "connect") {
-      const { username } = await withItx((itx) =>
-        connectBot(itx, field("token"), `${url.origin}${basePath}`),
-      );
+      const { username } = await connectBot(itx, field("token"), `${url.origin}${basePath}`, slug);
       return redirect(flash("connected", username));
     }
-    const valid = BOT_NAME.test(bot) && (await withItx((itx) => listBots(itx))).includes(bot);
+    // a bot whose disconnect did not finish is disconnected again, which finishes it
+    if (path === "disconnect" && BOT_NAME.test(bot) && (await removing(itx, bot))) {
+      await disconnectBot(itx, bot, slug);
+      return redirect();
+    }
+    const valid = BOT_NAME.test(bot) && (await listBots(itx)).includes(bot);
     if (!valid) return redirect(flash("error", "Unknown bot"));
     if (path === "invite") {
-      const link = await withItx((itx) => makeInvite(itx, bot));
+      const link = await makeInvite(itx, bot);
       return redirect(`?bot=${bot}&invite=${new URL(link).searchParams.get("start")}`);
     }
-    if (path === "disconnect") await withItx((itx) => disconnectBot(itx, bot));
-    else if (/^-?\d+$/.test(id) && path === "allow")
-      await withItx(async (itx) => {
-        const pending = await readJson<Pending>(itx, bot, `pending/${id}`);
-        if (!pending) return;
+    if (path === "disconnect") await disconnectBot(itx, bot, slug);
+    else if (/^-?\d+$/.test(id) && path === "allow") {
+      const pending = await readJson<Pending>(itx, bot, `pending/${id}`);
+      if (pending) {
         const { chatId, chatTitle: _title, ...person } = pending;
         await allow(itx, bot, id, person);
         await say(itx, bot, chatId, chatId === Number(id) ? WELCOME : `You're in, ${person.name}.`);
-      });
-    else if (/^-?\d+$/.test(id) && path === "remove")
-      await withItx((itx) => itx.kv.delete(keyOf(bot, `allowed/${id}`)));
-    else return new Response("Not found\n", { status: 404 });
+        await registerBot(itx, bot, slug); // one more person let in
+      }
+    } else if (/^-?\d+$/.test(id) && path === "remove") {
+      await itx.kv.delete(keyOf(bot, `allowed/${id}`));
+      await registerBot(itx, bot, slug);
+    } else return new Response("Not found\n", { status: 404 });
     return redirect();
   } catch (error) {
     return redirect(flash("error", error instanceof Error ? error.message : String(error)));
