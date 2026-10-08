@@ -171,7 +171,7 @@ const redirect = (query = ""): Response =>
 const flash = (key: "error" | "connected", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 
-/** The members-only page at `/_/`: connect a bot, make invite links, let people in or out. Every
+/** The members-only page at `/`: connect a bot, make invite links, let people in or out. Every
  *  write is a plain form POST, answered with a redirect back to the page. `slug` is the routing slug
  *  the Dash's buttons lead to. */
 export async function servePage(
@@ -180,12 +180,9 @@ export async function servePage(
   slug: string,
 ): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/^\/_\/?/, "");
+  const path = url.pathname.replace(/^\//, "");
   const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" };
 
-  // `/_` would resolve the page's relative links against `/`
-  if (request.method === "GET" && url.pathname === "/_")
-    return new Response(null, { status: 308, headers: { location: "_/" } });
   if (request.method === "GET" && path === "") {
     const error = url.searchParams.get("error");
     const connected = url.searchParams.get("connected");

@@ -56,7 +56,7 @@ export async function registerCard(itx: GithubItx, slug: string, key?: string): 
         status: ready
           ? { kind: "ok" }
           : { kind: "attention", text: "Create a GitHub App and paste its secrets" },
-        actions: [{ label: ready ? "Manage" : "Connect", routingSlug: slug, path: "/_/" }],
+        actions: [{ label: ready ? "Manage" : "Connect", routingSlug: slug, path: "/" }],
       },
     },
     key,
@@ -66,7 +66,7 @@ export async function registerCard(itx: GithubItx, slug: string, key?: string): 
 /** One connection's row: an installation (its account, a link to it at GitHub), or a request an
  *  owner has yet to approve. */
 const rowOf = (slug: string, connection: string, installation: Installation) => {
-  const manage = { label: "Manage", routingSlug: slug, path: "/_/" };
+  const manage = { label: "Manage", routingSlug: slug, path: "/" };
   if (installation.requested)
     return {
       account: installation.account,

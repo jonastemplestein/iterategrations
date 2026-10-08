@@ -183,7 +183,7 @@ export async function connectBot(
     urls: ["https://telegram.invalid"],
   });
   await api(itx, placeholder(name), "setWebhook", {
-    url: `${webhookBase}/${name}`,
+    url: `${webhookBase}/webhook/${name}`,
     secret_token: secret,
     allowed_updates: ["message"],
     drop_pending_updates: true,
@@ -247,7 +247,7 @@ const cardOf = (slug: string, connected: boolean): Card => ({
   description:
     "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
   status: connected ? { kind: "ok" } : { kind: "attention", text: "Connect a bot" },
-  actions: [{ label: connected ? "Manage" : "Connect", routingSlug: slug, path: "/_/" }],
+  actions: [{ label: connected ? "Manage" : "Connect", routingSlug: slug, path: "/" }],
 });
 
 /** Registers the card, as the connected bots make it. */
@@ -273,7 +273,7 @@ export async function registerBot(
       account: `@${username ?? bot}`,
       status: { kind: "ok" },
       actions: [
-        { label: "Manage", routingSlug: slug, path: "/_/" },
+        { label: "Manage", routingSlug: slug, path: "/" },
         ...(username ? [{ label: "Open", url: `https://t.me/${username}` }] : []),
       ],
       details: { "Let in": people === 1 ? "1 person" : `${people} people` },

@@ -65,16 +65,17 @@ const once = (append: Promise<unknown>): Promise<unknown> =>
 
 /** Monzo's webhook: it POSTs `{ type: "transaction.created", data: <the transaction> }` to the URL
  *  registered for an account, and retries a delivery that does not answer 200 (up to five times).
- *  Monzo does not sign anything, so each account's URL is `/<account name>/<secret>`, the secret
+ *  Monzo does not sign anything, so each account's URL is `/webhook/<account name>/<secret>`, the secret
  *  being `/secrets/monzo-webhook-<account name>`, checked with `itx.secrets.verifyEquals`. Each
  *  transaction becomes one `monzo/transaction-created` event on the stream `/monzo/<account name>`,
  *  the transaction as Monzo sent it in `payload.transaction`. */
 async function receive(request: Request, itx: MonzoItx): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
-  const [, account = "", presented = ""] = new URL(request.url).pathname
+  const [, place = "", account = "", presented = ""] = new URL(request.url).pathname
     .split("/")
     .map(decodeURIComponent);
   const known =
+    place === "webhook" &&
     ACCOUNT_NAME.test(account) &&
     presented !== "" &&
     (await itx.secrets.verifyEquals(`/secrets/monzo-webhook-${account}`, { value: presented }));
@@ -106,7 +107,7 @@ async function receive(request: Request, itx: MonzoItx): Promise<Response> {
 /** A project's Monzo receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [monzo()];`
  *
- *  On the `monzo` routing slug it answers Monzo's webhook at `/<account name>/<secret>`. Its install
+ *  On the `monzo` routing slug it answers Monzo's webhook at `/webhook/<account name>/<secret>`. Its install
  *  hook (`project/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
  *  appended by the recipe's script that registers the account's webhook. */
 export function monzo(): Integration {

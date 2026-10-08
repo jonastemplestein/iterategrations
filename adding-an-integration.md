@@ -20,14 +20,15 @@ export function acme(options: { slug?: string } = {}): Integration {
   return {
     // the host it answers: acme--<project>.<ingress>, or <origin>/projects/<project>/acme/ under paths
     routingSlug,
-    // every request on that host and no other
+    // every request on that host and no other: deliveries at /webhook, which prove themselves,
+    // then for members only the provider's return at /oauth2/callback and the page at /
     async fetch(request, host) {
       const url = new URL(request.url);
       if (url.pathname === "/webhook") return receive(request, host.getItx());
-      // a page is for members only
       const denied = host.auth.require(request);
       if (denied) return denied;
       using itx = host.getItx();
+      if (url.pathname === "/oauth2/callback") return callback(request, itx);
       return page(request, itx, routingSlug);
     },
     // every durable event of the project, unordered, at least once
@@ -38,6 +39,11 @@ export function acme(options: { slug?: string } = {}): Integration {
   };
 }
 ```
+
+A package's address has three places and no others. `/` is its page, for members. `/oauth2/callback`
+is where a provider sends the member back, for members too. `/webhook` takes a service's deliveries,
+which prove themselves (`/webhook/<name>` when a service has several). Those are the URLs a person
+registers at the service.
 
 The project's `worker.ts` lists it: `const integrations: Integration[] = [acme()];`. The worker hands
 each element the requests on its routing slug and every event, after the project's own cases. A hook
@@ -69,7 +75,7 @@ await itx.cd("/integrations").append(
         title: "Acme",
         description: "What it does, in one sentence.",
         status: { kind: "attention", text: "Connect an account" },
-        actions: [{ label: "Connect", routingSlug: "acme", path: "/_/" }],
+        actions: [{ label: "Connect", routingSlug: "acme", path: "/" }],
       },
     },
   },
@@ -95,9 +101,9 @@ publication, so a failed append cannot leave a stale row.
 
 Every integration seen so far is one of these, or a mix.
 
-**A service with its own page and webhook** (Telegram, ChatGPT). The page at `/_/` collects what the
+**A service with its own page and webhook** (Telegram, ChatGPT). The page at `/` collects what the
 service needs (`itx.secrets.collectFromUser` gives a link where the person pastes a token: the
-package never sees it), sets the webhook at the service with a URL on the project's host, and
+package never sees it), sets the webhook at the service to `/webhook/<name>` on the project's host, and
 registers a row. The webhook proves itself: `itx.secrets.verifyHmac(path, { payload, signature })`
 for a signed body, `itx.secrets.verifyEquals(path, { value })` for a token in the URL. Each delivery
 lands once on `/integrations/<slug>/<connection>`, keyed by the service's delivery id. The page and
@@ -113,10 +119,10 @@ const { authorizationUrl } = await itx.secrets.beginOAuth("/secrets/acme-main", 
   tokenEndpoint,
   clientId,
   clientSecret: 'getSecret("/secrets/acme-app", { field: "clientSecret" })',
-  redirect: { routingSlug: "acme", path: "/callback" }, // register this page's URL at the provider
+  redirect: { routingSlug: "acme", path: "/oauth2/callback" }, // register this URL at the provider
   scope: "read",
 });
-// the provider sends the person to /callback?code=…&state=…; the page, for members only, hands both back
+// the provider sends the person to /oauth2/callback?code=…&state=…; the page, for members only, hands both back
 const { scopes } = await itx.secrets.completeOAuth("/secrets/acme-main", { code, state });
 ```
 

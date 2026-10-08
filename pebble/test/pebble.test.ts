@@ -76,7 +76,10 @@ async function signed(
   form.set("recordedAt", "1760000000000");
   form.set("transcription", "buy oat milk");
   form.set("audio", new File([new Uint8Array([1, 2, 3])], "rec-42.m4a", { type: "audio/mp4" }));
-  const draft = new Request("https://pebble--iterate.example/", { method: "POST", body: form });
+  const draft = new Request("https://pebble--iterate.example/webhook", {
+    method: "POST",
+    body: form,
+  });
   const body = new Uint8Array(await draft.arrayBuffer());
   const timestamp = options.timestamp ?? Math.floor(Date.now() / 1000);
   const delivery = options.delivery ?? "d-1";
@@ -84,7 +87,7 @@ async function signed(
   const signature = createHmac("sha256", options.secret ?? SECRET)
     .update(Buffer.concat([Buffer.from(prefix), body]))
     .digest("hex");
-  return new Request("https://pebble--iterate.example/", {
+  return new Request("https://pebble--iterate.example/webhook", {
     method: "POST",
     headers: {
       "content-type": draft.headers.get("content-type")!,
@@ -103,7 +106,10 @@ test("it answers the pebble routing slug; a webhook is public, so no member is a
   const project = fakeProject();
   assert.equal(project.integration.routingSlug, "pebble");
   assert.equal((await project.serve(await signed())).status, 200);
-  assert.equal((await project.serve(new Request("https://pebble--iterate.example/"))).status, 405);
+  assert.equal(
+    (await project.serve(new Request("https://pebble--iterate.example/webhook"))).status,
+    405,
+  );
   assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
 });
 

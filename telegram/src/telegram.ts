@@ -41,8 +41,8 @@ export type Integration = {
 /** A project's Telegram bot, as an integration its worker hosts:
  *  `const integrations: Integration[] = [telegram()];`
  *
- *  On its routing slug it answers Telegram's webhook at `/<bot>` (checked with a secret) and, for
- *  members only, the Connect Telegram page at `/_/`. Its install hook (`project/worker-updated`)
+ *  On its routing slug it answers Telegram's webhook at `/webhook/<bot>` (checked with a secret) and,
+ *  for members only, the Connect Telegram page at `/`. Its install hook (`project/worker-updated`)
  *  lists it on the Dash's Integrations page: the card, and a row per connected bot.
  *
  *  - `slug`: the routing slug to answer on. Default `telegram`.
@@ -56,15 +56,14 @@ export function telegram(options: { slug?: string; deliver?: Deliver } = {}): In
     routingSlug,
     async fetch(request, host) {
       const { pathname } = new URL(request.url);
-      const page = pathname === "/_" || pathname.startsWith("/_/");
-      if (page) {
-        const denied = host.auth.require(request);
-        if (denied) return denied;
+      if (pathname.startsWith("/webhook/")) {
+        using itx = host.getItx();
+        return await receiveUpdate(request, itx, options.deliver ?? "agents", routingSlug);
       }
+      const denied = host.auth.require(request);
+      if (denied) return denied;
       using itx = host.getItx();
-      return page
-        ? await servePage(request, itx, routingSlug)
-        : await receiveUpdate(request, itx, options.deliver ?? "agents", routingSlug);
+      return await servePage(request, itx, routingSlug);
     },
     async processEvent({ event, itx }) {
       if (event.type === WORKER_UPDATED)
