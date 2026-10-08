@@ -45,7 +45,7 @@ const callNames = (bot: BotInfo): string[] =>
 
 /** Whether a group message is for the bot: it @mentions the bot, replies to it, is a command, or
  *  says its name as a word ("Hi Jeeves"). */
-export function isAddressed(message: Message, bot: BotInfo): boolean {
+function isAddressed(message: Message, bot: BotInfo): boolean {
   const text = (message.text ?? message.caption ?? "").toLowerCase();
   const word = (name: string) =>
     new RegExp(
@@ -67,9 +67,9 @@ const hasContent = (message: Message): boolean =>
   FILES.some((kind) => message[kind] !== undefined) ||
   message.location !== undefined;
 
-/** What the agent is told: where, who, what, the files, and how to answer. An agent writes scripts
- *  against `itx`, which cannot import packages, so the answer is a plain `itx.fetch` with the
- *  token placeholder. */
+/** What the agent is told: where, who, what, the files, and how to answer. An agent's script cannot
+ *  import packages, and its global `fetch` is the project's egress, so the answer is a plain `fetch`
+ *  with the token placeholder. */
 function describe(bot: string, info: BotInfo, message: Message): string {
   const group = message.chat.type !== "private";
   const files = FILES.flatMap((kind) => {
@@ -87,7 +87,7 @@ function describe(bot: string, info: BotInfo, message: Message): string {
     `Telegram message from ${who}${where}:`,
     message.text ?? message.caption ?? "(no text)",
     ...files,
-    `Reply with \`await itx.fetch(new Request('https://api.telegram.org/bot' + '${placeholder(bot)}' + '/sendMessage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: ${message.chat.id}${thread}${reply}, text }) }))\`. A message holds at most 4096 characters. Any other Bot API method is the same call under its own name. To read a file, call getFile with its file_id, then GET 'https://api.telegram.org/file/bot' + '${placeholder(bot)}' + '/' + file_path (up to 20 MB).${group ? ` You are @${info.username}. In a group, answer only what is meant for you; the rest you read as context.` : ""}`,
+    `Reply with \`await fetch('https://api.telegram.org/bot' + '${placeholder(bot)}' + '/sendMessage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: ${message.chat.id}${thread}${reply}, text }) })\`. A message holds at most 4096 characters. Any other Bot API method is the same call under its own name. To read a file, call getFile with its file_id, then GET 'https://api.telegram.org/file/bot' + '${placeholder(bot)}' + '/' + file_path (up to 20 MB).${group ? ` You are @${info.username}. In a group, answer only what is meant for you; the rest you read as context.` : ""}`,
   ].join("\n\n");
 }
 
