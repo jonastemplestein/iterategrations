@@ -345,6 +345,7 @@ const card = (status: object, label: string, routingSlug = "chatgpt") => ({
   title: "ChatGPT",
   description:
     "Bring your own ChatGPT: Responses API requests paid by a ChatGPT Plus or Pro plan, not an API key.",
+  icon: "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=64",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });

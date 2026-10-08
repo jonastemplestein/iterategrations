@@ -1,7 +1,7 @@
 {
   "name": "iterate-jmap",
   "version": "0.0.0",
-  "description": "The Mailbox (JMAP) card on an iterate project's Dash; agents call Fastmail's JMAP API with fetch, by the README's recipe",
+  "description": "The Mailbox (JMAP) card on an iterate project's Dash, and its page; agents call Fastmail's JMAP API with fetch, by the README's recipe",
   "type": "module",
   "exports": {
     ".": {

@@ -757,6 +757,7 @@ const card = (status: object, label: string, routingSlug = "telegram") => ({
   title: "Telegram",
   description:
     "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
+  icon: "https://www.google.com/s2/favicons?domain=telegram.org&sz=64",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });

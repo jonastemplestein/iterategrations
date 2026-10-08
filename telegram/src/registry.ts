@@ -12,8 +12,15 @@ export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
 export type Status = { kind: "ok" | "attention" | "error"; text?: string };
 /** A button: a page of this project, or an absolute https URL. A card or a row has at most four. */
 export type Action = { label: string } & ({ routingSlug: string; path: string } | { url: string });
-/** The card: a title of at most 80 characters, a description of at most 400. */
-export type Card = { title: string; description?: string; status?: Status; actions: Action[] };
+/** The card: a title of at most 80 characters, a description of at most 400, and an icon: an https
+ *  URL of a square image (the service's mark), at most 2,048 characters. */
+export type Card = {
+  title: string;
+  description?: string;
+  icon?: string;
+  status?: Status;
+  actions: Action[];
+};
 /** One connection's row: its account (at most 200 characters) and at most ten details. */
 export type Row = {
   account: string;

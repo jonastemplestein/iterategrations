@@ -1,7 +1,7 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: secrets, and streams that
 // keep what is appended to them and refuse a key used twice for another event (as the platform
 // does; the same event again is a no-op). `host` is the worker hosting the package: a scope per
-// `getItx`, counted.
+// `getItx`, counted, and a member gate that refuses unless `member` is set.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import { monzo } from "../dist/monzo.js";
@@ -12,8 +12,13 @@ const SECRETS: Record<string, string> = {
   "/secrets/monzo-webhook-jonas-personal": "personal-secret",
 };
 const CONFIGURED = "events.iterate.com/integration/configured";
+const ORIGIN = "https://monzo--iterate.example";
+const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/monzo";
 
-function fakeProject(secrets: Record<string, string> = SECRETS) {
+function fakeProject(
+  secrets: Record<string, string> = SECRETS,
+  options: { member?: boolean } = {},
+) {
   const appended: { path: string; event: any }[] = [];
   const scopes = { opened: 0, disposed: 0 };
   const itx: any = {
@@ -41,9 +46,19 @@ function fakeProject(secrets: Record<string, string> = SECRETS) {
       scopes.opened++;
       return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
     },
-    auth: { require: () => new Response("Sign in\n", { status: 401 }) },
+    auth: {
+      require: () => (options.member ? null : new Response("Sign in\n", { status: 401 })),
+    },
   };
   const serve = (request: Request) => integration.fetch!(request, host);
+  /** A GET of the package's `path`, as the edge hands it on: `basePath` is what a paths ingress
+   *  strips, under the platform's origin. */
+  const page = (path: string, basePath?: string) =>
+    serve(
+      new Request(`${basePath ? "https://os.iterate.example" : ORIGIN}${path}`, {
+        headers: basePath ? { "x-iterate-base-path": basePath } : {},
+      }),
+    );
   /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
@@ -51,7 +66,7 @@ function fakeProject(secrets: Record<string, string> = SECRETS) {
       itx,
     });
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
-  return { integration, appended, scopes, serve, publish, registry, secrets };
+  return { integration, appended, scopes, serve, page, publish, registry, secrets };
 }
 
 const transaction = {
@@ -108,7 +123,7 @@ test("a transaction.created for an account becomes one event on that account's s
 });
 
 test("an account's secret opens only that account: the other's, a wrong one, an unknown or malformed account, or nothing is a 404 that stores nothing", async () => {
-  const project = fakeProject();
+  const project = fakeProject(SECRETS, { member: true });
   for (const path of [
     "/webhook/joint-account/personal-secret",
     "/webhook/jonas-personal/joint-secret",
@@ -149,7 +164,7 @@ test("a trailing path after the secret is fine; other event types are answered 2
 test("only POST is accepted", async () => {
   const project = fakeProject();
   const res = await project.serve(
-    new Request("https://monzo--iterate.example/joint-account/joint-secret"),
+    new Request("https://monzo--iterate.example/webhook/joint-account/joint-secret"),
   );
   assert.equal(res.status, 405);
 });
@@ -160,9 +175,11 @@ const card = (status: object) => ({
   title: "Monzo",
   description:
     "Every Monzo transaction as a monzo/transaction-created event, on a stream per account (/monzo/<name>), from a webhook per account.",
+  icon: "https://www.google.com/s2/favicons?domain=monzo.com&sz=64",
   status,
   actions: [
-    { label: "Recipe", url: "https://github.com/jonastemplestein/iterategrations/tree/main/monzo" },
+    { label: "Open", routingSlug: "monzo", path: "/" },
+    { label: "Recipe", url: RECIPE },
   ],
 });
 
@@ -198,4 +215,76 @@ test("the hook ignores every other event", async () => {
       itx: {} as any,
     });
   assert.deepEqual(project.appended, []);
+});
+
+// ------------------------------------------------------------------- the page
+
+test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
+  const project = fakeProject();
+  for (const path of ["/", "/nope"]) {
+    const res = await project.page(path);
+    assert.equal(res.status, 401, path);
+    assert.equal(await res.text(), "Sign in\n");
+  }
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+});
+
+test("the page shows the sign-in, the accounts the webhook secrets name, and the webhook URL's shape with a Copy button, with the base path a paths ingress strips; never a secret's value", async () => {
+  const project = fakeProject(
+    { ...SECRETS, "/secrets/monzo-webhook-Not_A_Name": "x" },
+    { member: true },
+  );
+  let res = await project.page("/");
+  let html = await res.text();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.match(html, /<h1>Monzo<\/h1>/);
+  assert.match(html, /Set up by your coding agent: see the recipe/);
+  const hint = `Set up Monzo in my iterate project. Follow the recipe at ${RECIPE}`;
+  assert.ok(html.includes(`data-copy="${hint}"`), hint);
+  assert.ok(html.includes(`data-copy="${ORIGIN}/webhook/&lt;account&gt;/&lt;secret&gt;"`));
+  assert.ok(html.includes(`href="${RECIPE}"`));
+  const accounts = [...html.matchAll(/<li><b>([^<]+)<\/b>/g)].map((match) => match[1]);
+  assert.deepEqual(accounts, ["joint-account", "jonas-personal"]);
+  for (const value of Object.values(SECRETS)) assert.ok(!html.includes(value), value);
+
+  project.secrets["/secrets/monzo"] = "a-made-up-sign-in";
+  res = await project.page("/", "/projects/iterate/monzo");
+  html = await res.text();
+  assert.match(
+    html,
+    /Signed in\. The project has the sign-in secret <code>\/secrets\/monzo<\/code>/,
+  );
+  assert.doesNotMatch(html, /coding agent/);
+  assert.ok(
+    html.includes(
+      `data-copy="https://os.iterate.example/projects/iterate/monzo/webhook/&lt;account&gt;/&lt;secret&gt;"`,
+    ),
+  );
+  assert.ok(!html.includes("a-made-up-sign-in"));
+  const empty = await fakeProject({}, { member: true }).page("/");
+  assert.match(await empty.text(), /None yet/);
+});
+
+test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
+  const res = await fakeProject(SECRETS, { member: true }).page("/");
+  const html = await res.text();
+  const csp = res.headers.get("content-security-policy")!;
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /form-action 'none'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
+  assert.equal(html.match(/<script/g)!.length, 1);
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.doesNotMatch(html, /onclick=|<form/);
+});
+
+test("a member's stray path is a 404 that reads nothing", async () => {
+  const project = fakeProject(SECRETS, { member: true });
+  for (const path of ["/nope", "/webhook", "/oauth2/callback"])
+    assert.equal((await project.page(path)).status, 404, path);
+  assert.equal((await project.serve(post("/", {}))).status, 404);
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
 });

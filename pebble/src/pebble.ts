@@ -1,3 +1,5 @@
+import { servePage } from "./page.js";
+
 /** The project, as this package uses it: what a config worker's `itx` already has. */
 export type PebbleItx = {
   secrets: {
@@ -48,22 +50,31 @@ const MAX_CLOCK_SKEW_SECONDS = 300;
  *  hook. */
 const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
 
+const SLUG = "pebble";
+const TITLE = "Pebble Index 01";
+const DESCRIPTION =
+  "Every recording made with the ring: the transcript as a pebble/recording-created event on /pebble, the audio as a project file.";
+const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/pebble";
+
 /** The card on the Dash's Integrations page (iterate/integrations). A coding agent sets the ring up
- *  by the recipe, so the card links there, and it is "ok" once the signing secret exists. */
+ *  by the recipe, so the card links to the page and to the recipe, and it is "ok" once the signing
+ *  secret exists. */
 const cardOf = (signing: boolean) => ({
-  title: "Pebble Index 01",
-  description:
-    "Every recording made with the ring: the transcript as a pebble/recording-created event on /pebble, the audio as a project file.",
+  title: TITLE,
+  description: DESCRIPTION,
+  icon: "https://www.google.com/s2/favicons?domain=repebble.com&sz=64",
   status: signing
     ? { kind: "ok" }
     : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
   actions: [
-    {
-      label: "Recipe",
-      url: "https://github.com/jonastemplestein/iterategrations/tree/main/pebble",
-    },
+    { label: "Open", routingSlug: SLUG, path: "/" },
+    { label: "Recipe", url: RECIPE },
   ],
 });
+
+/** Whether the signing secret exists: the card's status and the page's. */
+const hasSigningSecret = async (itx: PebbleItx): Promise<boolean> =>
+  (await itx.secrets.list()).some((secret) => secret.path === SIGNING_SECRET);
 
 /** Pebble Index 01's webhook (webhook protocol version 1): verify the signature, store the audio
  *  as the project file /pebble/<recordingId>.m4a and publish `pebble/recording-created` on /pebble. */
@@ -128,20 +139,34 @@ async function receive(request: Request, itx: PebbleItx): Promise<Response> {
 /** A project's Pebble Index 01 receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [pebble()];`
  *
- *  On the `pebble` routing slug it answers the Pebble app's webhook at `/webhook`. Its install hook
- *  (`project/worker-updated`) lists it on the Dash's Integrations page. */
+ *  On the `pebble` routing slug it answers the Pebble app's webhook at `/webhook` and, for members
+ *  only, its page at `/`; any other path is a 404. Its install hook (`project/worker-updated`)
+ *  lists it on the Dash's Integrations page. */
 export function pebble(): Integration {
   return {
-    routingSlug: "pebble",
+    routingSlug: SLUG,
     async fetch(request, host) {
-      if (new URL(request.url).pathname !== "/webhook")
+      const { pathname } = new URL(request.url);
+      if (pathname === "/webhook") {
+        using itx = host.getItx();
+        return await receive(request, itx);
+      }
+      const denied = host.auth.require(request);
+      if (denied) return denied;
+      if (request.method !== "GET" || pathname !== "/")
         return new Response("Not found\n", { status: 404 });
       using itx = host.getItx();
-      return await receive(request, itx);
+      return servePage(request, {
+        title: TITLE,
+        description: DESCRIPTION,
+        recipe: RECIPE,
+        secret: SIGNING_SECRET,
+        saved: await hasSigningSecret(itx),
+      });
     },
     async processEvent({ event, itx }) {
       if (event.type !== WORKER_UPDATED) return;
-      const signing = (await itx.secrets.list()).some((secret) => secret.path === SIGNING_SECRET);
+      const signing = await hasSigningSecret(itx);
       // The platform retries an event, so this card may have landed already, perhaps with what was
       // true then (IDEMPOTENCY_CONFLICT): not an error, and the next publish registers it again.
       await itx
