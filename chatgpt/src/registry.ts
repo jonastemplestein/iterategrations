@@ -49,6 +49,7 @@ export async function register(itx: ChatgptItx, slug: string, at?: string): Prom
         title: "ChatGPT",
         description:
           "Bring your own ChatGPT: Responses API requests paid by a ChatGPT Plus or Pro plan, not an API key.",
+        icon: "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=64",
         status: connected ? { kind: "ok" } : { kind: "attention", text: "Connect ChatGPT" },
         actions: [manage],
       },

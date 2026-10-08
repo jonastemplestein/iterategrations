@@ -1,3 +1,5 @@
+import { servePage } from "./page.js";
+
 /** The project, as this package uses it: what a config worker's `itx` already has. */
 export type MonzoItx = {
   secrets: {
@@ -37,23 +39,46 @@ const ACCOUNT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** The sign-in zero-trust-mcp keeps for the project (the recipe's step 1). */
 const SIGN_IN = "/secrets/monzo";
 
+/** Each account's webhook secret is this and the account's name (the recipe's step 4). */
+const WEBHOOK_SECRETS = "/secrets/monzo-webhook-";
+
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
 const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
 
+const SLUG = "monzo";
+const TITLE = "Monzo";
+const DESCRIPTION =
+  "Every Monzo transaction as a monzo/transaction-created event, on a stream per account (/monzo/<name>), from a webhook per account.";
+const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/monzo";
+
 /** The card on the Dash's Integrations page (iterate/integrations). A coding agent sets Monzo up by
- *  the recipe, so the card links there, and it is "ok" once the sign-in exists. */
+ *  the recipe, so the card links to the page and to the recipe, and it is "ok" once the sign-in
+ *  exists. */
 const cardOf = (signedIn: boolean) => ({
-  title: "Monzo",
-  description:
-    "Every Monzo transaction as a monzo/transaction-created event, on a stream per account (/monzo/<name>), from a webhook per account.",
+  title: TITLE,
+  description: DESCRIPTION,
+  icon: "https://www.google.com/s2/favicons?domain=monzo.com&sz=64",
   status: signedIn
     ? { kind: "ok" }
     : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
   actions: [
-    { label: "Recipe", url: "https://github.com/jonastemplestein/iterategrations/tree/main/monzo" },
+    { label: "Open", routingSlug: SLUG, path: "/" },
+    { label: "Recipe", url: RECIPE },
   ],
 });
+
+/** What the secrets list says of Monzo: whether the sign-in exists (the card's status and the
+ *  page's), and the accounts whose webhook secret exists, by name. */
+async function setupOf(itx: MonzoItx): Promise<{ signedIn: boolean; accounts: string[] }> {
+  const paths = (await itx.secrets.list()).map((secret) => secret.path);
+  const accounts = paths
+    .filter((path) => path.startsWith(WEBHOOK_SECRETS))
+    .map((path) => path.slice(WEBHOOK_SECRETS.length))
+    .filter((name) => ACCOUNT_NAME.test(name))
+    .sort();
+  return { signedIn: paths.includes(SIGN_IN), accounts };
+}
 
 /** The platform retries an event, so a card keyed by it may have landed already, perhaps with what
  *  was true then (`IDEMPOTENCY_CONFLICT`): that is not an error, and the next publish registers the
@@ -78,7 +103,7 @@ async function receive(request: Request, itx: MonzoItx): Promise<Response> {
     place === "webhook" &&
     ACCOUNT_NAME.test(account) &&
     presented !== "" &&
-    (await itx.secrets.verifyEquals(`/secrets/monzo-webhook-${account}`, { value: presented }));
+    (await itx.secrets.verifyEquals(`${WEBHOOK_SECRETS}${account}`, { value: presented }));
   // an unknown account, or a wrong or missing secret, looks like any other path
   if (!known) return new Response("Not found\n", { status: 404 });
 
@@ -107,19 +132,36 @@ async function receive(request: Request, itx: MonzoItx): Promise<Response> {
 /** A project's Monzo receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [monzo()];`
  *
- *  On the `monzo` routing slug it answers Monzo's webhook at `/webhook/<account name>/<secret>`. Its install
- *  hook (`project/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
+ *  On the `monzo` routing slug it answers Monzo's webhook at `/webhook/<account name>/<secret>` and,
+ *  for members only, its page at `/`; any other path is a 404. Its install hook
+ *  (`project/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
  *  appended by the recipe's script that registers the account's webhook. */
 export function monzo(): Integration {
   return {
-    routingSlug: "monzo",
+    routingSlug: SLUG,
     async fetch(request, host) {
+      const { pathname } = new URL(request.url);
+      if (pathname.startsWith("/webhook/")) {
+        using itx = host.getItx();
+        return await receive(request, itx);
+      }
+      const denied = host.auth.require(request);
+      if (denied) return denied;
+      if (request.method !== "GET" || pathname !== "/")
+        return new Response("Not found\n", { status: 404 });
       using itx = host.getItx();
-      return await receive(request, itx);
+      return servePage(request, {
+        title: TITLE,
+        description: DESCRIPTION,
+        recipe: RECIPE,
+        signIn: SIGN_IN,
+        webhookSecrets: WEBHOOK_SECRETS,
+        ...(await setupOf(itx)),
+      });
     },
     async processEvent({ event, itx }) {
       if (event.type !== WORKER_UPDATED) return;
-      const signedIn = (await itx.secrets.list()).some((secret) => secret.path === SIGN_IN);
+      const { signedIn } = await setupOf(itx);
       await once(
         itx.cd("/integrations").append({
           type: "events.iterate.com/integration/configured",

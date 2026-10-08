@@ -5,8 +5,10 @@ Every recording you make with the ring lands in an iterate project: the transcri
 `/pebble/<recordingId>.m4a`.
 
 The receiver is the package `iterate-pebble`: one element, `pebble()`, in the `integrations` array
-of the project's config worker. The project's Integrations page in the Dash shows a Pebble card ("Set
-up by your coding agent" until the signing secret exists, with a link to this recipe).
+of the project's config worker. It has a page of its own, for the project's members: the status and
+the webhook URL to paste in the Pebble app. The project's Integrations page in the Dash shows a
+Pebble card ("Set up by your coding agent" until the signing secret exists), with an **Open** button
+to the page and a **Recipe** button to this recipe.
 
 ## 0. Before you start: the ring and the app
 
@@ -70,33 +72,39 @@ const FILES = {};
 ```
 
 `pebble()` answers the project's `pebble` host: the worker hands it every request there, and every
-event. Its install hook (`project/worker-updated`) puts the Pebble card on the Dash.
+event. `/webhook` takes the Pebble app's recordings. The page at `/` is for the project's members:
+it shows the status (whether the signing secret exists) and the webhook URL to paste, with a
+**Copy** button. Its install hook (`project/worker-updated`) puts the Pebble card on the Dash.
 
 ### By hand, or copy the source
 
 By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
-To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) (no dependencies) and commit it to
-`/repos/config` as `pebble.ts`; the import then reads `from "./pebble.ts"`. You own the copy, so you
-can change it.
+To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) and [`src/page.ts`](src/page.ts)
+(no dependencies) and commit them to `/repos/config` under `pebble/`; the import then reads
+`from "./pebble/pebble.ts"`. You own the copy, so you can change it.
 
-## 3. Get the webhook URL
+## 3. Send the person to the page
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "pebble", path: "/webhook" });
-  const res = await itx.fetch(new Request(url, { method: "POST" }));
-  return { url, status: res.status }; // 400: the receiver refused an unsigned request. 404: not published yet
+  const page = await itx.url({ routingSlug: "pebble", path: "/" });
+  const webhook = await itx.url({ routingSlug: "pebble", path: "/webhook" });
+  const res = await itx.fetch(new Request(webhook, { method: "POST" }));
+  return { page, status: res.status }; // 400: the receiver refused an unsigned request. 404: not published yet
 };
 ```
 
+Say: "Open this and sign in. It shows the webhook URL for the Pebble app, with a **Copy** button."
+The page says "Set up" once the signing secret from step 1 exists.
+
 ## 4. Point the Pebble app at the project
 
-Give the person the webhook URL from step 3 and these taps, in the Pebble app:
+Give the person these taps, in the Pebble app:
 
 1. **Index 01 Settings → Webhook.**
 2. Pick the gesture to configure (**Hold & talk** or **Double click & hold**). Each has its own
    URL, headers and payload.
-3. **Webhook URL:** paste the URL from step 3.
+3. **Webhook URL:** paste the URL the page shows (its **Copy** button).
 4. Turn on **Sign requests** and paste the signing secret from step 1 (the same value, exactly).
 5. **Send:** choose **Both**, so you get the transcript and the audio ("Recording only" has no
    transcript; "Transcription only" has no audio file).

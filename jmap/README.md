@@ -7,7 +7,7 @@ agent makes for one site and switches off later.
 
 There is no client to install. An agent's script, or the project's own code, calls Fastmail's JMAP
 API with plain `fetch`: [Using the mailbox](#using-the-mailbox) has every call. The package,
-`iterate-jmap`, is only the mailbox's card on the Dash.
+`iterate-jmap`, is only the mailbox's card on the Dash and a page with its status.
 
 Mail the project sends goes through the mailbox itself: it is written to Drafts, submitted, and moved
 to Sent. So the mailbox holds everything the project sent and received, as a person's mailbox would,
@@ -49,7 +49,7 @@ async (itx) =>
 
 Send the person the returned `url` and wait until they say it is saved.
 
-## 2. The card on the Dash
+## 2. The card on the Dash, and the page
 
 Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the
 package (built by this repo's CI and served by pkg.pr.new, never npm), adds `jmap()` to the
@@ -64,9 +64,11 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`jmap()` has no host of its own. Its install hook (`project/worker-updated`) puts a Mailbox card on
-the Dash's Integrations page: "Set up by your coding agent: see the recipe" until the token exists,
-with a link to this recipe, and "ok" after.
+`jmap()` answers the project's `jmap` host. Its page at `/` is for the project's members: it shows
+the status (whether the token exists). It has no webhook, so there is no URL to paste. Its install
+hook (`project/worker-updated`) puts a Mailbox card on the Dash's Integrations page: "Set up by your
+coding agent: see the recipe" until the token exists, and "ok" after, with an **Open** button to the
+page and a **Recipe** button to this recipe.
 
 Earlier builds of this package shipped a client (`connectJmap`, `maskedEmails`), and an earlier
 version of this recipe added `mail.ts` and a `mailbox()` member to `worker.ts` that use it. Move any
