@@ -25,7 +25,8 @@ export type GithubItx = {
       options: { urls: string[]; refresh?: InstallationRefresh },
     ): Promise<unknown>;
     delete(path: string): Promise<unknown>;
-    list(): Promise<{ path: string }[]>;
+    /** The catalog: each secret's path, and the values of its public fields, never a secret one. */
+    list(): Promise<{ path: string; public?: Record<string, string> }[]>;
     verifyHmac(
       path: string,
       input: { payload: string | Uint8Array; signature: string; field?: string },
@@ -34,7 +35,16 @@ export type GithubItx = {
       path: string;
       egress: { urls: string[] };
       description?: string;
-      fields?: { name: string; label: string; multiline?: boolean }[];
+      /** A `public` field is no secret: the form shows it as a plain input (with `placeholder`,
+       *  and HTML's `pattern`), and the catalog answers its value. */
+      fields?: {
+        name: string;
+        label: string;
+        multiline?: boolean;
+        public?: boolean;
+        placeholder?: string;
+        pattern?: string;
+      }[];
     }): Promise<{ path: string; url: string }>;
   };
   cd(path: string): {
@@ -53,8 +63,10 @@ export type GithubItx = {
  *  slug and its card on the Dash stay `github`: the shared App has no project host, and the
  *  registry is the packages' own. */
 
-/** The App's own secret: `privateKey` (the PEM GitHub generated) and `webhookSecret` (the one typed
- *  in the App's settings), collected on the Dash so neither passes through this code. */
+/** The App, one secret: `appId` and `slug`, public fields, and `privateKey` (the PEM GitHub
+ *  generated) and `webhookSecret` (the one typed in the App's settings). A person enters all four on
+ *  one form of the Dash, so neither secret passes through this code. The catalog answers the ID and
+ *  the slug (`readApp`): the package keeps no copy of them. */
 export const APP_SECRET = "/secrets/own-github-app";
 /** Where the App's secrets and every installation's token may go. */
 export const PIN: string[] = ["https://github.com", "https://api.github.com"];
@@ -71,11 +83,10 @@ export const placeholder = (installationId: string): string =>
 export const streamOf = (installationId: string): string =>
   `/integrations/own-github/${installationId}`;
 
-/** The kv: `own-github/app` (the App's ID and slug, both public), `own-github/pending/<nonce>`
- *  (an install this page started), `own-github/installations/<connection>` (an installation, by
- *  its id, or a request an owner has yet to approve, `request-<…>`), and
- *  `own-github/removed/<connection>` (a removal whose null row has yet to land on the Dash). */
-export const APP_KEY = "own-github/app";
+/** The kv: `own-github/pending/<nonce>` (an install this page started),
+ *  `own-github/installations/<connection>` (an installation, by its id, or a request an owner has
+ *  yet to approve, `request-<…>`), and `own-github/removed/<connection>` (a removal whose null row
+ *  has yet to land on the Dash). */
 const PENDING = "own-github/pending/";
 export const INSTALLATIONS = "own-github/installations/";
 export const REMOVED = "own-github/removed/";
@@ -89,6 +100,7 @@ export const INSTALLATION_ID: RegExp = /^\d{1,20}$/;
 /** A connection on the Dash: an installation id, or a request an owner has yet to approve. */
 export const CONNECTION: RegExp = /^(?:\d{1,20}|request-[0-9a-f]{16})$/;
 
+/** The App, as the catalog answers it: its ID and its slug, the public fields of `APP_SECRET`. */
 export type App = { appId: string; slug: string };
 /** What the kv keeps of an installation: the account it is on (`installation <id>` when GitHub did
  *  not say), and when it was connected. A request an owner has yet to approve also keeps the nonce
@@ -112,29 +124,17 @@ const hex = (bytes: number): string =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-export async function readApp(itx: Pick<GithubItx, "kv">): Promise<App | null> {
-  const value = await itx.kv.get(APP_KEY);
-  return value ? (JSON.parse(value) as App) : null;
+/** The App, from the catalog: null until `APP_SECRET` holds its ID and slug as public fields. A
+ *  secret there without them (set by hand, or saved before the form asked for them) is not an App:
+ *  the page asks to save the App again. */
+export async function readApp(itx: Pick<GithubItx, "secrets">): Promise<App | null> {
+  const entry = (await itx.secrets.list()).find((secret) => secret.path === APP_SECRET);
+  const appId = entry?.public?.appId;
+  const slug = entry?.public?.slug;
+  return appId && slug ? { appId, slug } : null;
 }
 
-/** Keep the App's ID and slug. The slug may come as the App's public link,
- *  `https://github.com/apps/<slug>`. */
-export async function saveApp(
-  itx: Pick<GithubItx, "kv">,
-  appId: string,
-  slugOrLink: string,
-): Promise<App> {
-  const id = appId.trim();
-  if (!/^\d{1,12}$/.test(id)) throw new Error("The App ID is a number: it is on the App's page");
-  const slug =
-    /^https:\/\/github\.com\/apps\/([^/?#]+)\/?$/.exec(slugOrLink.trim())?.[1] ?? slugOrLink.trim();
-  if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug))
-    throw new Error("The slug is the last part of the App's public link, github.com/apps/<slug>");
-  const app = { appId: id, slug };
-  await itx.kv.put(APP_KEY, JSON.stringify(app));
-  return app;
-}
-
+/** Whether the project has a secret at `APP_SECRET`, an App or not. */
 export async function hasAppSecret(itx: Pick<GithubItx, "secrets">): Promise<boolean> {
   return (await itx.secrets.list()).some((secret) => secret.path === APP_SECRET);
 }
@@ -156,13 +156,11 @@ export async function listInstallations(
 }
 
 /** The link that installs the App, with a nonce that binds GitHub's redirect back to this install
- *  (`state`, which GitHub passes through to the setup URL). It needs the App's ID and slug, and its
- *  secrets: the callback proves the installation with them. */
+ *  (`state`, which GitHub passes through to the setup URL). It needs the App: the callback proves
+ *  the installation with its key. */
 export async function startInstall(itx: Pick<GithubItx, "kv" | "secrets">): Promise<string> {
   const app = await readApp(itx);
-  if (!app) throw new Error("Save the App ID and slug first");
-  if (!(await hasAppSecret(itx)))
-    throw new Error("Save the App's private key and webhook secret first");
+  if (!app) throw new Error("Save the App first");
   // an install that never came back leaves its nonce behind: those over an hour old go
   for (const key of (await itx.kv.list(PENDING)).keys) {
     const value = await itx.kv.get(key);
@@ -236,8 +234,8 @@ async function prove(itx: GithubItx, path: string, installationId: string): Prom
   return body?.repositories?.[0]?.owner?.login ?? `installation ${installationId}`;
 }
 
-/** Record an installation GitHub sent back: its secret, proved by one call that also names the
- *  account, and the kv entry. The proof runs on a secret of its own,
+/** Record an installation, sent back by GitHub or named on the page: its secret, proved by one call
+ *  that also names the account, and the kv entry. The proof runs on a secret of its own,
  *  `/secrets/own-github-<id>-proof`, and the installation's secret is set only once it has passed:
  *  an update that fails (GitHub down, a wrong App ID saved) leaves a working installation as it
  *  was, its minted token included. The proof's secret goes either way, and a failure to delete it
@@ -249,7 +247,7 @@ async function prove(itx: GithubItx, path: string, installationId: string): Prom
  *  can mint for any installation of its App already. */
 export async function connectInstallation(itx: GithubItx, installationId: string): Promise<string> {
   const app = await readApp(itx);
-  if (!app) throw new Error("Save the App ID and slug first");
+  if (!app) throw new Error("Save the App first");
   const material = {
     appId: app.appId,
     privateKey: `getSecret("${APP_SECRET}", { field: "privateKey" })`,

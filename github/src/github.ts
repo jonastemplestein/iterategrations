@@ -1,6 +1,6 @@
 import type { GithubItx } from "./app.js";
 import { servePage, serveCallback } from "./page.js";
-import { registerAll, WORKER_UPDATED } from "./registry.js";
+import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
 import { receiveDelivery } from "./webhook.js";
 
 export { APP_SECRET, PIN, placeholder, secretOf, streamOf } from "./app.js";
@@ -31,7 +31,8 @@ export type Integration = {
  *  On its routing slug it answers, for members only, the Connect GitHub page at `/` and the App's
  *  setup URL at `/oauth2/callback`, and, for GitHub, the App's webhook at `/webhook` (checked with
  *  the App's webhook secret). Its install hook (`project/worker-updated`) lists it on the Dash's
- *  Integrations page: the card, and a row per installation.
+ *  Integrations page: the card, and a row per installation. The App's secret set or deleted on the
+ *  Dash registers the card again.
  *
  *  - `slug`: the routing slug to answer on. Default `github`. */
 export function github(options: { slug?: string } = {}): Integration {
@@ -52,8 +53,9 @@ export function github(options: { slug?: string } = {}): Integration {
         : await servePage(request, itx, routingSlug);
     },
     async processEvent({ event, itx }) {
-      if (event.type === WORKER_UPDATED)
-        await registerAll(itx, routingSlug, `${event.path}@${event.offset}`);
+      const at = `${event.path}@${event.offset}`;
+      if (event.type === WORKER_UPDATED) await registerAll(itx, routingSlug, at);
+      else if (isAppFact(event)) await registerCard(itx, routingSlug, `github:registry:${at}`);
     },
   };
 }

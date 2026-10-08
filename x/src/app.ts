@@ -35,12 +35,22 @@ export type XItx = {
   };
   secrets: {
     delete(path: string): Promise<unknown>;
-    list(): Promise<{ path: string }[]>;
+    /** The catalog: each secret's path, and the values of its public fields, never a secret one. */
+    list(): Promise<{ path: string; public?: Record<string, string> }[]>;
     collectFromUser(input: {
       path: string;
       egress: { urls: string[] };
       description?: string;
-      fields?: { name: string; label: string; multiline?: boolean }[];
+      /** A `public` field is no secret: the form shows it as a plain input (with `placeholder`,
+       *  and HTML's `pattern`), and the catalog answers its value. */
+      fields?: {
+        name: string;
+        label: string;
+        multiline?: boolean;
+        public?: boolean;
+        placeholder?: string;
+        pattern?: string;
+      }[];
     }): Promise<{ path: string; url: string }>;
     beginOAuth(path: string, options: OAuthOptions): Promise<{ authorizationUrl: string }>;
     completeOAuth(
@@ -68,11 +78,12 @@ export type Settings = { slug: string; scopes: string[]; urls: string[] };
  *  `x-` name. Its routing slug and its card on the Dash stay `x`: the shared app has no project
  *  host, and the registry is the packages' own. */
 
-/** The OAuth client's secret, `clientSecret`, collected on the Dash so it never passes through this
- *  code. */
+/** The OAuth client, one secret: `clientId`, a public field, and `clientSecret`. A person enters both
+ *  on one form of the Dash, so the secret never passes through this code. The catalog answers the
+ *  client ID (`readApp`): the package keeps no copy of it. */
 export const APP_SECRET = "/secrets/own-x-app";
-/** Where the client secret may go: X's token endpoint, which the platform sends it to at the code
- *  exchange and at every refresh. */
+/** Where the client may go: X's token endpoint, which the platform sends it to at the code exchange
+ *  and at every refresh. */
 export const APP_PIN: string[] = ["https://api.x.com"];
 const AUTHORIZATION_ENDPOINT = "https://x.com/i/oauth2/authorize";
 const TOKEN_ENDPOINT = "https://api.x.com/2/oauth2/token";
@@ -94,11 +105,11 @@ export const secretOf = (connection: string): string => `/secrets/own-x-${connec
 export const placeholder = (connection: string): string =>
   `getSecret("${secretOf(connection)}", { field: "accessToken" })`;
 
-/** The kv: `own-x/app` (the client ID, public, and the redirect URI the platform last sent X),
+/** The kv: `own-x/redirect-uri` (the redirect URI the platform last sent X),
  *  `own-x/pending/<digest of the state>` (a sign-in this page started),
  *  `own-x/accounts/<connection>` (an account), and `own-x/removed/<connection>` (a
  *  removal whose null row has yet to land on the Dash). */
-export const APP_KEY = "own-x/app";
+export const REDIRECT_URI = "own-x/redirect-uri";
 const PENDING = "own-x/pending/";
 export const ACCOUNTS = "own-x/accounts/";
 export const REMOVED = "own-x/removed/";
@@ -108,10 +119,8 @@ const ATTEMPT_TTL_MS = 60 * 60 * 1000;
 /** A connection: eight hex digits, made when an account is first connected. */
 export const CONNECTION: RegExp = /^[0-9a-f]{8}$/;
 
-/** The client ID, and the redirect URI the platform sent X with the last Connect when it was
- *  not the page's own address: a project with a primary hostname serves the page there, but the
- *  platform composes the redirect under iterate's ingress. */
-export type App = { clientId: string; redirectUri?: string };
+/** The client, as the catalog answers it: its ID, the public field of `APP_SECRET`. */
+export type App = { clientId: string };
 /** What the kv keeps of an account: its @username, its id at X, the scopes X granted, and when it
  *  was connected. */
 export type Account = { account: string; externalId: string; scopes: string[]; at: string };
@@ -145,23 +154,16 @@ const pendingKey = async (state: string): Promise<string> => {
   return `${PENDING}${hexOf(new Uint8Array(digest))}`;
 };
 
-export async function readApp(itx: Pick<XItx, "kv">): Promise<App | null> {
-  const value = await itx.kv.get(APP_KEY);
-  return value ? (JSON.parse(value) as App) : null;
+/** The client, from the catalog: null until `APP_SECRET` holds its ID as a public field. A secret
+ *  there without it (set by hand, or saved before the form asked for the ID) is not a client: the
+ *  page asks to save the client again. */
+export async function readApp(itx: Pick<XItx, "secrets">): Promise<App | null> {
+  const entry = (await itx.secrets.list()).find((secret) => secret.path === APP_SECRET);
+  const clientId = entry?.public?.clientId;
+  return clientId ? { clientId } : null;
 }
 
-/** Keep the client ID. It is public: it goes into the authorization URL. */
-export async function saveApp(itx: Pick<XItx, "kv">, clientId: string): Promise<App> {
-  const id = clientId.trim();
-  if (!/^[A-Za-z0-9+/=_-]{10,100}$/.test(id))
-    throw new Error(
-      "The client ID is one word of letters and digits: it is under the app's Keys and tokens at X",
-    );
-  const app: App = { ...(await readApp(itx)), clientId: id };
-  await itx.kv.put(APP_KEY, JSON.stringify(app));
-  return app;
-}
-
+/** Whether the project has a secret at `APP_SECRET`, a client or not. */
 export async function hasAppSecret(itx: Pick<XItx, "secrets">): Promise<boolean> {
   return (await itx.secrets.list()).some((secret) => secret.path === APP_SECRET);
 }
@@ -209,16 +211,16 @@ function oauthOptionsOf(app: App, settings: Settings, existing: Account | null):
 
 /** Begin OAuth for an account: a new connection, or `connection` again (Reconnect). Answers the URL
  *  to send the person to. The attempt is kept by its `state`, the query parameter the platform
- *  signed into that URL and X sends back to the callback. It needs the client ID and the
- *  client secret: the platform refuses a placeholder that names no secret. */
+ *  signed into that URL and X sends back to the callback. It needs the client. The redirect URI the
+ *  platform sent is kept when it changes: a project with a primary hostname serves the page there,
+ *  but the platform composes the redirect under iterate's ingress, and the page shows it. */
 export async function startConnect(
   itx: XItx,
   settings: Settings,
   connection?: string,
 ): Promise<string> {
   const app = await readApp(itx);
-  if (!app) throw new Error("Save the client ID first");
-  if (!(await hasAppSecret(itx))) throw new Error("Save the client secret first");
+  if (!app) throw new Error("Save the client first");
   const existing = connection === undefined ? null : await readAccount(itx, connection);
   if (connection !== undefined && !existing) throw new Error("Unknown account");
   // a sign-in that never came back leaves its attempt behind: those over an hour old go
@@ -245,8 +247,8 @@ export async function startConnect(
   const attempt: Attempt = { connection: id, at: Date.now() };
   await itx.kv.put(await pendingKey(state), JSON.stringify(attempt));
   const redirectUri = url.searchParams.get("redirect_uri");
-  if (redirectUri && redirectUri !== app.redirectUri)
-    await itx.kv.put(APP_KEY, JSON.stringify({ ...app, redirectUri }));
+  if (redirectUri && redirectUri !== (await itx.kv.get(REDIRECT_URI)))
+    await itx.kv.put(REDIRECT_URI, redirectUri);
   return authorizationUrl;
 }
 

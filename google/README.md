@@ -10,14 +10,16 @@ It is project code: one element, `google()`, in the `integrations` array of the 
 worker, which hands it the requests on the project's `google` routing slug, and every event.
 
 - **The page** (members only, at the project's `google` address, `/`): the redirect URI to paste
-  into the OAuth client at Google, a form for the client ID, a link that collects the client secret,
-  a **Connect** button, and the connected accounts with Reconnect and Disconnect buttons.
+  into the OAuth client at Google, a link that collects the client (its ID and its secret, on one
+  form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
+  Disconnect buttons.
 - **The callback** (the same address, `/oauth2/callback`, members only): Google sends the person
   back here from its consent screen, and the page connects the account.
 - **The Dash:** the project's Integrations page shows a Google card ("Create an OAuth client and
-  paste its secret" until the client is set up, then "Connect an account") and a row per account:
+  paste its secret" until the client is saved, then "Connect an account") and a row per account:
   its address, its scopes, and buttons to the page and to the account's third-party access at
-  Google.
+  Google. The card changes when the client is saved or deleted: the package registers it again on
+  that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
 
 The deployment's own Google client (iterate's, on the Dash's Connect sheet) is another thing: it is
 shared by every project, and the platform keeps it. This package is for a client the project owns,
@@ -81,12 +83,13 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    **Testing**, only its test users can connect: add each account as a test user, or publish the
    app. Then enable each API the scopes need (the Gmail API, …) under **APIs & Services**,
    **Library**.
-2. **Paste the client ID** on the page (public, kept in the project's kv). It ends in
-   `.apps.googleusercontent.com`.
-3. **Save the client secret** through the page's link: a page of iterate's Dash, made by
-   `itx.secrets.collectFromUser`, keeps it as `/secrets/own-google-app`, pinned to
-   `oauth2.googleapis.com`. It never passes through the project's code.
-4. **Connect an account**: Google asks which account, and for its consent, then sends them back to
+2. **Save the client** through the page's link: a page of iterate's Dash, made by
+   `itx.secrets.collectFromUser`, asks for the client ID and the client secret on one form, and
+   keeps them as one secret, `/secrets/own-google-app`, pinned to `oauth2.googleapis.com`. The
+   client ID is a public field of that secret: the form shows it as plain text and checks its shape
+   (it ends in `.apps.googleusercontent.com`), and the project reads it from its list of secrets.
+   The client secret never passes through the project's code.
+3. **Connect an account**: Google asks which account, and for its consent, then sends them back to
    the page, which shows the account. Connect again for each other account.
 
 Then write the accounts, their secrets and where the page is into the project's `AGENTS.md`.
@@ -144,12 +147,16 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
   (`redirect_uri_mismatch`). A project that claimed a primary hostname serves the page there, under
   another address: after its first Connect, the page also shows the URI the platform sent, to add to
   the client.
-- **One client secret serves every account.** Each account's secret holds the client ID and a
-  placeholder for the client secret,
-  `getSecret("/secrets/own-google-app", { field: "clientSecret" })`, which the platform reads at each
-  refresh. To rotate it, add a new secret on the client's page at Google, save it through the page's
-  link (**Replace it**), then delete the old one at Google. To move to another client, save its ID
-  and its secret, then Reconnect each account.
+- **One client serves every account.** The client is one secret, `/secrets/own-google-app`: its
+  `clientId`, a public field that the catalog (`itx.secrets.list()`) answers, and its
+  `clientSecret`. The package keeps no copy of the ID. A secret there without the public `clientId`
+  (set by hand, or saved by an older version of this package) is not a client: the page says so,
+  and asks to save the client again. Each account's secret holds the client ID and a placeholder
+  for the client secret, `getSecret("/secrets/own-google-app", { field: "clientSecret" })`, which
+  the platform reads at each refresh. To rotate the secret, add a new one on the client's page at
+  Google, save the client again through the page's link (**Replace it**: the form asks for the ID
+  and the new secret), then delete the old secret at Google. To move to another client, save it
+  through the same link, then Reconnect each account.
 - **A row per account.** The platform names each account at Google's userinfo endpoint, with the new
   token, before it stores anything (`account` in `beginOAuth`), and the page keeps what it answers.
   The same account connected again replaces its older connection: that secret goes, and its row.

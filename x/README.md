@@ -10,13 +10,16 @@ It is project code: one element, `x()`, in the `integrations` array of the proje
 which hands it the requests on the project's `x` routing slug, and every event.
 
 - **The page** (members only, at the project's `x` address, `/`): the callback and website URLs to
-  paste into the app's settings at X, a form for the client ID, a link that collects the client
-  secret, a **Connect** button, and the connected accounts with Reconnect and Disconnect buttons.
+  paste into the app's settings at X, a link that collects the client (its ID and its secret, on one
+  form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
+  Disconnect buttons.
 - **The callback** (the same address, `/oauth2/callback`, members only): X sends the person back
   here from its authorization page, and the page connects the account.
 - **The Dash:** the project's Integrations page shows an X card ("Create an OAuth client and paste
-  its secret" until the app is set up, then "Connect an account") and a row per account: its
-  @username, its scopes, and buttons to the page and to the account on X.
+  its secret" until the client is saved, then "Connect an account") and a row per account: its
+  @username, its scopes, and buttons to the page and to the account on X. The card changes when the
+  client is saved or deleted: the package registers it again on that secret's
+  `events.iterate.com/secret/set` and `secret/deleted` facts.
 
 The deployment's own X app (iterate's, on the Dash's Connect sheet) is another thing: it is shared
 by every project, and the platform keeps it. This package is for an app the project owns, with its
@@ -82,15 +85,15 @@ project's `x` address; the page shows each URL with a Copy button):
    - **Callback URI / Redirect URL:** `<address>/oauth2/callback`.
    - **Website URL:** the page's own address, `<address>/`.
 
-   Then, under the app's **Keys and tokens**, **OAuth 2.0 Client ID and Client Secret**: the Client
-   ID for step 2 and the Client Secret for step 3. X shows the Client Secret once; if it is lost,
-   regenerate it there.
+   Then, under the app's **Keys and tokens**, **OAuth 2.0 Client ID and Client Secret**: both are
+   for step 2. X shows the Client Secret once; if it is lost, regenerate it there.
 
-2. **Paste the client ID** on the page (public, kept in the project's kv).
-3. **Save the client secret** through the page's link: a page of iterate's Dash, made by
-   `itx.secrets.collectFromUser`, keeps it as `/secrets/own-x-app`, pinned to `api.x.com`. It never
-   passes through the project's code.
-4. **Connect an account**: X asks the account signed in at x.com to authorize the app, then sends
+2. **Save the client** through the page's link: a page of iterate's Dash, made by
+   `itx.secrets.collectFromUser`, asks for the client ID and the client secret on one form, and
+   keeps them as one secret, `/secrets/own-x-app`, pinned to `api.x.com`. The client ID is a public
+   field of that secret: the form shows it as plain text and checks its shape, and the project
+   reads it from its list of secrets. The client secret never passes through the project's code.
+3. **Connect an account**: X asks the account signed in at x.com to authorize the app, then sends
    them back to the page, which shows the account. To connect another account, sign in to X as that
    account, then connect again.
 
@@ -150,10 +153,15 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
   Secret, which the platform sends to X's token endpoint in a Basic header at the exchange and at
   every refresh. A Native App or a Single Page App is a public client, which this page does not
   use.
-- **One client secret serves every account.** Each account's secret holds the client ID and a
-  placeholder for the client secret, `getSecret("/secrets/own-x-app", { field: "clientSecret" })`,
-  which the platform reads at each refresh. To rotate it, regenerate it at X and save the new one
-  through the page's link (**Replace it**) right away.
+- **One client serves every account.** The client is one secret, `/secrets/own-x-app`: its
+  `clientId`, a public field that the catalog (`itx.secrets.list()`) answers, and its
+  `clientSecret`. The package keeps no copy of the ID. A secret there without the public `clientId`
+  (set by hand, or saved by an older version of this package) is not a client: the page says so,
+  and asks to save the client again. Each account's secret holds the client ID and a placeholder
+  for the client secret, `getSecret("/secrets/own-x-app", { field: "clientSecret" })`, which the
+  platform reads at each refresh. To rotate the secret, regenerate it at X and save the client
+  again through the page's link (**Replace it**: the form asks for the ID and the new secret) right
+  away.
 - **A row per account.** X's token answer names no account (X has no ID token), so the platform
   names each account at X's `/2/users/me`, with the new token, before it stores anything (`account`
   in `beginOAuth`), and the page keeps what it answers. The same account connected again replaces
