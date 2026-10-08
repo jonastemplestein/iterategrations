@@ -15,8 +15,12 @@ export type OAuthOptions = {
   /** The origins the tokens may be sent to: the token endpoint's, and the APIs'. */
   urls: string[];
   extra?: Record<string, string>;
-  /** The account the tokens must be for, by its id at the provider: another account's tokens are
-   *  refused before anything is stored. */
+  /** Where the provider names the account the new tokens are for: an endpoint within `urls`, which
+   *  the platform calls once with the new access token before it stores anything, and the JSON
+   *  paths of the account's id and name. `completeOAuth` answers the account. */
+  account: { url: string; id: string; name?: string };
+  /** The account the tokens must be for, by the id `account`'s endpoint names: the platform refuses
+   *  another account's tokens before it stores anything (`IDENTITY_CONFLICT`). */
   expectAccount?: string;
 };
 
@@ -42,7 +46,7 @@ export type XItx = {
     completeOAuth(
       path: string,
       input: { code: string; state: string },
-    ): Promise<{ path: string; scopes: string[] }>;
+    ): Promise<{ path: string; scopes: string[]; account?: { id: string; name: string | null } }>;
   };
   cd(path: string): {
     append(event: {
@@ -72,17 +76,16 @@ export const APP_SECRET = "/secrets/own-x-app";
 export const APP_PIN: string[] = ["https://api.x.com"];
 const AUTHORIZATION_ENDPOINT = "https://x.com/i/oauth2/authorize";
 const TOKEN_ENDPOINT = "https://api.x.com/2/oauth2/token";
-const USERINFO = "https://api.x.com/2/users/me";
+/** Where X names the account a token is for: users/me, with the account's id and @username under
+ *  `data`. X's token answer names no account (X has no ID token), so the platform calls it with the
+ *  new token before it stores anything. */
+const ACCOUNT = { url: "https://api.x.com/2/users/me", id: "data.id", name: "data.username" };
 /** The scopes every connection asks for, whatever more it asks: `tweet.read` and `users.read` name
  *  the account at users/me, and `offline.access` brings a refresh token. */
 export const SCOPES: string[] = ["tweet.read", "users.read", "offline.access"];
 /** The origins every account's tokens may be sent to: X's API, which is the token endpoint's origin
  *  too. */
 export const URLS: string[] = ["https://api.x.com"];
-/** X's token answer names no account (X has no ID token), so the platform cannot hold a reconnect
- *  to its account: `expectAccount` would refuse every one. The callback checks the account once the
- *  tokens are stored instead, and deletes tokens it cannot vouch for. */
-const HOLDS_ACCOUNT = false;
 
 /** An account's secret: its tokens, which the platform refreshes with the client's secret. */
 export const secretOf = (connection: string): string => `/secrets/own-x-${connection}`;
@@ -115,10 +118,8 @@ export type Account = { account: string; externalId: string; scopes: string[]; a
 /** A sign-in the page started: the connection it is for, and when. */
 export type Attempt = { connection: string; at: number };
 /** What a callback came to: the account connected, with the connections of the same account it
- *  replaced; or a reconnect's tokens refused, with the connection that went with them. */
-export type Outcome =
-  | { connected: string; replaced: string[] }
-  | { refused: string; forgotten: string };
+ *  replaced. */
+export type Outcome = { connected: string; replaced: string[] };
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -189,10 +190,9 @@ export async function listAccounts(
 /** The scopes as a person reads them: X's are short already. */
 export const scopesShown = (scopes: string[]): string[] => scopes;
 
-/** What Connect and Reconnect begin OAuth with. X's token endpoint takes the client's credentials
- *  in a Basic header. A reconnect is not held to its account: the platform cannot hold it
- *  (`HOLDS_ACCOUNT`). */
-function oauthOptionsOf(app: App, settings: Settings): OAuthOptions {
+/** What Connect begins OAuth with, and Reconnect with `existing`: held to its account by the id
+ *  users/me names. X's token endpoint takes the client's credentials in a Basic header. */
+function oauthOptionsOf(app: App, settings: Settings, existing: Account | null): OAuthOptions {
   return {
     authorizationEndpoint: AUTHORIZATION_ENDPOINT,
     tokenEndpoint: TOKEN_ENDPOINT,
@@ -202,28 +202,9 @@ function oauthOptionsOf(app: App, settings: Settings): OAuthOptions {
     clientAuth: "client_secret_basic",
     scope: settings.scopes.join(" "),
     urls: settings.urls,
+    account: ACCOUNT,
+    ...(existing && { expectAccount: existing.externalId }),
   };
-}
-
-/** Names the account a secret's token is for, with one call to X's users/me through the project's
- *  egress, which swaps the token in for the placeholder: the account's @username, and its id at X. */
-async function nameAccount(path: string): Promise<{ account: string; externalId: string }> {
-  const response = await fetch(
-    new Request(USERINFO, {
-      headers: { authorization: `Bearer getSecret("${path}", { field: "accessToken" })` },
-    }),
-  );
-  const body = (await response.json().catch(() => null)) as {
-    data?: { id?: unknown; username?: unknown };
-    detail?: unknown;
-  } | null;
-  const id = body?.data?.id;
-  const username = body?.data?.username;
-  if (!response.ok || typeof id !== "string" || !id || typeof username !== "string" || !username) {
-    const message = typeof body?.detail === "string" ? `: ${body.detail}` : "";
-    throw new Error(`X's users/me named no account (HTTP ${response.status}${message})`);
-  }
-  return { account: `@${username}`, externalId: id };
 }
 
 /** Begin OAuth for an account: a new connection, or `connection` again (Reconnect). Answers the URL
@@ -256,7 +237,7 @@ export async function startConnect(
       id = hex(4);
   const { authorizationUrl } = await itx.secrets.beginOAuth(
     secretOf(id),
-    oauthOptionsOf(app, settings),
+    oauthOptionsOf(app, settings, existing),
   );
   const url = new URL(authorizationUrl);
   const state = url.searchParams.get("state");
@@ -290,14 +271,14 @@ export async function dropAttempt(itx: XItx, state: string, attempt: Attempt): P
 }
 
 /** Finish an attempt the page started. The platform exchanges the code inside the secret's facet
- *  (the page never sees a token), one call names the account, and the kv keeps it. A connection
- *  of the same account made before goes: one row per account.
+ *  (the page never sees a token), names the account at users/me before it stores the tokens, and
+ *  refuses a reconnect's tokens for another account (`IDENTITY_CONFLICT`). The kv keeps the
+ *  account it names, by its @username. A connection of the same account made before goes: one row
+ *  per account.
  *
- *  What fails is undone as far as it went. An exchange that fails stores nothing: a new
- *  connection's pending secret goes, and a reconnected one keeps its old tokens. Tokens that no
- *  account can be named for go with a new connection. A reconnect's new tokens replaced its old
- *  ones: they stay when the platform held them to its account (`HOLDS_ACCOUNT`); when it could not,
- *  tokens that may be another account's go, and the connection with them. */
+ *  An exchange that fails or is refused stores nothing: a new connection's pending secret goes, and
+ *  a reconnected one keeps its old tokens. Tokens the platform names no account for go with a new
+ *  connection. */
 export async function connectAccount(
   itx: XItx,
   state: string,
@@ -315,26 +296,16 @@ export async function connectAccount(
       });
     throw error;
   };
-  const refuse = async (why: string, held: Account): Promise<Outcome> => {
-    await forget(itx, connection).catch((leftover: unknown) => {
-      throw new Error(`${why}; ${path} is left: ${messageOf(leftover)}`);
-    });
-    return {
-      refused: `${why}. Those tokens were deleted, and ${held.account} is no longer connected: sign in to X as ${held.account}, then connect it again.`,
-      forgotten: connection,
-    };
+  const { scopes, account: named } = await itx.secrets
+    .completeOAuth(path, { code, state })
+    .catch(undo);
+  if (!named) return await undo(new Error("The platform named no account for these tokens"));
+  const account: Account = {
+    account: named.name ? `@${named.name}` : named.id,
+    externalId: named.id,
+    scopes,
+    at: new Date().toISOString(),
   };
-  const { scopes } = await itx.secrets.completeOAuth(path, { code, state }).catch(undo);
-  let named: { account: string; externalId: string };
-  try {
-    named = await nameAccount(path);
-  } catch (error) {
-    if (existing && !HOLDS_ACCOUNT) return await refuse(messageOf(error), existing);
-    return await undo(error);
-  }
-  if (existing && named.externalId !== existing.externalId)
-    return await refuse(`X signed in ${named.account}, not ${existing.account}`, existing);
-  const account: Account = { ...named, scopes, at: new Date().toISOString() };
   // connected again after a removal that did not finish: that removal is over
   await itx.kv.delete(`${REMOVED}${connection}`);
   await itx.kv.put(`${ACCOUNTS}${connection}`, JSON.stringify(account));

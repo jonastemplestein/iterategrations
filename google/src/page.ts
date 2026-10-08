@@ -296,11 +296,6 @@ export async function serveCallback(
       );
     }
     const outcome = await connectAccount(itx, state, code, attempt);
-    if ("refused" in outcome) {
-      await registerRemoval(itx, settings.slug, outcome.forgotten);
-      await registerCard(itx, settings.slug);
-      return back(flashOf("error", outcome.refused));
-    }
     for (const connection of outcome.replaced)
       await registerRemoval(itx, settings.slug, connection);
     await registerCard(itx, settings.slug);
