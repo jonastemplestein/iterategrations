@@ -1,0 +1,24 @@
+{
+  "name": "iterate-x",
+  "version": "0.0.0",
+  "description": "A project's own X app for an iterate project: a Connect X page, its callback, and each connected account as a secret",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/x.d.ts",
+      "default": "./dist/x.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp pack && vp test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

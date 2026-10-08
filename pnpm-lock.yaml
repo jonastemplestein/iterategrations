@@ -45,6 +45,18 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  google:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260925.1
+        version: 5.20260929.1
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   herdr:
     devDependencies:
       '@types/node':
@@ -164,6 +176,18 @@ importers:
       iterate:
         specifier: https://pkg.pr.new/iterate/iterate/iterate@d285b9c
         version: https://pkg.pr.new/iterate/iterate/iterate@d285b9c
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  x:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260925.1
+        version: 5.20260929.1
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
