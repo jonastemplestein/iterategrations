@@ -5,15 +5,16 @@ import {
   placeholder,
   PRIVATE,
   readJson,
+  registerBot,
   say,
   spendInvite,
   keyOf,
   streamOf,
   WELCOME,
+  type AgentsItx,
   type BotInfo,
   type Pending,
   type TelegramItx,
-  type WithItx,
 } from "./bot.js";
 
 type Message = {
@@ -145,6 +146,7 @@ async function route(
   id: number,
   message: Message,
   deliver: Deliver,
+  slug: string,
 ): Promise<void> {
   const from = message.from;
   const info = await readJson<BotInfo>(itx, bot, "bot");
@@ -162,6 +164,7 @@ async function route(
   if (!group && code !== undefined && (await spendInvite(itx, bot, code))) {
     await allow(itx, bot, String(from.id), person);
     await say(itx, bot, message.chat.id, WELCOME);
+    await registerBot(itx, bot, slug); // one more person let in
     return;
   }
 
@@ -202,7 +205,7 @@ async function route(
   // the rest of a group's talk it reads as context only.
   const agent = `/agents/telegram/${bot}/chat-${message.chat.id}`;
   await Promise.all([
-    itx.agents.create(agent),
+    (itx as TelegramItx & AgentsItx).agents.create(agent),
     addressed
       ? api(itx, placeholder(bot), "sendChatAction", {
           chat_id: message.chat.id,
@@ -233,8 +236,9 @@ async function route(
  *  `route` decides what it means. */
 export async function receiveUpdate(
   request: Request,
-  withItx: WithItx,
-  deliver: Deliver = "agents",
+  itx: TelegramItx,
+  deliver: Deliver,
+  slug: string,
 ): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
   const [, bot = ""] = new URL(request.url).pathname.split("/").map(decodeURIComponent);
@@ -242,9 +246,7 @@ export async function receiveUpdate(
   const known =
     BOT_NAME.test(bot) &&
     presented !== "" &&
-    (await withItx((itx) =>
-      itx.secrets.verifyEquals(`/secrets/telegram-webhook-${bot}`, { value: presented }),
-    ));
+    (await itx.secrets.verifyEquals(`/secrets/telegram-webhook-${bot}`, { value: presented }));
   if (!known) return new Response("Not found\n", { status: 404 });
 
   // authenticated: what cannot be used is acknowledged, so Telegram stops resending it
@@ -255,15 +257,13 @@ export async function receiveUpdate(
   if (typeof update?.update_id !== "number")
     return Response.json({ ok: true, ignored: update ? "no update_id" : "not JSON" });
   const id = update.update_id;
-  await withItx(async (itx) => {
-    await once(
-      itx.cd(streamOf(bot)).append({
-        type: "telegram/update",
-        idempotencyKey: `telegram:${bot}:${id}`,
-        payload: { bot, update },
-      }),
-    );
-    if (update.message) await route(itx, bot, id, update.message, deliver);
-  });
+  await once(
+    itx.cd(streamOf(bot)).append({
+      type: "telegram/update",
+      idempotencyKey: `telegram:${bot}:${id}`,
+      payload: { bot, update },
+    }),
+  );
+  if (update.message) await route(itx, bot, id, update.message, deliver, slug);
   return Response.json({ ok: true });
 }

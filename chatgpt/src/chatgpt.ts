@@ -1,5 +1,6 @@
+import type { ChatgptItx } from "./auth.js";
 import { servePage } from "./page.js";
-import type { WithItx } from "./auth.js";
+import { register, WORKER_UPDATED } from "./registry.js";
 
 export {
   ACCOUNT_KEY,
@@ -12,7 +13,7 @@ export {
   isConnected,
   readAccount,
 } from "./auth.js";
-export type { Account, ChatgptItx, WithItx } from "./auth.js";
+export type { Account, ChatgptItx } from "./auth.js";
 export {
   chatgptBody,
   chatgptHeaders,
@@ -23,23 +24,46 @@ export {
   serverEvents,
 } from "./request.js";
 
-/** A project's ChatGPT connection, as a partial `fetch`: it answers the requests that are its own
- *  (the project's `chatgpt` routing slug) and returns `null` for every other, so a worker chains
- *  it: `const chatgpt = await serveChatgpt(request, …); if (chatgpt) return chatgpt;`
+/** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
+ *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
+ *  gate of a members-only page. */
+export type IntegrationHost = {
+  getItx(): ChatgptItx & Disposable;
+  auth: { require(request: Request): Response | null };
+};
+
+/** One durable event of the project, as `processEvent` is handed it. */
+export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
+
+/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+ *  the package builds and tests without iterate. */
+export type Integration = {
+  routingSlug?: string;
+  fetch?(request: Request, host: IntegrationHost): Promise<Response>;
+  processEvent?(args: { event: IntegrationEvent; itx: ChatgptItx }): Promise<void>;
+};
+
+/** A project's ChatGPT connection, as an integration its worker hosts:
+ *  `const integrations: Integration[] = [chatgpt()];`
  *
- *  What it answers: the Connect ChatGPT page at `/`, for members only. Any other path is a 404.
+ *  On its routing slug it answers, for members only, the Connect ChatGPT page at `/`; any other
+ *  path is a 404. Its install hook (`project/worker-updated`) lists it on the Dash's Integrations
+ *  page: the card, and the connected account's row.
  *
- *  - `withItx`: `(call) => { using itx = this.getItx(); return call(itx); }`
- *  - `requireMember`: `(request) => this.auth.require(request)`: a `Response` to send, or null.
  *  - `slug`: the routing slug to answer on. Default `chatgpt`. */
-export async function serveChatgpt(
-  request: Request,
-  options: {
-    withItx: WithItx;
-    requireMember(request: Request): Response | null;
-    slug?: string;
-  },
-): Promise<Response | null> {
-  if (request.headers.get("x-iterate-routing-slug") !== (options.slug ?? "chatgpt")) return null;
-  return options.requireMember(request) ?? servePage(request, options.withItx);
+export function chatgpt(options: { slug?: string } = {}): Integration {
+  const routingSlug = options.slug ?? "chatgpt";
+  return {
+    routingSlug,
+    async fetch(request, host) {
+      const denied = host.auth.require(request);
+      if (denied) return denied;
+      using itx = host.getItx();
+      return await servePage(request, itx, routingSlug);
+    },
+    async processEvent({ event, itx }) {
+      if (event.type === WORKER_UPDATED)
+        await register(itx, routingSlug, `${event.path}@${event.offset}`);
+    },
+  };
 }

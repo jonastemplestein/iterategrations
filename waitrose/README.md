@@ -5,6 +5,10 @@ target in an iterate project, logged in with the person's own Waitrose account. 
 holds the password or the token: they live in a secret, and iterate's egress swaps the token into
 each request and logs in again when Waitrose answers 401.
 
+It is the package `iterate-waitrose`: one element, `waitrose(…)`, in the `integrations` array of the
+project's config worker. The project's Integrations page in the Dash shows a Waitrose card ("Set up
+by your coding agent" until the account's secret exists, with a link to this recipe).
+
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
@@ -81,40 +85,32 @@ export async function exchange(material, fetch) {
 ## 2. Serve the API from the project's config repo
 
 Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
-(built by this repo's CI and served by pkg.pr.new, never npm), adds the imports and one branch to
-`worker.ts`, probes the result as a worker, and commits it. The route is for members only: the API acts
-as the person's Waitrose account, `placeOrder` included.
+(built by this repo's CI and served by pkg.pr.new, never npm), adds the imports and the element to the
+`integrations` array of `worker.ts`, probes the result as a worker, and commits it. The route is for
+members only: the API acts as the person's Waitrose account, `placeOrder` included.
 
 ```js
 // the values for add-to-a-project.md
 const PACKAGE = "iterate-waitrose";
-const SLUG = "waitrose";
 const IMPORT = `import { newWorkersRpcResponse as iterateRpcResponse } from "iterate/sdk";
-import { Waitrose as IterateWaitrose } from "iterate-waitrose";`;
-const BRANCH = `if (request.headers.get("x-iterate-routing-slug") === "waitrose") {
-  const denied = this.auth.require(request);
-  if (denied) return denied;
-  return iterateRpcResponse(
-    request,
-    new IterateWaitrose({
-      fetch: async (outbound: Request) => {
-        using itx = this.getItx();
-        return await itx.fetch(outbound);
-      },
-    }),
-  );
-}`;
+import { waitrose } from "iterate-waitrose";`;
+const ELEMENT = "waitrose({ rpcResponse: iterateRpcResponse })";
 const MEMBER = "";
 const FILES = {};
 ```
 
+`waitrose(…)` answers the project's `waitrose` host: the worker hands it every request there, and
+every event. It serves a `Waitrose` over Cap'n Web with `rpcResponse`, which is iterate/sdk's
+`newWorkersRpcResponse` (the package never imports iterate). Its install hook
+(`project/worker-updated`) puts the Waitrose card on the Dash.
+
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the imports and the branch above.
+By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the imports and the element above.
 To copy the source instead, read [`src/client.ts`](src/client.ts) (the API, no dependencies),
-[`src/index.ts`](src/index.ts) (the RPC target) and [`src/exchange.ts`](src/exchange.ts), and commit
-them to `/repos/config` under `waitrose/`. You own the copy. The branch then imports `Waitrose` from
-`"./waitrose/index.ts"`.
+[`src/index.ts`](src/index.ts) (the RPC target and `waitrose()`) and
+[`src/exchange.ts`](src/exchange.ts), and commit them to `/repos/config` under `waitrose/`. You own
+the copy. The import then reads `from "./waitrose/index.ts"`.
 
 ## 3. Use it
 
@@ -146,3 +142,6 @@ without the person's say-so for that order.
 - Waitrose's login refuses a request that already carries a token, so the exchange sends none.
 - Adapted from [jonastemplestein/waitrose](https://github.com/jonastemplestein/waitrose), which is
   the same client as a CLI.
+- To remove it: take the element and its imports out of `worker.ts`, and delete `/secrets/waitrose`.
+  The Dash takes nothing away itself, so once that commit is live, take the card off with its null:
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "waitrose", card: null } })`.

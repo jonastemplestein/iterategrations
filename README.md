@@ -18,17 +18,24 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`jmap/`](jmap)                     | `iterate-jmap`                             | A mailbox over JMAP (Fastmail by default): send from it (filed in Sent), search, threads; and Fastmail Masked Email, throwaway addresses on demand.   |
 | [`telegram/`](telegram)             | `iterate-telegram`                         | A Telegram bot with its own Connect Telegram page: private chats and groups, each handed to an agent; invite links to let people in.                  |
 | [`chatgpt/`](chatgpt)               | `iterate-chatgpt`                          | Bring your own ChatGPT: a Connect ChatGPT page, and model requests paid by the subscription instead of an API key.                                    |
+| [`github/`](github)                 | `iterate-github`                           | A project's own GitHub App, with a Connect GitHub page: each installation's webhooks as events, and its API with tokens the platform mints.           |
 
 ## Adding one to a project
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root). How an integration reaches a project depends on what it is:
 
-- **A package** (`iterate-…` in the table: Pebble, Waitrose, Monzo, JMAP, Telegram, ChatGPT) runs in the
-  project's own config worker. [`add-to-a-project.md`](add-to-a-project.md) is the one script that
-  pins it (a full pkg.pr.new commit), adds it to `package.json` and `worker.ts`, probes the patched repo
-  as a worker, commits it and waits for the platform to publish. Each recipe gives the values to put in
-  its first block, then what to do next (a secret, a webhook, a page).
+- **A package** (`iterate-…` in the table: Pebble, Waitrose, Monzo, JMAP, Telegram, ChatGPT, GitHub)
+  runs in the project's own config worker, as one element of its `integrations` array:
+  `const integrations: Integration[] = [telegram(), github()];`. The worker hands each package the
+  requests on its routing slug (its page, its webhook) and every event. A package's install hook
+  registers its card, and a row for each connection (a bot, an installation, an account), on the
+  project's `/integrations`; the Dash's Integrations page shows them, with buttons to the package's
+  page. [`add-to-a-project.md`](add-to-a-project.md) is the one script that pins it (a full pkg.pr.new
+  commit), adds it to `package.json` and the array, probes the patched repo as a worker, commits it and
+  waits for the platform to publish. Each recipe gives the values to put in its first block, then what
+  to do next (a secret, a webhook, a page). Writing and publishing a package of your own:
+  [`adding-an-integration.md`](adding-an-integration.md).
 - **Lent from your own computer** (WhatsApp, WhatsApp calls, Herdr: "run with `iterate provide`"): one
   command lends it to the project as `itx.<name>`. Each recipe says what to run and has a sample call.
 - **Through zero-trust-mcp** (Monzo's sign-in, Yoto): [`zero-trust-mcp.md`](zero-trust-mcp.md) connects
