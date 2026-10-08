@@ -1,7 +1,8 @@
 // Runs against dist, the package as shipped. `fakeProject` is a project: secrets whose HMAC check
 // runs here as the platform's does, files, and streams that refuse a key used twice for another
 // event (as the platform does; the same event again is a no-op). `host` is the worker hosting the
-// package: a scope per `getItx`, counted. `signed` is the Pebble app: it signs as its protocol says.
+// package: a scope per `getItx`, counted, and a member gate that refuses unless `member` is set.
+// `signed` is the Pebble app: it signs as its protocol says.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vite-plus/test";
@@ -9,8 +10,13 @@ import { pebble } from "../dist/pebble.js";
 
 const SECRET = "a-made-up-signing-secret";
 const CONFIGURED = "events.iterate.com/integration/configured";
+const ORIGIN = "https://pebble--iterate.example";
+const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/pebble";
 
-function fakeProject(secrets: Record<string, string> = { "/secrets/pebble-webhook": SECRET }) {
+function fakeProject(
+  secrets: Record<string, string> = { "/secrets/pebble-webhook": SECRET },
+  options: { member?: boolean } = {},
+) {
   const appended: { path: string; event: any }[] = [];
   const files: Record<string, { contentType?: string; data: Uint8Array }> = {};
   const scopes = { opened: 0, disposed: 0 };
@@ -48,9 +54,19 @@ function fakeProject(secrets: Record<string, string> = { "/secrets/pebble-webhoo
       scopes.opened++;
       return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
     },
-    auth: { require: () => new Response("Sign in\n", { status: 401 }) },
+    auth: {
+      require: () => (options.member ? null : new Response("Sign in\n", { status: 401 })),
+    },
   };
   const serve = (request: Request) => integration.fetch!(request, host);
+  /** A GET of the package's `path`, as the edge hands it on: `basePath` is what a paths ingress
+   *  strips, under the platform's origin. */
+  const page = (path: string, basePath?: string) =>
+    serve(
+      new Request(`${basePath ? "https://os.iterate.example" : ORIGIN}${path}`, {
+        headers: basePath ? { "x-iterate-base-path": basePath } : {},
+      }),
+    );
   /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
@@ -58,7 +74,7 @@ function fakeProject(secrets: Record<string, string> = { "/secrets/pebble-webhoo
       itx,
     });
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
-  return { integration, appended, files, scopes, serve, publish, registry, secrets };
+  return { integration, appended, files, scopes, serve, page, publish, registry, secrets };
 }
 
 /** A delivery as the Pebble app makes it: a multipart body, signed over
@@ -162,12 +178,11 @@ const card = (status: object) => ({
   title: "Pebble Index 01",
   description:
     "Every recording made with the ring: the transcript as a pebble/recording-created event on /pebble, the audio as a project file.",
+  icon: "https://www.google.com/s2/favicons?domain=repebble.com&sz=64",
   status,
   actions: [
-    {
-      label: "Recipe",
-      url: "https://github.com/jonastemplestein/iterategrations/tree/main/pebble",
-    },
+    { label: "Open", routingSlug: "pebble", path: "/" },
+    { label: "Recipe", url: RECIPE },
   ],
 });
 
@@ -202,4 +217,68 @@ test("the hook ignores every other event", async () => {
     itx: {} as any,
   });
   assert.deepEqual(project.appended, []);
+});
+
+// ------------------------------------------------------------------- the page
+
+test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
+  const project = fakeProject();
+  for (const path of ["/", "/nope"]) {
+    const res = await project.page(path);
+    assert.equal(res.status, 401, path);
+    assert.equal(await res.text(), "Sign in\n");
+  }
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+});
+
+test("the page shows the status and the webhook URL with a Copy button, with the base path a paths ingress strips", async () => {
+  const project = fakeProject({}, { member: true });
+  let res = await project.page("/");
+  let html = await res.text();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.match(html, /<h1>Pebble Index 01<\/h1>/);
+  assert.match(html, /Set up by your coding agent: see the recipe/);
+  const hint = `Set up Pebble Index 01 in my iterate project. Follow the recipe at ${RECIPE}`;
+  assert.ok(html.includes(`data-copy="${hint}"`), hint);
+  assert.ok(html.includes(`data-copy="${ORIGIN}/webhook"`));
+  assert.ok(html.includes(`href="${RECIPE}"`));
+
+  project.secrets["/secrets/pebble-webhook"] = SECRET;
+  res = await project.page("/", "/projects/iterate/pebble");
+  html = await res.text();
+  assert.match(
+    html,
+    /Set up\. The project has the signing secret <code>\/secrets\/pebble-webhook<\/code>/,
+  );
+  assert.doesNotMatch(html, /coding agent/);
+  assert.ok(
+    html.includes(`data-copy="https://os.iterate.example/projects/iterate/pebble/webhook"`),
+  );
+  assert.ok(!html.includes(SECRET));
+  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+});
+
+test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
+  const res = await fakeProject({}, { member: true }).page("/");
+  const html = await res.text();
+  const csp = res.headers.get("content-security-policy")!;
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /form-action 'none'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
+  assert.equal(html.match(/<script/g)!.length, 1);
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.doesNotMatch(html, /onclick=|<form/);
+});
+
+test("a member's stray path is a 404 that reads nothing", async () => {
+  const project = fakeProject({}, { member: true });
+  for (const path of ["/nope", "/webhook/x", "/oauth2/callback"])
+    assert.equal((await project.page(path)).status, 404, path);
+  const post = await project.serve(new Request(`${ORIGIN}/`, { method: "POST" }));
+  assert.equal(post.status, 404);
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
 });

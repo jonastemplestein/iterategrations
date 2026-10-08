@@ -13,9 +13,11 @@ its webhooks, so the recipe puts an unguessable secret in each webhook's URL and
 the person: they never see or type it.
 
 The receiver is the package `iterate-monzo`: one element, `monzo()`, in the `integrations` array of
-the project's config worker. The project's Integrations page in the Dash shows a Monzo card ("Set up
-by your coding agent" until the sign-in exists, with a link to this recipe) and a row per account
-whose webhook step 4 registered.
+the project's config worker. It has a page of its own, for the project's members: the status, the
+accounts, and the shape of an account's webhook URL. The project's Integrations page in the Dash
+shows a Monzo card ("Set up by your coding agent" until the sign-in exists), with an **Open** button
+to the page and a **Recipe** button to this recipe, and a row per account whose webhook step 4
+registered.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
@@ -65,13 +67,17 @@ const FILES = {};
 ```
 
 `monzo()` answers the project's `monzo` host: the worker hands it every request there, and every
-event. Its install hook (`project/worker-updated`) puts the Monzo card on the Dash.
+event. `/webhook/<account name>/<secret>` takes Monzo's deliveries. The page at `/` is for the
+project's members: it shows the status (whether the sign-in exists), the accounts whose webhook
+secret exists, and the shape of an account's webhook URL, with a **Copy** button. It never shows a
+secret. Its install hook (`project/worker-updated`) puts the Monzo card on the Dash.
 
 ### By hand, or copy the source
 
 By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
-To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) (no imports) and commit it to
-`/repos/config` as `monzo.ts`; the import then reads `from "./monzo.ts"`. You own the copy.
+To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) and [`src/page.ts`](src/page.ts)
+(no other imports) and commit them to `/repos/config` under `monzo/`; the import then reads
+`from "./monzo/monzo.ts"`. You own the copy.
 
 ### Check it's live
 
@@ -156,7 +162,7 @@ async (itx) => {
 Each URL is now a password: anyone who has it can post fake transactions to that account's stream.
 It is held by the project's secret store and by Monzo, and it is in the request log of this one
 script. Keep it out of chat. One account's URL cannot write to another's stream: each name has its
-own secret.
+own secret. The page lists each account whose secret exists, by name, and never the secret.
 
 ## 5. Prove it
 

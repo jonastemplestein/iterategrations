@@ -15,6 +15,8 @@ import {
 } from "../dist/index.js";
 
 const AUTHORIZATION = 'Bearer getSecret("/secrets/waitrose", { field: "accessToken" })';
+const ORIGIN = "https://waitrose--iterate.example";
+const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose";
 const USER_AGENT = "Waitrose/3.9.1 (Android)";
 const GRAPHQL_URL = "https://www.waitrose.com/api/graphql-prod/graph/live";
 const PLACE_URL = "https://www.waitrose.com/api/order-orchestration-prod/v1/orders/o-1/place";
@@ -466,7 +468,7 @@ test("the README's exchange block is the shipped EXCHANGE_SOURCE, less its expor
 
 // ------------------------------------------- the card on the Dash
 
-test("waitrose() has no host of its own; its install hook registers the card, keyed by the event's path and offset, ok once the account's secret exists", async () => {
+test("waitrose() answers the waitrose routing slug; its install hook registers the card, keyed by the event's path and offset, ok once the account's secret exists", async () => {
   const appended: { path: string; event: any }[] = [];
   const secrets: string[] = [];
   const itx: any = {
@@ -481,20 +483,19 @@ test("waitrose() has no host of its own; its install hook registers the card, ke
     }),
   };
   const integration = waitrose();
-  assert.equal(integration.routingSlug, undefined);
-  assert.equal("fetch" in integration, false);
+  assert.equal(integration.routingSlug, "waitrose");
+  assert.equal(typeof integration.fetch, "function");
   const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
   const card = (status: object) => ({
     title: "Waitrose",
     description:
       "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout), signed in as the person's own account: agents and the project's code call it with fetch and the token's placeholder.",
+    icon: "https://www.google.com/s2/favicons?domain=waitrose.com&sz=64",
     status,
     actions: [
-      {
-        label: "Recipe",
-        url: "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose",
-      },
+      { label: "Open", routingSlug: "waitrose", path: "/" },
+      { label: "Recipe", url: RECIPE },
     ],
   });
 
@@ -524,4 +525,83 @@ test("waitrose() has no host of its own; its install hook registers the card, ke
       },
     },
   ]);
+});
+
+// ------------------------------------------- the page
+
+/** The worker hosting the package, over a project with `secrets`: a scope per `getItx`, counted, and
+ *  a member gate that refuses unless `member` is set. */
+function hosted(secrets: string[], options: { member?: boolean } = {}) {
+  const scopes = { opened: 0, disposed: 0 };
+  const integration = waitrose();
+  const serve = (request: Request) =>
+    integration.fetch!(request, {
+      getItx: () => {
+        scopes.opened++;
+        const itx: any = { secrets: { list: async () => secrets.map((path) => ({ path })) } };
+        return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
+      },
+      auth: {
+        require: () => (options.member ? null : new Response("Sign in\n", { status: 401 })),
+      },
+    });
+  const page = (path: string) => serve(new Request(`${ORIGIN}${path}`));
+  return { scopes, serve, page };
+}
+
+test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
+  const project = hosted(["/secrets/waitrose"]);
+  for (const path of ["/", "/nope"]) {
+    const res = await project.page(path);
+    assert.equal(res.status, 401, path);
+    assert.equal(await res.text(), "Sign in\n");
+  }
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+});
+
+test("the page shows the status: until the account's secret exists, what to paste into a coding agent, with a Copy button", async () => {
+  const sent = fakeWaitrose(() => undefined);
+  let res = await hosted([], { member: true }).page("/");
+  let html = await res.text();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.match(html, /<h1>Waitrose<\/h1>/);
+  assert.match(html, /Set up by your coding agent: see the recipe/);
+  const hint = `Set up Waitrose in my iterate project. Follow the recipe at ${RECIPE}`;
+  assert.ok(html.includes(`data-copy="${hint}"`), hint);
+  assert.ok(html.includes(`href="${RECIPE}"`));
+
+  const project = hosted(["/secrets/waitrose"], { member: true });
+  res = await project.page("/");
+  html = await res.text();
+  assert.match(
+    html,
+    /Set up\. The project has the Waitrose account <code>\/secrets\/waitrose<\/code>/,
+  );
+  assert.doesNotMatch(html, /coding agent|data-copy="/);
+  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
+  assert.deepEqual(sent, []); // the page never calls Waitrose
+});
+
+test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
+  const res = await hosted([], { member: true }).page("/");
+  const html = await res.text();
+  const csp = res.headers.get("content-security-policy")!;
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /form-action 'none'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-frame-options"), "DENY");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
+  assert.equal(html.match(/<script/g)!.length, 1);
+  assert.ok(html.includes(`<script nonce="${nonce}">`));
+  assert.doesNotMatch(html, /onclick=|<form/);
+});
+
+test("a member's stray path is a 404 that reads nothing", async () => {
+  const project = hosted(["/secrets/waitrose"], { member: true });
+  for (const path of ["/nope", "/webhook", "/oauth2/callback"])
+    assert.equal((await project.page(path)).status, 404, path);
+  assert.equal((await project.serve(new Request(`${ORIGIN}/`, { method: "POST" }))).status, 404);
+  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
 });

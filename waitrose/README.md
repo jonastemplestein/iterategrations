@@ -11,9 +11,10 @@ swaps the token into each request and logs in again when Waitrose answers 401.
 It is the package `iterate-waitrose`. `waitroseFetch` and `graphql` add what every call needs,
 `OPERATIONS` holds the app's GraphQL operations, and `placeOrder` is the one call that spends money,
 with its guards. The login is the secret's refresh. `waitrose()` is one element in the
-`integrations` array of the project's config worker: the project's Integrations page in the Dash
-shows a Waitrose card ("Set up by your coding agent" until the account's secret exists, with a link
-to this recipe).
+`integrations` array of the project's config worker, with a page of its own for the project's
+members: the status. The project's Integrations page in the Dash shows a Waitrose card ("Set up by
+your coding agent" until the account's secret exists), with an **Open** button to the page and a
+**Recipe** button to this recipe.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
@@ -103,8 +104,10 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`waitrose()` has no host of its own. Its install hook (`project/worker-updated`) puts the Waitrose
-card on the Dash. With the package in `package.json`, the project's code can import the helpers.
+`waitrose()` answers the project's `waitrose` host. Its page at `/` is for the project's members: it
+shows the status (whether the account's secret exists). It has no webhook, so there is no URL to
+paste. Its install hook (`project/worker-updated`) puts the Waitrose card on the Dash. With the
+package in `package.json`, the project's code can import the helpers.
 
 Earlier builds of this package served a `Waitrose` over Cap'n Web on the project's `waitrose` host,
 and an earlier version of this recipe added `waitrose({ rpcResponse: iterateRpcResponse })` with an
@@ -117,7 +120,7 @@ nothing is committed.
 
 By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/index.ts`](src/index.ts) (`waitrose()` and the exports),
-[`src/fetch.ts`](src/fetch.ts) (`waitroseFetch` and `graphql`),
+[`src/page.ts`](src/page.ts) (its page), [`src/fetch.ts`](src/fetch.ts) (`waitroseFetch` and `graphql`),
 [`src/operations.ts`](src/operations.ts), [`src/place-order.ts`](src/place-order.ts) and
 [`src/exchange.ts`](src/exchange.ts), and commit them to `/repos/config` under `waitrose/`. They have
 no dependencies. You own the copy. The import then reads `from "./waitrose/index.ts"`.
