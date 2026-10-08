@@ -52,10 +52,14 @@ the platform retries. Every reaction is an append keyed by the event's path and 
 lands nothing twice.
 
 What a package has: `host.getItx()` is the project's scope (`itx.secrets`, `itx.kv`, `itx.cd(path)`,
-`itx.fetch` through the project's egress, `itx.schedules`); `host.auth.require(request)` is the member
-gate. What it never has: a raw secret. A credential is set through `collectFromUser` or OAuth, pinned
-to the hosts it may go to, and spent as a `getSecret("/secrets/<name>", { field })` placeholder in an
-outbound request, which egress substitutes.
+`itx.schedules`); `host.auth.require(request)` is the member gate. What it never has: a raw secret. A
+credential is set through `collectFromUser` or OAuth, pinned to the hosts it may go to, and spent as a
+`getSecret("/secrets/<name>", { field })` placeholder in an outbound request, which egress
+substitutes. In every worker the platform loads the global `fetch` is the project's egress, so a
+package, a run script and an agent all call a service with plain `fetch`: a package ships no API
+client. Its README names the secret's placeholder, the pinned origins and the service's own HTTP
+docs; its code is what the service pushes (webhooks), what a person does (the page) and what the
+platform cannot do.
 
 ## Registering on the Dash
 
@@ -127,9 +131,10 @@ const { scopes } = await itx.secrets.completeOAuth("/secrets/acme-main", { code,
 ```
 
 The exchange runs in the platform's secret facet: the page never sees a token, and the same callback
-again (a refreshed tab) answers the same. The platform composes the URL under the deployment's
-ingress, never a primary hostname, so a rename of the project moves it, and the provider's
-registration must follow. For a GitHub App, store one secret per installation with the App's key as a placeholder and
+again (a refreshed tab) answers the same. The platform composes the URL by the deployment's static
+rules: on the hostname its config pins to the project when it has one, else under its ingress, never
+on a hostname the project claimed, so the URL is the project's by construction. It is the URL the
+page shows, and the one to register at the provider. For a GitHub App, store one secret per installation with the App's key as a placeholder and
 the `github-app-installation` refresh strategy: the platform mints each installation's token on use.
 Claim a nonce once by appending an event with the nonce as its idempotency key and a body only
 that claim has (a random value: the same event again is a no-op, so two identical claims would
@@ -140,8 +145,7 @@ and clear only the pending request the callback's nonce names.
 collect the key into a secret pinned to the service's origin; the install hook registers a card that
 says "Set up by your coding agent: see the recipe" until that secret exists. Where there are
 accounts to name, the recipe's own script appends a row for each (Monzo's does). Outbound calls
-spend the key as a placeholder. A member the worker exposes (a method on the class, named in the
-recipe) is what agents call.
+spend the key as a placeholder, in plain `fetch`, by the README's examples.
 
 **An event producer or consumer with no service** (a schedule, a project-internal workflow). Only
 `processEvent`: the install hook sets `itx.schedules.set({ key, when: { everyMs }, events })`, and the
