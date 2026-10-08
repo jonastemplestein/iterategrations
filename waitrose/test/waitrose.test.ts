@@ -1,13 +1,23 @@
-// Runs against dist (the package as shipped): `pnpm test` builds first. The Waitrose class extends
-// workerd's RpcTarget, which the tests load as a bare stand-in (vite.config.ts), so Cap'n Web itself
-// is exercised in an iterate project, not here.
+// Runs against dist (the package as shipped): `pnpm test` builds first. `fakeWaitrose` puts a
+// pretend Waitrose behind the global `fetch`, which is the project's egress in a loaded worker: it
+// answers each request by its URL or its GraphQL operation, and records every request it was sent.
 import assert from "node:assert/strict";
-import { test } from "vite-plus/test";
-import { WaitroseApi } from "../dist/client.js";
+import { readFileSync } from "node:fs";
+import { afterEach, test } from "vite-plus/test";
 import { EXCHANGE_SOURCE, exchange } from "../dist/exchange.js";
-import { Waitrose, waitrose } from "../dist/index.js";
+import {
+  CheckoutOutcomeUnknownError,
+  OPERATIONS,
+  graphql,
+  placeOrder,
+  waitrose,
+  waitroseFetch,
+} from "../dist/index.js";
 
 const AUTHORIZATION = 'Bearer getSecret("/secrets/waitrose", { field: "accessToken" })';
+const USER_AGENT = "Waitrose/3.9.1 (Android)";
+const GRAPHQL_URL = "https://www.waitrose.com/api/graphql-prod/graph/live";
+const PLACE_URL = "https://www.waitrose.com/api/order-orchestration-prod/v1/orders/o-1/place";
 const CONTEXT = {
   customerId: "c-1",
   customerOrderId: "o-1",
@@ -15,97 +25,363 @@ const CONTEXT = {
   defaultBranchId: "b-1",
 };
 
-/** A fetch that answers by URL and records every request. */
-function fakeWaitrose(answers: Record<string, (body: any) => unknown> = {}) {
-  const seen: { url: string; method: string; headers: Record<string, string>; body: any }[] = [];
-  const fetch = async (input: string, init: RequestInit = {}) => {
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+type Sent = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any;
+  init: RequestInit;
+};
+
+/** Waitrose behind the global `fetch`: `answer` gets each request's URL and GraphQL operation name,
+ *  and what it leaves unanswered is HTTP 500. */
+function fakeWaitrose(
+  answer: (url: string, operation?: string) => Response | Promise<Response> | undefined,
+) {
+  const sent: Sent[] = [];
+  globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
+    const request = new Request(input, init);
     const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
-    seen.push({
-      url: input,
-      method: init.method ?? "GET",
-      headers: init.headers as Record<string, string>,
+    sent.push({
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
       body,
+      init,
     });
-    if (body?.query?.includes("shoppingContext"))
-      return Response.json({ data: { shoppingContext: CONTEXT } });
-    for (const [prefix, answer] of Object.entries(answers))
-      if (input.startsWith(prefix) || body?.query?.includes(prefix))
-        return Response.json(answer(body));
-    return new Response("no answer", { status: 500 });
-  };
-  return { fetch, seen };
+    const operation = /^(?:query|mutation) (\w+)/.exec(body?.query ?? "")?.[1];
+    return (await answer(request.url, operation)) ?? new Response("no answer", { status: 500 });
+  }) as typeof fetch;
+  return sent;
 }
 
-test("every request carries the secret placeholder, never a token, and the shopping context is read once, first", async () => {
-  const { fetch, seen } = fakeWaitrose({
-    getTrolley: () => ({
-      data: {
-        getTrolley: {
-          products: [],
-          trolley: { orderId: "o-1", trolleyItems: [], trolleyTotals: {} },
-          failures: null,
-        },
-      },
-    }),
-    "https://www.waitrose.com/api/content-prod": () => ({
-      totalMatches: 1,
-      componentsAndProducts: [{ searchProduct: { id: "p1", name: "Oat milk" } }],
-    }),
+// ------------------------------------------- the helpers
+
+test("waitroseFetch is the global fetch with the token's placeholder, the app's user agent and JSON: content-type only with a body, and the caller's headers win", async () => {
+  const sent = fakeWaitrose(() => Response.json({}));
+  await waitroseFetch("https://www.waitrose.com/api/products-prod/v1/products/1+2?view=EXTENDED");
+  await waitroseFetch(new URL("https://www.waitrose.com/api/somewhere"), {
+    method: "POST",
+    headers: { accept: "text/plain", "x-trace": "t-1" },
+    body: '{"a":1}',
+    redirect: "manual",
   });
-  const api = new WaitroseApi({ fetch, authorization: AUTHORIZATION });
-
-  await api.getTrolley();
-  const found = await api.searchProducts("oat milk");
-  await api.getTrolley();
-
-  assert.deepEqual(found.products, [{ id: "p1", name: "Oat milk" }]);
   assert.equal(
-    seen.filter((request) => request.body?.query?.includes("shoppingContext")).length,
-    1,
+    sent[0]!.url,
+    "https://www.waitrose.com/api/products-prod/v1/products/1+2?view=EXTENDED",
   );
-  assert.match(seen[0]!.body.query, /shoppingContext/);
-  assert.ok(seen.every((request) => request.headers.Authorization === AUTHORIZATION));
-  // the trolley is the context's order, and the search is the context's customer, with no branch:
-  // Waitrose answers zero products to a search or browse that names one
-  assert.equal(seen[1]!.body.variables.orderId, "o-1");
-  const search = seen.find((request) => request.url.includes("/productcontent/search/"))!;
-  assert.match(search.url, /\/search\/c-1\?clientType=WEB_APP$/);
-  assert.equal(search.body.customerSearchRequest.queryParams.branchId, undefined);
-});
-
-test("browse takes a category ID, names no branch, and returns its subcategories", async () => {
-  const subCategories = [
-    { categoryId: "300119", name: "Bakery", expectedResults: 599, hiddenInNav: false },
-  ];
-  const { fetch, seen } = fakeWaitrose({
-    "https://www.waitrose.com/api/content-prod": () => ({
-      totalMatches: 16965,
-      componentsAndProducts: [{ searchProduct: { id: "p1", name: "Duchy Organic Carrots" } }],
-      subCategories,
-    }),
-  });
-  const api = new WaitroseApi({ fetch, authorization: AUTHORIZATION });
-
-  const groceries = await api.browseProducts("10051");
-
-  assert.deepEqual(groceries.subCategories, subCategories);
-  const browse = seen.find((request) => request.url.includes("/productcontent/browse/"))!;
-  assert.equal(browse.body.customerSearchRequest.queryParams.category, "10051");
-  assert.equal(browse.body.customerSearchRequest.queryParams.branchId, undefined);
-});
-
-test("a failed context read is not remembered: the next call tries again", async () => {
-  let calls = 0;
-  const api = new WaitroseApi({
+  assert.equal(sent[0]!.method, "GET");
+  assert.deepEqual(sent[0]!.headers, {
+    accept: "application/json",
     authorization: AUTHORIZATION,
-    fetch: async () =>
-      ++calls === 1
-        ? new Response("down", { status: 503 })
-        : Response.json({ data: { shoppingContext: CONTEXT } }),
+    "user-agent": USER_AGENT,
   });
-  await assert.rejects(api.getShoppingContext(), /HTTP 503/);
-  assert.deepEqual(await api.getShoppingContext(), CONTEXT);
+  assert.equal(sent[1]!.method, "POST");
+  assert.deepEqual(sent[1]!.body, { a: 1 });
+  assert.equal(sent[1]!.init.redirect, "manual");
+  assert.deepEqual(sent[1]!.headers, {
+    accept: "text/plain",
+    authorization: AUTHORIZATION,
+    "content-type": "application/json",
+    "user-agent": USER_AGENT,
+    "x-trace": "t-1",
+  });
 });
+
+test("graphql posts the operation and its variables to Waitrose's GraphQL endpoint through waitroseFetch, and returns data", async () => {
+  const sent = fakeWaitrose(() => Response.json({ data: { getTrolley: { failures: null } } }));
+  assert.deepEqual(await graphql(OPERATIONS.GetTrolley, { orderId: "o-1" }), {
+    getTrolley: { failures: null },
+  });
+  await graphql(OPERATIONS.GetCampaigns);
+  assert.equal(sent[0]!.url, GRAPHQL_URL);
+  assert.equal(sent[0]!.method, "POST");
+  assert.deepEqual(sent[0]!.body, { query: OPERATIONS.GetTrolley, variables: { orderId: "o-1" } });
+  assert.equal(sent[0]!.headers.authorization, AUTHORIZATION);
+  assert.equal(sent[0]!.headers["user-agent"], USER_AGENT);
+  assert.equal(sent[0]!.headers["content-type"], "application/json");
+  assert.deepEqual(sent[1]!.body.variables, {});
+});
+
+test("graphql throws on an HTTP error and on GraphQL errors, with their messages; a refusal inside data is the caller's to read", async () => {
+  fakeWaitrose(() => new Response("down", { status: 503 }));
+  await assert.rejects(graphql(OPERATIONS.GetShoppingContext), { message: "HTTP 503: down" });
+  fakeWaitrose(() =>
+    Response.json({ data: null, errors: [{ message: "Bad orderId" }, { message: "Not found" }] }),
+  );
+  await assert.rejects(graphql(OPERATIONS.GetTrolley, { orderId: "x" }), {
+    message: "GraphQL Error: Bad orderId, Not found",
+  });
+  const refused = { bookSlot: { failures: [{ type: "SLOT_GONE", message: "Slot taken" }] } };
+  fakeWaitrose(() => Response.json({ data: refused, errors: [] }));
+  assert.deepEqual(
+    await graphql(OPERATIONS.BookSlot, { input: { slotId: "s-1", slotType: "DELIVERY" } }),
+    refused,
+  );
+});
+
+test("OPERATIONS is the app's 17 GraphQL operations, frozen, each under its own name", () => {
+  assert.ok(Object.isFrozen(OPERATIONS));
+  assert.equal(Object.keys(OPERATIONS).length, 17);
+  for (const [name, text] of Object.entries(OPERATIONS))
+    assert.match(text, new RegExp(`^(query|mutation) ${name}\\b`));
+});
+
+test("the README's script calls Waitrose as the package does: the same request as graphql(OPERATIONS.GetShoppingContext)", async () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const script = readme.split("### The helpers in a script")[1]?.match(/```js\n([\s\S]*?)```/)?.[1];
+  assert.ok(script, "README has no script under 'The helpers in a script'");
+  const run = (
+    await import(`data:text/javascript,${encodeURIComponent(`export default ${script}`)}`)
+  ).default;
+  const sent = fakeWaitrose((_, operation) =>
+    operation === "GetShoppingContext"
+      ? Response.json({ data: { shoppingContext: CONTEXT } })
+      : undefined,
+  );
+  assert.deepEqual(await run(), CONTEXT);
+  await graphql(OPERATIONS.GetShoppingContext);
+  const [fromScript, fromPackage] = sent.map(({ url, method, headers, body }) => ({
+    url,
+    method,
+    headers,
+    body,
+  }));
+  assert.deepEqual(fromScript, fromPackage);
+});
+
+// ------------------------------------------- placeOrder
+
+const SLOT = {
+  slotType: "DELIVERY",
+  startDateTime: "2026-10-10T09:00:00Z",
+  endDateTime: "2026-10-10T10:00:00Z",
+  expiryDateTime: new Date(Date.now() + 3_600_000).toISOString(),
+};
+const PLACED = {
+  customerOrderId: "o-1",
+  totals: { estimated: { totalPrice: { amount: 87.45, currencyCode: "GBP" } }, actual: null },
+  slots: [
+    {
+      branchId: 1,
+      branchName: "Anytown",
+      type: "DELIVERY",
+      startDateTime: SLOT.startDateTime,
+      endDateTime: SLOT.endDateTime,
+    },
+  ],
+};
+const REVIEWED = { orderId: "o-1", expectedTotal: { amount: 87.45, currencyCode: "GBP" } };
+
+/** A Waitrose whose current order, o-1, is ready for instant checkout at £87.45, less what `change`
+ *  alters. `place` answers the place POST. */
+function checkoutWaitrose(
+  change: {
+    context?: object;
+    trolley?: (trolley: any) => void;
+    slot?: object | null;
+    place?: () => Response | Promise<Response>;
+  } = {},
+) {
+  const trolley = {
+    instantCheckout: "ALLOWED",
+    checkoutReadiness: { slotTypeValid: true },
+    failures: null,
+    products: [],
+    trolley: {
+      orderId: "o-1",
+      trolleyItems: [{ lineNumber: "123", quantity: { amount: 1, uom: "C62" } }],
+      trolleyTotals: {
+        minimumSpendThresholdMet: true,
+        trolleyItemCounts: { hardConflicts: 0, noConflicts: 1, softConflicts: 0 },
+        totalEstimatedCost: { amount: 87.45, currencyCode: "GBP" },
+      },
+    },
+  };
+  change.trolley?.(trolley);
+  const slot = "slot" in change ? change.slot : SLOT;
+  const sent = fakeWaitrose((url, operation) => {
+    if (operation === "GetShoppingContext")
+      return Response.json({ data: { shoppingContext: { ...CONTEXT, ...change.context } } });
+    if (operation === "GetTrolley") return Response.json({ data: { getTrolley: trolley } });
+    if (operation === "CurrentSlot") return Response.json({ data: { currentSlot: slot } });
+    if (url === PLACE_URL) return change.place ? change.place() : Response.json(PLACED);
+  });
+  return { sent, placed: () => sent.filter((request) => request.url === PLACE_URL) };
+}
+
+test("placeOrder reviews the checkout from fresh reads, then posts once to the place endpoint and returns Waitrose's answer", async () => {
+  const waitroseSide = checkoutWaitrose();
+  assert.deepEqual(await placeOrder(REVIEWED), PLACED);
+  const [first, ...rest] = waitroseSide.sent;
+  assert.equal(first!.body.query, OPERATIONS.GetShoppingContext);
+  const reads = Object.fromEntries(
+    rest.filter((request) => request.body?.query).map((r) => [r.body.query, r.body.variables]),
+  );
+  assert.deepEqual(reads, {
+    [OPERATIONS.GetTrolley]: { orderId: "o-1" },
+    [OPERATIONS.CurrentSlot]: { input: { customerOrderId: "o-1" } },
+  });
+  const placed = waitroseSide.placed();
+  assert.equal(placed.length, 1);
+  assert.equal(waitroseSide.sent.at(-1), placed[0]);
+  assert.equal(placed[0]!.method, "POST");
+  assert.deepEqual(placed[0]!.body, { instantCheckout: true, event: "PLACE" });
+  assert.equal(placed[0]!.headers.authorization, AUTHORIZATION);
+  assert.equal(placed[0]!.headers["user-agent"], USER_AGENT);
+  assert.equal(placed[0]!.headers["content-type"], "application/json");
+  assert.equal(placed[0]!.init.redirect, "manual");
+  assert.ok(placed[0]!.init.signal instanceof AbortSignal);
+});
+
+test("placeOrder refuses when the estimated total is not the one the person agreed to, and posts nothing", async () => {
+  for (const expectedTotal of [
+    { amount: 80, currencyCode: "GBP" },
+    { amount: 87.45, currencyCode: "EUR" },
+  ]) {
+    const { placed } = checkoutWaitrose();
+    await assert.rejects(placeOrder({ orderId: "o-1", expectedTotal }), {
+      message: "The estimated total has changed; review checkout again",
+    });
+    assert.equal(placed().length, 0);
+  }
+});
+
+test("placeOrder refuses when the trolley is not the current order, and posts nothing", async () => {
+  const { placed } = checkoutWaitrose({
+    trolley: (trolley) => {
+      trolley.trolley.orderId = "o-2";
+    },
+  });
+  await assert.rejects(placeOrder(REVIEWED), {
+    message: "Checkout blocked: The trolley does not match the current order",
+  });
+  assert.equal(placed().length, 0);
+});
+
+test("placeOrder refuses unless instant checkout is ALLOWED, and posts nothing", async () => {
+  for (const [instantCheckout, shown] of [
+    ["NOT_ALLOWED", "NOT_ALLOWED"],
+    ["THRESHOLD_EXCEEDED", "THRESHOLD_EXCEEDED"],
+    [undefined, "unknown"],
+  ]) {
+    const { placed } = checkoutWaitrose({
+      trolley: (trolley) => {
+        trolley.instantCheckout = instantCheckout;
+      },
+    });
+    await assert.rejects(placeOrder(REVIEWED), {
+      message: `Checkout blocked: Instant checkout is ${shown}; complete payment setup or checkout on the Waitrose website`,
+    });
+    assert.equal(placed().length, 0);
+  }
+});
+
+test("placeOrder names every other blocker, and posts nothing", async () => {
+  const cases: [Parameters<typeof checkoutWaitrose>[0], string][] = [
+    [
+      { trolley: (t) => void (t.failures = [{ type: "X", message: "x" }]) },
+      "Waitrose reported trolley failures",
+    ],
+    [
+      { trolley: (t) => void (t.checkoutReadiness.slotTypeValid = false) },
+      "A valid delivery or collection slot is required",
+    ],
+    [{ slot: null }, "A valid delivery or collection slot is required"],
+    [{ slot: { ...SLOT, slotType: "VAN" } }, "A valid delivery or collection slot is required"],
+    [
+      { slot: { ...SLOT, expiryDateTime: "2020-01-01T00:00:00Z" } },
+      "The slot reservation has expired or its expiry is unknown",
+    ],
+    [{ trolley: (t) => void (t.trolley.trolleyItems = []) }, "The trolley is empty"],
+    [
+      { trolley: (t) => void (t.trolley.trolleyTotals.minimumSpendThresholdMet = false) },
+      "The minimum spend requirement is not met or unknown",
+    ],
+    [
+      { trolley: (t) => void (t.trolley.trolleyTotals.trolleyItemCounts.hardConflicts = 1) },
+      "Resolve trolley conflicts before checkout",
+    ],
+    [
+      { trolley: (t) => void (t.trolley.trolleyTotals.totalEstimatedCost = null) },
+      "The estimated total is unavailable",
+    ],
+  ];
+  for (const [change, blocker] of cases) {
+    const { placed } = checkoutWaitrose(change);
+    await assert.rejects(placeOrder(REVIEWED), { message: `Checkout blocked: ${blocker}` });
+    assert.equal(placed().length, 0);
+  }
+});
+
+test("placeOrder refuses bad arguments before any request, and a changed or missing current order before it reads the trolley", async () => {
+  const { sent } = checkoutWaitrose();
+  for (const bad of [
+    { orderId: "o 1", expectedTotal: { amount: 87.45, currencyCode: "GBP" } },
+    { orderId: "o-1", expectedTotal: { amount: -1, currencyCode: "GBP" } },
+    { orderId: "o-1", expectedTotal: { amount: Number.NaN, currencyCode: "GBP" } },
+    { orderId: "o-1", expectedTotal: { amount: 87.45, currencyCode: "" } },
+    { orderId: "o-1" },
+  ])
+    await assert.rejects(placeOrder(bad as typeof REVIEWED), {
+      message: "A reviewed order ID and expected total/currency are required",
+    });
+  assert.equal(sent.length, 0);
+  for (const [customerOrderId, message] of [
+    ["o-2", "The current order has changed; review checkout again"],
+    [null, "No current order available for checkout"],
+  ]) {
+    const changed = checkoutWaitrose({ context: { customerOrderId } });
+    await assert.rejects(placeOrder(REVIEWED), { message });
+    assert.deepEqual(
+      changed.sent.map((request) => request.body?.query),
+      [OPERATIONS.GetShoppingContext],
+    );
+  }
+});
+
+test("an unclear answer to the place POST is CheckoutOutcomeUnknownError, and the POST is never sent again", async () => {
+  const unclear: (() => Response | Promise<Response>)[] = [
+    () => Promise.reject(new TypeError("fetch failed")),
+    () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError")),
+    () => new Response("", { status: 500 }),
+    () => new Response("", { status: 503 }),
+    () => new Response("", { status: 408 }),
+    () => new Response("<html>", { status: 200 }),
+    () => Response.json({ ...PLACED, customerOrderId: "o-2" }),
+    () => Response.json({ ...PLACED, totals: [] }),
+    () => Response.json({ ...PLACED, slots: null }),
+  ];
+  for (const place of unclear) {
+    const { placed } = checkoutWaitrose({ place });
+    const error = await placeOrder(REVIEWED).catch((error: unknown) => error);
+    assert.ok(error instanceof CheckoutOutcomeUnknownError);
+    assert.equal(error.orderId, "o-1");
+    assert.equal(
+      error.message,
+      "Checkout outcome is unknown for order o-1. Check getOrder before retrying; the order may have been placed.",
+    );
+    assert.equal(placed().length, 1);
+  }
+});
+
+test("a refusal of the place POST (HTTP 4xx) says so, and is not an unknown outcome", async () => {
+  const { placed } = checkoutWaitrose({ place: () => new Response("", { status: 409 }) });
+  const error = await placeOrder(REVIEWED).catch((error: unknown) => error);
+  assert.ok(error instanceof Error && !(error instanceof CheckoutOutcomeUnknownError));
+  assert.equal(
+    error.message,
+    "Waitrose checkout rejected (409). Check the order and checkout eligibility before retrying.",
+  );
+  assert.equal(placed().length, 1);
+});
+
+// ------------------------------------------- the login, as the secret's refresh
 
 test("exchange logs in without any Authorization header and returns the material with the accessToken", async () => {
   const seen: { url: string; init: RequestInit }[] = [];
@@ -188,99 +464,46 @@ test("the README's exchange block is the shipped EXCHANGE_SOURCE, less its expor
   );
 });
 
-// ------------------------------------------- the integration the worker hosts
+// ------------------------------------------- the card on the Dash
 
-/** A project: the account's secret (or none), an egress that answers the shopping context, and
- *  appends on `/integrations`. `host` is the worker hosting the package: a scope per `getItx`. */
-function fakeProject(secrets: string[] = ["/secrets/waitrose"]) {
+test("waitrose() has no host of its own; its install hook registers the card, keyed by the event's path and offset, ok once the account's secret exists", async () => {
   const appended: { path: string; event: any }[] = [];
-  const outbound: Request[] = [];
-  const scopes = { opened: 0, disposed: 0 };
+  const secrets: string[] = [];
   const itx: any = {
-    fetch: async (request: Request) => {
-      outbound.push(request);
-      return Response.json({ data: { shoppingContext: CONTEXT } });
-    },
     secrets: { list: async () => secrets.map((path) => ({ path })) },
     cd: (path: string) => ({
       append: async (event: any) => {
-        const earlier = appended.find(
-          (a) => a.path === path && a.event.idempotencyKey === event.idempotencyKey,
-        );
+        const earlier = appended.find((a) => a.event.idempotencyKey === event.idempotencyKey);
         if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
         if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
         appended.push({ path, event });
       },
     }),
   };
-  const served: { request: Request; target: any }[] = [];
-  const integration = waitrose({
-    rpcResponse: (request, target) => {
-      served.push({ request, target });
-      return new Response("a Cap'n Web session");
-    },
+  const integration = waitrose();
+  assert.equal(integration.routingSlug, undefined);
+  assert.equal("fetch" in integration, false);
+  const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
+    integration.processEvent!({ event: { type, path: "/", offset }, itx });
+  const card = (status: object) => ({
+    title: "Waitrose",
+    description:
+      "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout), signed in as the person's own account: agents and the project's code call it with fetch and the token's placeholder.",
+    status,
+    actions: [
+      {
+        label: "Recipe",
+        url: "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose",
+      },
+    ],
   });
-  const host = (member: boolean) => ({
-    getItx: () => {
-      scopes.opened++;
-      return { ...itx, [Symbol.dispose]: () => void scopes.disposed++ };
-    },
-    auth: {
-      require: () => (member ? null : new Response("Sign in\n", { status: 401 })),
-    },
-  });
-  const publish = (offset: number) =>
-    integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
-      itx,
-    });
-  return { integration, appended, outbound, scopes, served, host, publish };
-}
 
-test("waitrose() answers its routing slug for members only: a non-member gets what auth.require answers, and nothing is served", async () => {
-  const project = fakeProject();
-  assert.equal(project.integration.routingSlug, "waitrose");
-  const refused = await project.integration.fetch!(
-    new Request("https://waitrose--iterate.example/", { method: "POST" }),
-    project.host(false),
-  );
-  assert.equal(refused.status, 401);
-  assert.deepEqual(project.served, []);
-  assert.equal(project.scopes.opened, 0);
-});
-
-test("a member gets a Waitrose over rpcResponse, and each of its requests opens a scope of its own, since the target outlives the request", async () => {
-  const project = fakeProject();
-  const request = new Request("https://waitrose--iterate.example/", { method: "POST" });
-  const res = await project.integration.fetch!(request, project.host(true));
-  assert.equal(await res.text(), "a Cap'n Web session");
-  assert.equal(project.served.length, 1);
-  assert.equal(project.served[0]!.request, request);
-  const target = project.served[0]!.target;
-  assert.ok(target instanceof Waitrose);
-  assert.equal(project.scopes.opened, 0); // nothing was asked of the project yet
-  assert.deepEqual(await target.getShoppingContext(), CONTEXT);
-  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
-  assert.equal(project.outbound[0]!.headers.get("authorization"), AUTHORIZATION);
-});
-
-const card = (status: object) => ({
-  title: "Waitrose",
-  description:
-    "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout) as a Cap'n Web RPC target, signed in as the person's own account.",
-  status,
-  actions: [
-    {
-      label: "Recipe",
-      url: "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose",
-    },
-  ],
-});
-
-test("the install hook registers the card, keyed by the event's path and offset: attention until the account's secret exists, ok after", async () => {
-  const unset = fakeProject([]);
-  for (let attempt = 0; attempt < 2; attempt++) await unset.publish(5);
-  assert.deepEqual(unset.appended, [
+  for (let attempt = 0; attempt < 2; attempt++) await publish(5);
+  secrets.push("/secrets/waitrose");
+  await publish(5); // the same event again, now with the secret: its key is spent, and that is fine
+  await publish(6);
+  await publish(7, "events.iterate.com/itx/woken"); // every other event is ignored
+  assert.deepEqual(appended, [
     {
       path: "/integrations",
       event: {
@@ -292,13 +515,13 @@ test("the install hook registers the card, keyed by the event's path and offset:
         },
       },
     },
+    {
+      path: "/integrations",
+      event: {
+        type: "events.iterate.com/integration/configured",
+        idempotencyKey: "waitrose:registry:/@6",
+        payload: { integration: "waitrose", card: card({ kind: "ok" }) },
+      },
+    },
   ]);
-  const set = fakeProject();
-  await set.publish(7);
-  assert.deepEqual(set.appended[0]!.event.payload.card, card({ kind: "ok" }));
-  await set.integration.processEvent!({
-    event: { type: "events.iterate.com/itx/woken", path: "/", offset: 8 },
-    itx: {} as any,
-  });
-  assert.equal(set.appended.length, 1); // every other event is ignored
 });

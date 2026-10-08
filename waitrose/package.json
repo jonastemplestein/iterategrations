@@ -1,7 +1,7 @@
 {
   "name": "iterate-waitrose",
   "version": "0.0.0",
-  "description": "The Waitrose API as a Cap'n Web RPC target, and its login as a secret's exchange code, for an iterate project",
+  "description": "Waitrose for an iterate project: fetch helpers (waitroseFetch, graphql), the app's GraphQL operations, a guarded placeOrder, the login as the secret's refresh, and the card on the Dash",
   "type": "module",
   "exports": {
     ".": {
