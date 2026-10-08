@@ -254,6 +254,7 @@ test("an allowed person's message wakes the chat's agent, with typing in the cha
   assert.match(content, /Telegram message from Jonas \(@jonas\):/);
   assert.match(content, /what's on today\?/);
   assert.match(content, /getSecret\("\/secrets\/telegram-iterate-bot", \{ field: "token" \}\)/);
+  assert.match(content, /Reply with `await fetch\('https:\/\/api\.telegram\.org\/bot'/);
   assert.match(content, /chat_id: 42/);
   assert.deepEqual(sent(project, "sendChatAction")[0]!.body, { chat_id: 42, action: "typing" });
 });
@@ -746,19 +747,8 @@ test("deliver events: strangers, other bots and service messages are never accep
   assert.match(sent(project)[1]!.body.text, /You're in/); // an allowed person's /start is welcomed
 });
 
-test("the package exports what a project needs to send its own answers: api, placeholder, splitText", async () => {
-  const lib = await import("../dist/telegram.js");
-  assert.equal(typeof lib.api, "function");
-  assert.equal(
-    lib.placeholder("jeeves"),
-    'getSecret("/secrets/telegram-jeeves", { field: "token" })',
-  );
-  assert.deepEqual(lib.splitText("hi"), ["hi"]);
-  const long = Array.from({ length: 5 }, (_, i) => String(i).repeat(1500)).join("\n");
-  const pieces = lib.splitText(long);
-  assert.ok(pieces.length >= 2 && pieces.every((p: string) => p.length <= 4096));
-  assert.equal(pieces.join("\n"), long);
-  assert.ok(lib.splitText("😀".repeat(3000)).every((p: string) => !/[\ud800-\udbff]$/.test(p)));
+test("the package exports the integration and no Telegram client: a project calls the Bot API with fetch", async () => {
+  assert.deepEqual(Object.keys(await import("../dist/telegram.js")), ["telegram"]);
 });
 
 // --------------------------------------------- the Dash's Integrations page
