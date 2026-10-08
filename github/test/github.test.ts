@@ -1,9 +1,10 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (an HMAC check run
-// here as the platform's is, a delete of a missing secret refused as SECRET_NOT_SET, and a collection
-// link to a pretend Dash), a kv, appends that refuse a key used twice for another event (as the
-// platform does; the same event again is a no-op), and an egress to a pretend GitHub that records
-// every request. The egress mints an installation's token as the platform does: on first use, while
-// its secret and the App's exist, and only for the App's real ID. `faults` makes a secret's delete or
+// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// answers the public fields a set named and never a secret one, an HMAC check run here as the
+// platform's is, a delete of a missing secret refused as SECRET_NOT_SET, and a collection link to a
+// pretend Dash), a kv, appends that refuse a key used twice for another event (as the platform
+// does; the same event again is a no-op), and an egress to a pretend GitHub that records every
+// request. The egress mints an installation's token as the platform does: on first use, while its
+// secret and the App's exist, and only for the App's real ID. `faults` makes a secret's delete or
 // an append on /integrations fail. `host` is the worker hosting the package: a scope per `getItx`,
 // counted.
 import assert from "node:assert/strict";
@@ -13,16 +14,31 @@ import { github } from "../dist/github.js";
 
 const ORIGIN = "https://github--iterate.example";
 const WEBHOOK_SECRET = "a-made-up-webhook-secret";
-const APP_SECRET = {
-  material: { privateKey: "-----BEGIN A FAKE KEY-----", webhookSecret: WEBHOOK_SECRET },
-  options: { urls: ["https://github.com", "https://api.github.com"] },
-};
 const PIN = ["https://github.com", "https://api.github.com"];
+/** The App's real ID at the pretend GitHub: a token is minted for no other. */
+const APP_ID = "123456";
+/** The App as the Dash's form saves it: one secret, its ID and slug public fields beside its key and
+ *  its webhook secret. */
+const APP_SECRET = {
+  material: {
+    appId: APP_ID,
+    slug: "iterate-acme",
+    privateKey: "-----BEGIN A FAKE KEY-----",
+    webhookSecret: WEBHOOK_SECRET,
+  },
+  options: { urls: PIN, public: ["appId", "slug"] },
+};
+/** The key and the webhook secret alone, with no public App ID and slug: set by hand, or saved by the
+ *  package before it asked for them on the same form. */
+const SECRETS_ALONE = {
+  material: { privateKey: "-----BEGIN A FAKE KEY-----", webhookSecret: WEBHOOK_SECRET },
+  options: { urls: PIN },
+};
 const CONFIGURED = "events.iterate.com/integration/configured";
 const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
 const DASH_LINK = "https://dash.example/collect-secret/iterate?path=%2Fsecrets%2Fown-github-app";
-/** The App's real ID at the pretend GitHub: a token is minted for no other. */
-const APP_ID = "123456";
+const APP_ID_PATTERN = String.raw`\d{1,12}`;
+const SLUG_PATTERN = String.raw`[a-z0-9][a-z0-9\-]{0,99}`;
 
 type Call = { url: string; headers: Record<string, string> };
 
@@ -53,7 +69,14 @@ function fakeProject(options: { slug?: string } = {}) {
           throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
         delete secrets[path];
       },
-      list: async () => Object.keys(secrets).map((path) => ({ path })),
+      // the catalog: a secret's public fields, as its set named them, and never a secret one
+      list: async () =>
+        Object.entries(secrets).map(([path, { material, options }]) => ({
+          path,
+          public: options.public
+            ? Object.fromEntries(options.public.map((name: string) => [name, material[name]]))
+            : undefined,
+        })),
       verifyHmac: async (
         path: string,
         input: { payload: string; signature: string; field?: string },
@@ -147,9 +170,9 @@ function fakeProject(options: { slug?: string } = {}) {
       }),
       requireMember,
     );
-  /** The App made at GitHub, its ID and slug saved on the page, its secrets saved on the Dash. */
+  /** The App made at GitHub, and saved on the Dash's one form: its ID and slug public, beside its
+   *  key and its webhook secret. */
   const setUp = async () => {
-    await page("/app", { form: { appId: APP_ID, slug: "iterate-acme" } });
     secrets["/secrets/own-github-app"] = structuredClone(APP_SECRET);
   };
   /** Press Install: the nonce in the link to GitHub. */
@@ -292,8 +315,8 @@ test("the page and the callback are for members: whatever auth.require answers i
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
-    ["/app", { appId: "1", slug: "x" }],
     ["/install", {}],
+    ["/connect", { id: "42" }],
     ["/oauth2/callback?installation_id=42&setup_action=install&state=x", undefined],
   ] as const)
     assert.equal((await project.page(path, { form }, refused)).status, 401, path);
@@ -338,11 +361,11 @@ test("the page shows the URLs to paste at GitHub, from the request's origin and 
   assert.doesNotMatch(html, /onclick=/);
 });
 
-test("the page links to the Dash's collection of the App's secrets, which never pass through this code", async () => {
+test("the page links to the Dash's one form for the App, its ID and slug public beside its secrets, which never pass through this code; the form checks the ID's and the slug's shapes as the browser does", async () => {
   const project = fakeProject();
   const html = await (await project.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
-  assert.match(html, />Save them</);
+  assert.match(html, />Save the App</);
   assert.match(project.collected[0]!.description, /BEGIN and END lines/);
   assert.deepEqual(
     project.collected.map((input) => ({ ...input, description: undefined })),
@@ -352,56 +375,77 @@ test("the page links to the Dash's collection of the App's secrets, which never 
         egress: { urls: PIN },
         description: undefined,
         fields: [
+          {
+            name: "appId",
+            label: "App ID",
+            public: true,
+            placeholder: "123456",
+            pattern: APP_ID_PATTERN,
+          },
+          {
+            name: "slug",
+            label: "Slug: the end of github.com/apps/<slug>",
+            public: true,
+            pattern: SLUG_PATTERN,
+          },
           { name: "privateKey", label: "Private key (.pem)", multiline: true },
           { name: "webhookSecret", label: "Webhook secret" },
         ],
       },
     ],
   );
+  // HTML's pattern takes the whole value, compiled with the `v` flag
+  const shape = (pattern: string) => new RegExp(`^(?:${pattern})$`, "v");
+  assert.match(APP_ID, shape(APP_ID_PATTERN));
+  for (const value of ["abc", "", "1234567890123"])
+    assert.doesNotMatch(value, shape(APP_ID_PATTERN));
+  assert.match("iterate-acme", shape(SLUG_PATTERN));
+  for (const value of ["Not A Slug", "-acme", "https://github.com/apps/iterate-acme"])
+    assert.doesNotMatch(value, shape(SLUG_PATTERN));
   await project.setUp();
-  assert.match(await (await project.page("/")).text(), />Replace them</);
+  assert.match(await (await project.page("/")).text(), />Replace it</);
 });
 
-test("the App's ID and slug are kept in the kv, the slug from its public link too; a bad one is shown as an error", async () => {
+test("the App is read from the catalog's public fields: the page shows its ID and link, Install leads to it, and the kv keeps no copy", async () => {
   const project = fakeProject();
-  const saved = await project.page("/app", {
-    form: { appId: " 123456 ", slug: "https://github.com/apps/iterate-acme" },
-  });
-  assert.equal(saved.headers.get("location"), "./");
-  assert.deepEqual(JSON.parse(project.kv["own-github/app"]!), {
-    appId: "123456",
-    slug: "iterate-acme",
-  });
-  assert.match(
-    location(await project.page("/app", { form: { appId: "abc", slug: "x" } })),
-    /error=The App ID is a number/,
-  );
-  assert.match(
-    location(await project.page("/app", { form: { appId: "1", slug: "Not A Slug" } })),
-    /error=The slug/,
-  );
-  assert.deepEqual(JSON.parse(project.kv["own-github/app"]!).appId, "123456");
+  await project.setUp();
   const html = await (await project.page("/")).text();
   assert.match(html, /App 123456/);
   assert.match(html, /href="https:\/\/github\.com\/apps\/iterate-acme"/);
+  assert.doesNotMatch(html, /has no public App ID/);
+  const to = new URL((await project.page("/install", { form: {} })).headers.get("location")!);
+  assert.equal(to.origin + to.pathname, "https://github.com/apps/iterate-acme/installations/new");
+  await project.callback({
+    installation_id: "42",
+    setup_action: "install",
+    state: to.searchParams.get("state")!,
+  });
+  assert.equal(project.secrets["/secrets/own-github-42"]!.material.appId, APP_ID);
+  assert.ok(!Object.values(project.kv).some((value) => value.includes("iterate-acme")));
 });
 
-test("Install needs the App's ID and slug, and its secrets; then it sends the person to GitHub with a nonce good for an hour", async () => {
+test("a secret without the public fields is not set up: the page asks to save the App again, and Install is refused", async () => {
   const project = fakeProject();
-  assert.match(
-    location(await project.page("/install", { form: {} })),
-    /error=Save the App ID and slug first/,
-  );
-  await project.page("/app", { form: { appId: "123456", slug: "iterate-acme" } });
-  assert.match(
-    location(await project.page("/install", { form: {} })),
-    /error=Save the App's private key and webhook secret first/,
-  );
+  project.secrets["/secrets/own-github-app"] = structuredClone(SECRETS_ALONE);
+  const html = await (await project.page("/")).text();
+  assert.match(html, /has no public App ID and slug\. Save the App again/);
+  assert.match(html, />Save the App</);
+  assert.doesNotMatch(html, /action="install"/);
+  assert.match(location(await project.page("/install", { form: {} })), /error=Save the App first/);
   assert.deepEqual(
     Object.keys(project.kv).filter((key) => key.startsWith("own-github/pending/")),
     [],
   );
-  project.secrets["/secrets/own-github-app"] = structuredClone(APP_SECRET);
+});
+
+test("Install needs the App; then it sends the person to GitHub with a nonce good for an hour", async () => {
+  const project = fakeProject();
+  assert.match(location(await project.page("/install", { form: {} })), /error=Save the App first/);
+  assert.deepEqual(
+    Object.keys(project.kv).filter((key) => key.startsWith("own-github/pending/")),
+    [],
+  );
+  await project.setUp();
   const res = await project.page("/install", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
@@ -417,7 +461,7 @@ test("no other site can frame the page's answers or the callback's", async () =>
   const project = fakeProject();
   await project.setUp();
   const answers = [
-    await project.page("/app", { form: { appId: APP_ID, slug: "iterate-acme" } }),
+    await project.page("/connect", { form: { id: "7" } }),
     await project.page("/disconnect", { form: { id: "7" } }),
     await project.callback({ installation_id: "42", setup_action: "install", state: "x" }),
     await project.callback({
@@ -661,7 +705,8 @@ test("an update whose proof fails leaves the installation as it was: its App ID 
   });
   assert.match(location(down), /error=GitHub refused installation 42 \(HTTP 502/);
   project.github.refuse = 0;
-  await project.page("/app", { form: { appId: "999999", slug: "iterate-acme" } });
+  project.secrets["/secrets/own-github-app"] = structuredClone(APP_SECRET);
+  project.secrets["/secrets/own-github-app"].material.appId = "999999";
   const wrong = await project.callback({
     installation_id: "42",
     setup_action: "update",
@@ -696,6 +741,78 @@ test("an update that passes its proof replaces the installation's secret, and th
   });
   assert.equal(project.secrets["/secrets/own-github-42-proof"], undefined);
   assert.equal(JSON.parse(project.kv["own-github/installations/42"]!).account, "acme-renamed");
+});
+
+test("an existing installation connected by its id is proved and listed; a bad id is refused", async () => {
+  const project = fakeProject();
+  assert.match(
+    location(await project.page("/connect", { form: { id: "77" } })),
+    /error=Save the App first/,
+  );
+  await project.setUp();
+  const html = await (await project.page("/")).text();
+  assert.ok(html.includes('<form method="post" action="connect" class="block">'));
+  assert.ok(html.includes('pattern="\\d{1,20}"'));
+  assert.match(html, /github\.com\/settings\/installations\/&lt;id&gt;/);
+
+  // GitHub came back for no install: the installation exists, and the page is given its ID
+  project.github.accounts["77"] = "acme-org";
+  const before = project.registry().length;
+  const res = await project.page("/connect", { form: { id: " 77 " } });
+  assert.equal(res.headers.get("location"), "./?connected=acme-org");
+  // proved through the App's key, on a secret of its own, before the installation's is set
+  assert.deepEqual(
+    project.calls.map((call) => call.headers.authorization),
+    ['Bearer getSecret("/secrets/own-github-77-proof", { field: "accessToken" })'],
+  );
+  assert.equal(project.secrets["/secrets/own-github-77-proof"], undefined);
+  assert.deepEqual(project.secrets["/secrets/own-github-77"]!.material, {
+    appId: APP_ID,
+    privateKey: 'getSecret("/secrets/own-github-app", { field: "privateKey" })',
+  });
+  assert.equal(JSON.parse(project.kv["own-github/installations/77"]!).account, "acme-org");
+  // the card first: a row stands under its card alone
+  assert.deepEqual(project.registry().slice(before), [
+    { type: CONFIGURED, payload: { integration: "github", card: READY } },
+    {
+      type: CONNECTION_CONFIGURED,
+      payload: {
+        integration: "github",
+        connection: "77",
+        row: {
+          account: "acme-org",
+          status: { kind: "ok" },
+          actions: [
+            { label: "Manage", routingSlug: "github", path: "/" },
+            { label: "Open", url: "https://github.com/acme-org" },
+          ],
+          details: { Installation: "77" },
+        },
+      },
+    },
+  ]);
+  // its deliveries land now
+  await project.deliver({ action: "opened", installation: { id: 77 } });
+  assert.ok(project.appended.some((a) => a.path === "/integrations/own-github/77"));
+
+  // a bad ID, and one GitHub refuses (another App's installation), write nothing
+  const kv = structuredClone(project.kv);
+  const registered = project.registry().length;
+  for (const id of ["", "abc", "12 34", "1".repeat(21), "../42"])
+    assert.match(
+      location(await project.page("/connect", { form: { id } })),
+      /error=The installation ID is a number/,
+      id,
+    );
+  project.github.refuse = 404;
+  assert.match(
+    location(await project.page("/connect", { form: { id: "78" } })),
+    /error=GitHub refused installation 78 \(HTTP 404/,
+  );
+  assert.equal(project.secrets["/secrets/own-github-78"], undefined);
+  assert.equal(project.secrets["/secrets/own-github-78-proof"], undefined);
+  assert.deepEqual(project.kv, kv);
+  assert.equal(project.registry().length, registered);
 });
 
 test("Install forgets the nonces of installs that never came back, after an hour", async () => {
@@ -931,10 +1048,51 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
     card({ kind: "attention", text: "Create a GitHub App and paste its secrets" }, "Connect", "gh"),
   );
   const count = project.appended.length;
-  for (const type of ["github/delivery-received", "events.iterate.com/secret/set"])
-    await project.integration.processEvent!({
-      event: { type, path: "/", offset: 2 },
+  for (const event of [
+    { type: "github/delivery-received", path: "/integrations/own-github/42" },
+    // another secret's fact, the App's own on its secret's path, and a fact with no payload
+    {
+      type: "events.iterate.com/secret/set",
+      path: "/",
+      payload: { path: "/secrets/own-github-42" },
+    },
+    {
+      type: "events.iterate.com/secret/set",
+      path: "/secrets/own-github-app",
+      payload: { path: "/secrets/own-github-app" },
+    },
+    { type: "events.iterate.com/secret/deleted", path: "/" },
+  ])
+    await project.integration.processEvent!({ event: { ...event, offset: 2 }, itx: project.itx });
+  assert.equal(project.appended.length, count);
+});
+
+test("the App saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
+  const project = fakeProject();
+  const fact = (type: string, offset: number, payload: object) =>
+    project.integration.processEvent!({
+      event: { type, path: "/", offset, payload },
       itx: project.itx,
     });
-  assert.equal(project.appended.length, count);
+  await project.setUp();
+  for (let attempt = 0; attempt < 2; attempt++)
+    await fact("events.iterate.com/secret/set", 7, {
+      path: "/secrets/own-github-app",
+      urls: PIN,
+      public: { appId: APP_ID, slug: "iterate-acme" },
+    });
+  delete project.secrets["/secrets/own-github-app"];
+  await fact("events.iterate.com/secret/deleted", 8, { path: "/secrets/own-github-app" });
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "github:registry:/@7",
+      payload: { integration: "github", card: READY },
+    },
+    {
+      type: CONFIGURED,
+      idempotencyKey: "github:registry:/@8",
+      payload: { integration: "github", card: NOT_READY },
+    },
+  ]);
 });

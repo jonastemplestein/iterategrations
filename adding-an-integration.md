@@ -101,6 +101,12 @@ the state is kept within 1 MiB, and a malformed payload folds nothing. When a co
 its row as `null`; keep a tombstone until that append has landed and finish it at the next
 publication, so a failed append cannot leave a stale row.
 
+A secret a person saves on the Dash (a `collectFromUser` form) changes what the card says, and no
+request of the package's sees it. Its `events.iterate.com/secret/set` and `secret/deleted` facts
+reach the hook twice: first on the secret's own path, then on `/`, where the catalog folds them.
+Register the card again on the copy on `/` whose `payload.path` is the package's secret, keyed by
+that event.
+
 ## The archetypes
 
 Every integration seen so far is one of these, or a mix.
@@ -129,6 +135,27 @@ const { authorizationUrl } = await itx.secrets.beginOAuth("/secrets/acme-main", 
 // the provider sends the person to /oauth2/callback?code=…&state=…; the page, for members only, hands both back
 const { scopes } = await itx.secrets.completeOAuth("/secrets/acme-main", { code, state });
 ```
+
+The client is one secret, and a person enters it on one form:
+
+```ts
+const { url } = await itx.secrets.collectFromUser({
+  path: "/secrets/acme-app",
+  egress: { urls: ["https://auth.acme.example"] }, // the token endpoint's origin
+  fields: [
+    { name: "clientId", label: "Client ID", public: true, pattern: String.raw`[a-z0-9\-]{1,64}` },
+    { name: "clientSecret", label: "Client secret" },
+  ],
+});
+// the catalog answers a public field's value, and never a secret one
+const app = (await itx.secrets.list()).find((entry) => entry.path === "/secrets/acme-app");
+const clientId = app?.public?.clientId; // undefined until the person saves the form
+```
+
+A `public` field is no secret: the form shows it as a plain input, checked against its `pattern`
+(HTML's, which the browser compiles with the `v` flag, so a hyphen in a character class is
+escaped), and the catalog answers its value. The package reads the client ID there and keeps no
+copy in its kv. A GitHub App's ID and slug are public fields of its secret in the same way.
 
 The exchange runs in the platform's secret facet: the page never sees a token, and the same callback
 again (a refreshed tab) answers the same. The platform composes the URL by the deployment's static

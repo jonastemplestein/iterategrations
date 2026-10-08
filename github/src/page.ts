@@ -13,7 +13,6 @@ import {
   listInstallations,
   readApp,
   recordRequest,
-  saveApp,
   startInstall,
   type GithubItx,
 } from "./app.js";
@@ -86,32 +85,62 @@ const flashOf = (key: "error" | "connected" | "requested", text: string): string
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** What the collection page on the Dash shows the person, above its two fields. */
-const COLLECT_DESCRIPTION = `Your GitHub App's private key and webhook secret.
+/** What the collection page on the Dash shows the person, above its four fields. */
+const COLLECT_DESCRIPTION = `Your GitHub App: its ID and slug, its private key and its webhook secret.
 
+- **App ID:** on the App's settings page at GitHub, under About.
+- **Slug:** the end of the App's public link, \`https://github.com/apps/<slug>\`, on the same page.
 - **Private key (.pem):** open the \`.pem\` file GitHub downloaded when you generated the key, in a text editor, and paste all of it, the BEGIN and END lines too.
 - **Webhook secret:** the secret you typed under Webhook in the App's settings.
 
 The key only signs the App's requests for installation tokens to GitHub's API, and the webhook secret only checks GitHub's deliveries. Neither passes through the project's code.`;
 
-/** The link to the Dash's page that collects the App's secrets into `/secrets/own-github-app`. It
- *  only builds a URL, so the page asks for a fresh one each time it renders. */
+/** The App's four fields: its ID and its slug, public, each in the shape GitHub gives it (HTML's
+ *  `pattern`, which the browser compiles with the `v` flag), then its key and its webhook secret. */
+const FIELDS = [
+  {
+    name: "appId",
+    label: "App ID",
+    public: true,
+    placeholder: "123456",
+    pattern: String.raw`\d{1,12}`,
+  },
+  {
+    name: "slug",
+    label: "Slug: the end of github.com/apps/<slug>",
+    public: true,
+    pattern: String.raw`[a-z0-9][a-z0-9\-]{0,99}`,
+  },
+  { name: "privateKey", label: "Private key (.pem)", multiline: true },
+  { name: "webhookSecret", label: "Webhook secret" },
+];
+
+/** The link to the Dash's page that collects the App into `/secrets/own-github-app`, on one form.
+ *  It only builds a URL, so the page asks for a fresh one each time it renders. */
 const collectLink = (itx: GithubItx): Promise<string> =>
   itx.secrets
     .collectFromUser({
       path: APP_SECRET,
       egress: { urls: PIN },
       description: COLLECT_DESCRIPTION,
-      fields: [
-        { name: "privateKey", label: "Private key (.pem)", multiline: true },
-        { name: "webhookSecret", label: "Webhook secret" },
-      ],
+      fields: FIELDS,
     })
     .then((link) => link.url);
 
+/** Under Install: an installation that exists already, by its ID. GitHub comes back to the setup URL
+ *  only after a new install or a change to one, so a project that moves to this package with its
+ *  App installed connects the installation here. */
+const CONNECT_FORM = `<p class="muted">Installed already? GitHub sends you back here only after a new install or a change to one. To connect an installation that exists, give its ID: the number at the end of its settings page, <code>github.com/settings/installations/&lt;id&gt;</code>, or for an organization <code>github.com/organizations/&lt;org&gt;/settings/installations/&lt;id&gt;</code>.</p>
+    <form method="post" action="connect" class="block">
+      <label for="installation-id">Installation ID</label>
+      <input id="installation-id" name="id" inputmode="numeric" pattern="\\d{1,20}" placeholder="12345678" autocomplete="off" required />
+      <button>Connect</button>
+    </form>`;
+
 async function render(itx: GithubItx, here: string, flash: string): Promise<string> {
   const app = await readApp(itx);
-  const secret = await hasAppSecret(itx);
+  // a secret saved without the public App ID and slug: by hand, or before the form asked for them
+  const incomplete = !app && (await hasAppSecret(itx));
   const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
   const installations = await listInstallations(itx);
   const step1 = `<section>
@@ -121,38 +150,34 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
       <li><b>GitHub App name:</b> any name that is free on GitHub; the project's is a good one.</li>
       <li><b>Homepage URL:</b> this page:${copyRow(`${here}/`)}</li>
       <li><b>Setup URL</b> (under Post installation), and tick <b>Redirect on update</b>:${copyRow(`${here}/oauth2/callback`)}</li>
-      <li><b>Webhook:</b> Active. <b>Webhook URL:</b>${copyRow(`${here}/webhook`)}<b>Secret:</b> make one up (<code>openssl rand -hex 32</code>) and keep it for step 3.</li>
+      <li><b>Webhook:</b> Active. <b>Webhook URL:</b>${copyRow(`${here}/webhook`)}<b>Secret:</b> make one up (<code>openssl rand -hex 32</code>) and keep it for step 2.</li>
       <li><b>Permissions</b> and <b>Subscribe to events:</b> what the project needs, no more. Every event you subscribe to reaches the project.</li>
       <li><b>Where can this GitHub App be installed?</b> Only on this account, unless other accounts should install it.</li>
     </ul>
-    <p>Press <b>Create GitHub App</b>. On the App's page, note its <b>App ID</b> and its public link (<code>https://github.com/apps/&lt;slug&gt;</code>), then press <b>Generate a private key</b>: GitHub downloads a <code>.pem</code> file.</p>
+    <p>Press <b>Create GitHub App</b>. On the App's page, note its <b>App ID</b> and its public link (<code>https://github.com/apps/&lt;slug&gt;</code>), then press <b>Generate a private key</b>: GitHub downloads a <code>.pem</code> file. Keep them for step 2.</p>
   </section>`;
   const step2 = `<section>
-    <h2>2. The App ID and slug</h2>
-    ${app ? `<p class="ok">App ${esc(app.appId)}, <a href="https://github.com/apps/${esc(app.slug)}">github.com/apps/${esc(app.slug)}</a></p>` : ""}
-    <form method="post" action="app" class="block">
-      <input name="appId" placeholder="App ID, e.g. 123456" inputmode="numeric" autocomplete="off" required value="${esc(app?.appId ?? "")}" />
-      <input name="slug" placeholder="Its slug, or its public link https://github.com/apps/…" autocomplete="off" required value="${esc(app?.slug ?? "")}" />
-      <button>Save</button>
-    </form>
-    <p class="muted">Both are public. They are kept in the project's kv.</p>
-  </section>`;
-  const step3 = `<section>
-    <h2>3. The private key and the webhook secret</h2>
-    ${secret ? `<p class="ok">Saved as the project's secret <code>${APP_SECRET}</code>.</p>` : ""}
+    <h2>2. Save the App</h2>
+    ${
+      app
+        ? `<p class="ok">App ${esc(app.appId)}, <a href="https://github.com/apps/${esc(app.slug)}">github.com/apps/${esc(app.slug)}</a></p>`
+        : incomplete
+          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public App ID and slug. Save the App again: the form asks for all four values together.</p>`
+          : ""
+    }
     ${
       typeof link === "string"
-        ? `<p><a class="button" href="${esc(link)}">${secret ? "Replace them" : "Save them"}</a></p>${copyRow(link)}`
+        ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the App"}</a></p>${copyRow(link)}`
         : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
     }
-    <p class="muted">The link opens a page of iterate's Dash, which asks for the key and the webhook secret and keeps them as <code>${APP_SECRET}</code>, pinned to github.com and api.github.com. They never pass through this page.</p>
+    <p class="muted">The link opens a page of iterate's Dash, which asks for the App ID, the slug, the private key and the webhook secret, and keeps them as <code>${APP_SECRET}</code>, pinned to github.com and api.github.com. The key and the webhook secret never pass through this page.</p>
   </section>`;
-  const step4 = `<section>
-    <h2>4. Install it</h2>
+  const step3 = `<section>
+    <h2>3. Install it</h2>
     ${
-      app && secret
-        ? `<p>${post("install", {}, "Install the App")}</p><p class="muted">GitHub asks which account, and which of its repositories, then sends you back here. Install again to add another account.</p>`
-        : `<p class="muted">First save the App ID and slug (2), and its secrets (3).</p>`
+      app
+        ? `<p>${post("install", {}, "Install the App")}</p><p class="muted">GitHub asks which account, and which of its repositories, then sends you back here. Install again to add another account.</p>${CONNECT_FORM}`
+        : `<p class="muted">First save the App (2).</p>`
     }
   </section>`;
   const list = installations.length
@@ -164,18 +189,18 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
         )
         .join("")
     : `<p class="muted">None yet.</p>`;
-  const step5 = `<section>
+  const listed = `<section>
     <h2>Installations</h2>
     ${list}
     <p class="muted">Disconnect forgets an installation here and deletes its secret. The App stays installed at GitHub: only its account can uninstall it, in the account's settings under its installed GitHub Apps. A request waits for an owner of the account. When GitHub sends their approval back here, the request becomes the installation; if it does not, press Install again and Save on GitHub's page, then Forget the request.</p>
   </section>`;
-  return `${flash}${step1}${step2}${step3}${step4}${step5}`;
+  return `${flash}${step1}${step2}${step3}${listed}`;
 }
 
-/** The members-only page at `/`: the App's URLs to paste at GitHub, its ID and slug, the link that
- *  collects its secrets, Install, and the installations with Disconnect. Every write is a plain form
- *  POST, answered with a redirect back to the page; Install's goes on to GitHub. `slug` is the
- *  routing slug the Dash's buttons lead to. */
+/** The members-only page at `/`: the App's URLs to paste at GitHub, the link that collects the App
+ *  on the Dash, Install, the form that connects an installation that exists already, and the
+ *  installations with Disconnect. Every write is a plain form POST, answered with a redirect back to
+ *  the page; Install's goes on to GitHub. `slug` is the routing slug the Dash's buttons lead to. */
 export async function servePage(request: Request, itx: GithubItx, slug: string): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\//, "");
@@ -215,16 +240,27 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
     return typeof value === "string" ? value : "";
   };
   try {
-    if (path === "app") {
-      await saveApp(itx, field("appId"), field("slug"));
-      await registerCard(itx, slug);
-      return redirect();
-    }
     if (path === "install")
       return new Response(null, {
         status: 303,
         headers: { location: await startInstall(itx), ...NO_FRAMES },
       });
+    if (path === "connect") {
+      // an installation that exists already, by its ID: the proof through the App's key decides
+      // whether it is the App's before its secret is set, as for an install GitHub sends back
+      const id = field("id").trim();
+      if (!INSTALLATION_ID.test(id))
+        return redirect(
+          flashOf(
+            "error",
+            "The installation ID is a number: the end of github.com/settings/installations/<id>",
+          ),
+        );
+      const account = await connectInstallation(itx, id);
+      await registerCard(itx, slug);
+      await registerRow(itx, slug, id);
+      return redirect(flashOf("connected", account));
+    }
     if (path === "disconnect") {
       // an installation, a request, or a removal that did not finish: Disconnect again finishes it
       const connection = field("id");
