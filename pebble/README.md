@@ -83,7 +83,7 @@ can change it.
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "pebble" });
+  const url = await itx.url({ routingSlug: "pebble", path: "/webhook" });
   const res = await itx.fetch(new Request(url, { method: "POST" }));
   return { url, status: res.status }; // 400: the receiver refused an unsigned request. 404: not published yet
 };

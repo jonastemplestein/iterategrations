@@ -128,12 +128,14 @@ async function receive(request: Request, itx: PebbleItx): Promise<Response> {
 /** A project's Pebble Index 01 receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [pebble()];`
  *
- *  On the `pebble` routing slug it answers the Pebble app's webhook. Its install hook
+ *  On the `pebble` routing slug it answers the Pebble app's webhook at `/webhook`. Its install hook
  *  (`project/worker-updated`) lists it on the Dash's Integrations page. */
 export function pebble(): Integration {
   return {
     routingSlug: "pebble",
     async fetch(request, host) {
+      if (new URL(request.url).pathname !== "/webhook")
+        return new Response("Not found\n", { status: 404 });
       using itx = host.getItx();
       return await receive(request, itx);
     },

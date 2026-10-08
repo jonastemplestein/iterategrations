@@ -183,10 +183,10 @@ test("it answers its own routing slug, telegram unless another is given", () => 
 test("each request opens one scope and releases it; a page refused to a non-member opens none", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, { update_id: 1, message: message() });
-  await project.page("/_/");
+  await project.hook(`/webhook/${BOT}`, { update_id: 1, message: message() });
+  await project.page("/");
   assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
-  const refused = await project.page("/_/", {}, () => new Response("Sign in\n", { status: 401 }));
+  const refused = await project.page("/", {}, () => new Response("Sign in\n", { status: 401 }));
   assert.equal(refused.status, 401);
   assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
 });
@@ -197,7 +197,7 @@ test("an update is recorded on the bot's stream keyed by update_id, the update u
   const project = fakeProject();
   await project.connected();
   const update = { update_id: 900, message: message() };
-  assert.equal((await project.hook(`/${BOT}`, update)).status, 200);
+  assert.equal((await project.hook(`/webhook/${BOT}`, update)).status, 200);
   assert.deepEqual(project.appended[0], {
     path: STREAM,
     event: {
@@ -213,15 +213,14 @@ test("a wrong, missing or other bot's token, an unknown or malformed bot, or a G
   await project.connected({ 42: ME });
   const update = { update_id: 1, message: message() };
   for (const [path, token] of [
-    [`/${BOT}`, "wrong"],
-    [`/${BOT}`, null],
-    ["/elsewhere", "s3cret"],
-    ["/Iterate-Bot", "s3cret"],
-    ["/", "s3cret"],
-    ["", "s3cret"],
+    [`/webhook/${BOT}`, "wrong"],
+    [`/webhook/${BOT}`, null],
+    ["/webhook/elsewhere", "s3cret"],
+    ["/webhook/Iterate-Bot", "s3cret"],
+    ["/webhook/", "s3cret"],
   ] as const)
     assert.equal((await project.hook(path, update, token)).status, 404, `${path} ${token}`);
-  const get = await project.page(`/${BOT}`);
+  const get = await project.page(`/webhook/${BOT}`);
   assert.equal(get.status, 405);
   assert.deepEqual(project.appended, []);
   assert.deepEqual(project.agents, []);
@@ -231,7 +230,7 @@ test("an authenticated body with no update_id, or not JSON, is acknowledged and 
   const project = fakeProject();
   await project.connected();
   for (const body of ["{}", "nope", JSON.stringify({ update_id: "1" })]) {
-    const res = await project.hook(`/${BOT}`, body);
+    const res = await project.hook(`/webhook/${BOT}`, body);
     assert.equal(res.status, 200);
     assert.notEqual(((await res.json()) as any).ignored, undefined);
   }
@@ -244,7 +243,7 @@ test("an allowed person's message wakes the chat's agent, with typing in the cha
   const project = fakeProject();
   await project.connected({ 42: ME });
   const update = { update_id: 10, message: message({ text: "what's on today?" }) };
-  for (let delivery = 0; delivery < 2; delivery++) await project.hook(`/${BOT}`, update);
+  for (let delivery = 0; delivery < 2; delivery++) await project.hook(`/webhook/${BOT}`, update);
   const added = agentEvents(project);
   assert.equal(added.length, 1);
   assert.equal(added[0]!.path, `/agents/telegram/${BOT}/chat-42`);
@@ -269,7 +268,7 @@ test("a photo or document is described with its file_id, a photo's largest size;
     photo: [{ file_id: "small" }, { file_id: "big" }],
     document: { file_id: "doc1" },
   });
-  await project.hook(`/${BOT}`, { update_id: 11, message: withFiles });
+  await project.hook(`/webhook/${BOT}`, { update_id: 11, message: withFiles });
   const content: string = agentEvents(project)[0]!.event.payload.content;
   assert.match(content, /my receipt/);
   assert.match(content, /Attached: photo, file_id big/);
@@ -281,11 +280,11 @@ test("a photo or document is described with its file_id, a photo's largest size;
 test("a stranger is told once that the bot is private, waits on the page, and reaches no agent", async () => {
   const project = fakeProject();
   await project.connected();
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 20,
     message: message({}, { id: 555, first_name: "Eve" }),
   });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 21,
     message: message({ text: "hello?" }, { id: 555, first_name: "Eve" }),
   });
@@ -299,13 +298,13 @@ test("a stranger is told once that the bot is private, waits on the page, and re
 test("an invite lets in whoever opens it, once, and welcomes them; a spent, expired or wrong one does not", async () => {
   const project = fakeProject();
   await project.connected();
-  const made = await project.page("/_/invite", { form: { bot: BOT } });
-  const code = new URL(made.headers.get("location")!, "https://x.example/_/").searchParams.get(
+  const made = await project.page("/invite", { form: { bot: BOT } });
+  const code = new URL(made.headers.get("location")!, "https://x.example/").searchParams.get(
     "invite",
   )!;
   assert.match(code, /^[0-9a-f]{32}$/);
 
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 30,
     message: message({ text: `/start ${code}` }, { id: 77, first_name: "Wife" }),
   });
@@ -314,7 +313,7 @@ test("an invite lets in whoever opens it, once, and welcomes them; a spent, expi
   assert.equal(project.kv[K(`invite/${code}`)], undefined);
 
   // spent: the next person with the link is a stranger
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 31,
     message: message({ text: `/start ${code}` }, { id: 88 }),
   });
@@ -323,7 +322,7 @@ test("an invite lets in whoever opens it, once, and welcomes them; a spent, expi
 
   // expired
   project.kv[K("invite/aaaa")] = String(Date.now() - 1000);
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 32,
     message: message({ text: "/start aaaa" }, { id: 99 }),
   });
@@ -334,7 +333,7 @@ test("an invite lets in whoever opens it, once, and welcomes them; a spent, expi
 test("an allowed person who taps Start again is welcomed, and it wakes no agent", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, { update_id: 40, message: message({ text: "/start" }) });
+  await project.hook(`/webhook/${BOT}`, { update_id: 40, message: message({ text: "/start" }) });
   assert.match(sent(project)[0]!.body.text, /You're in/);
   assert.deepEqual(agentEvents(project), []);
 });
@@ -344,15 +343,15 @@ test("an allowed person who taps Start again is welcomed, and it wakes no agent"
 test("in a group an allowed person's @mention, reply to the bot, or command wakes the agent, which is told to reply to that message", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME, 77: WIFE });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 50,
     message: group({ text: "@iterate_bot what's for dinner?" }),
   });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 51,
     message: group({ text: "and tomorrow?", reply_to_message: { from: { id: 1001 } } }, { id: 77 }),
   });
-  await project.hook(`/${BOT}`, { update_id: 52, message: group({ text: "/shopping" }) });
+  await project.hook(`/webhook/${BOT}`, { update_id: 52, message: group({ text: "/shopping" }) });
   const added = agentEvents(project);
   assert.equal(added.length, 3);
   assert.ok(added.every((a) => a.path === `/agents/telegram/${BOT}/chat--100`));
@@ -366,7 +365,10 @@ test("in a group an allowed person's @mention, reply to the bot, or command wake
 test("in a group what is not for the bot is read as context only: it wakes nothing and nothing says typing", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, { update_id: 60, message: group({ text: "we need milk" }) });
+  await project.hook(`/webhook/${BOT}`, {
+    update_id: 60,
+    message: group({ text: "we need milk" }),
+  });
   const added = agentEvents(project);
   assert.equal(added.length, 1);
   assert.deepEqual(added[0]!.event.payload.llmRequestPolicy, { behaviour: "dont-trigger-request" });
@@ -376,15 +378,15 @@ test("in a group what is not for the bot is read as context only: it wakes nothi
 test("in a group a stranger who addresses the bot waits on the page and gets no reply; a stranger's chatter, and other bots, are ignored", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 70,
     message: group({ text: "@iterate_bot hi" }, { id: 555, first_name: "Eve" }),
   });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 71,
     message: group({ text: "just talking" }, { id: 556 }),
   });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 72,
     message: group({ text: "@iterate_bot hi" }, { id: 557, is_bot: true }),
   });
@@ -403,8 +405,8 @@ test("the page is for members: whatever auth.require answers is sent, and nothin
   const project = fakeProject();
   const refused = new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
-    ["/_/", undefined],
-    ["/_/connect", { token: TOKEN }],
+    ["/", undefined],
+    ["/connect", { token: TOKEN }],
   ] as const) {
     const res = await project.page(path, { form }, () => refused);
     assert.equal(res.status, 401);
@@ -416,7 +418,7 @@ test("the page is for members: whatever auth.require answers is sent, and nothin
 
 test("with no bot the page shows the BotFather steps and the token form", async () => {
   const project = fakeProject();
-  const res = await project.page("/_/");
+  const res = await project.page("/");
   const html = await res.text();
   assert.equal(res.status, 200);
   assert.match(html, /https:\/\/t\.me\/BotFather/);
@@ -427,15 +429,11 @@ test("with no bot the page shows the BotFather steps and the token form", async 
   // no other site can frame it
   assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
   assert.equal(res.headers.get("x-frame-options"), "DENY");
-  // without its slash the page's relative links would lead off it
-  const bare = await project.page("/_");
-  assert.equal(bare.status, 308);
-  assert.equal(bare.headers.get("location"), "_/");
 });
 
 test("pasting a token checks it, keeps it as a secret, and registers the webhook with a secret the project keeps", async () => {
   const project = fakeProject();
-  const res = await project.page("/_/connect", { form: { token: ` ${TOKEN} ` } });
+  const res = await project.page("/connect", { form: { token: ` ${TOKEN} ` } });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "./?connected=Iterate_Bot");
   assert.equal(res.headers.get("x-frame-options"), "DENY");
@@ -448,7 +446,7 @@ test("pasting a token checks it, keeps it as a secret, and registers the webhook
   const set = sent(project, "setWebhook")[0]!;
   assert.equal(set.credential, `getSecret("/secrets/telegram-${BOT}", { field: "token" })`);
   assert.deepEqual(set.body, {
-    url: `https://telegram--iterate.example/${BOT}`,
+    url: `https://telegram--iterate.example/webhook/${BOT}`,
     secret_token: webhookSecret,
     allowed_updates: ["message"],
     drop_pending_updates: true,
@@ -464,36 +462,37 @@ test("pasting a token checks it, keeps it as a secret, and registers the webhook
   });
   // and a delivery carrying that secret is accepted
   assert.equal(
-    (await project.hook(`/${BOT}`, { update_id: 1, message: message() }, webhookSecret)).status,
+    (await project.hook(`/webhook/${BOT}`, { update_id: 1, message: message() }, webhookSecret))
+      .status,
     200,
   );
   // the page now shows the bot
-  assert.match(await (await project.page("/_/")).text(), /@Iterate_Bot/);
+  assert.match(await (await project.page("/")).text(), /@Iterate_Bot/);
 });
 
 test("the webhook URL keeps the base path a paths ingress strips", async () => {
   const project = fakeProject();
-  await project.page("/_/connect", {
+  await project.page("/connect", {
     form: { token: TOKEN },
     headers: { "x-iterate-base-path": "/projects/iterate" },
   });
   assert.equal(
     sent(project, "setWebhook")[0]!.body.url,
-    `https://telegram--iterate.example/projects/iterate/${BOT}`,
+    `https://telegram--iterate.example/projects/iterate/webhook/${BOT}`,
   );
 });
 
 test("a token Telegram refuses, or that is not a token, is shown as an error and keeps nothing", async () => {
   const project = fakeProject();
-  const refused = await project.page("/_/connect", {
+  const refused = await project.page("/connect", {
     form: { token: "123456:bad_bad_bad_bad_bad_bad_bad" },
   });
   assert.match(decodeURIComponent(refused.headers.get("location")!), /error=getMe: Unauthorized/);
-  const junk = await project.page("/_/connect", { form: { token: "hello" } });
+  const junk = await project.page("/connect", { form: { token: "hello" } });
   assert.match(decodeURIComponent(junk.headers.get("location")!), /does not look like a bot token/);
   assert.deepEqual(project.secrets, {});
   const html = await (
-    await project.page("/_/?error=" + encodeURIComponent("<script>x</script>"))
+    await project.page("/?error=" + encodeURIComponent("<script>x</script>"))
   ).text();
   assert.doesNotMatch(html, /<script>x/);
 });
@@ -501,53 +500,59 @@ test("a token Telegram refuses, or that is not a token, is shown as an error and
 test("the owner lets a waiting person in from the page, and the person is welcomed where they wrote; removing them takes the access away", async () => {
   const project = fakeProject();
   await project.connected();
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 80,
     message: message({}, { id: 555, first_name: "Eve" }),
   });
-  assert.match(await (await project.page("/_/")).text(), /Waiting to be let in[\s\S]*Eve/);
+  assert.match(await (await project.page("/")).text(), /Waiting to be let in[\s\S]*Eve/);
 
-  await project.page("/_/allow", { form: { bot: BOT, id: "555" } });
+  await project.page("/allow", { form: { bot: BOT, id: "555" } });
   assert.equal(JSON.parse(project.kv[K("allowed/555")]!).name, "Eve");
   assert.equal(project.kv[K("pending/555")], undefined);
   assert.match(sent(project).at(-1)!.body.text, /You're in/);
   assert.equal(sent(project).at(-1)!.body.chat_id, 42);
 
-  await project.hook(`/${BOT}`, { update_id: 81, message: message({ text: "now?" }, { id: 555 }) });
+  await project.hook(`/webhook/${BOT}`, {
+    update_id: 81,
+    message: message({ text: "now?" }, { id: 555 }),
+  });
   assert.equal(agentEvents(project).length, 1);
 
-  await project.page("/_/remove", { form: { bot: BOT, id: "555" } });
+  await project.page("/remove", { form: { bot: BOT, id: "555" } });
   assert.equal(project.kv[K("allowed/555")], undefined);
 });
 
 test("an invite link is shown on the page only for a code that exists, for a bot that exists", async () => {
   const project = fakeProject();
   await project.connected();
-  const made = await project.page("/_/invite", { form: { bot: BOT } });
+  const made = await project.page("/invite", { form: { bot: BOT } });
   const location = made.headers.get("location")!;
-  const html = await (await project.page(`/_/${location.slice(2)}`)).text();
+  const html = await (await project.page(`/${location.slice(2)}`)).text();
   assert.match(html, /https:\/\/t\.me\/Iterate_Bot\?start=[0-9a-f]{32}/);
-  const forged = await (await project.page(`/_/?bot=${BOT}&invite=${"a".repeat(32)}`)).text();
+  const forged = await (await project.page(`/?bot=${BOT}&invite=${"a".repeat(32)}`)).text();
   assert.doesNotMatch(forged, /start=a{32}/);
 });
 
 test("disconnecting drops the webhook and the secrets and takes the bot off the page", async () => {
   const project = fakeProject();
-  await project.page("/_/connect", { form: { token: TOKEN } });
-  await project.page("/_/disconnect", { form: { bot: BOT } });
+  await project.page("/connect", { form: { token: TOKEN } });
+  await project.page("/disconnect", { form: { bot: BOT } });
   assert.ok(sent(project, "deleteWebhook").length === 1);
   assert.deepEqual(project.secrets, {});
-  assert.match(await (await project.page("/_/")).text(), /Connect a Telegram bot/);
+  assert.match(await (await project.page("/")).text(), /Connect a Telegram bot/);
   // a webhook with the old secret is refused
-  assert.equal((await project.hook(`/${BOT}`, { update_id: 1, message: message() })).status, 404);
+  assert.equal(
+    (await project.hook(`/webhook/${BOT}`, { update_id: 1, message: message() })).status,
+    404,
+  );
 });
 
 test("a form for a bot that is not connected, or with a bad id, changes nothing", async () => {
   const project = fakeProject();
   await project.connected();
-  const unknown = await project.page("/_/allow", { form: { bot: "other", id: "1" } });
+  const unknown = await project.page("/allow", { form: { bot: "other", id: "1" } });
   assert.match(decodeURIComponent(unknown.headers.get("location")!), /Unknown bot/);
-  const bad = await project.page("/_/allow", { form: { bot: BOT, id: "x; drop" } });
+  const bad = await project.page("/allow", { form: { bot: BOT, id: "x; drop" } });
   assert.equal(bad.status, 404);
   assert.deepEqual(Object.keys(project.kv).sort(), [`telegram/bots/${BOT}`, K("bot")].sort());
 });
@@ -563,7 +568,7 @@ test("in a group saying the bot's name, as a word, is addressing it: its display
     name: "Butler",
   });
   const say = async (id: number, text: string) =>
-    project.hook(`/${BOT}`, { update_id: id, message: group({ text }) });
+    project.hook(`/webhook/${BOT}`, { update_id: id, message: group({ text }) });
   for (const [id, text] of [
     [100, "Hi Jeeves"],
     [101, "thanks, butler!"],
@@ -601,8 +606,8 @@ test("a service message (the group was created, someone joined) is not chat: it 
     new_chat_members: [{ id: 1001, is_bot: true }],
     group_chat_created: undefined,
   };
-  await project.hook(`/${BOT}`, { update_id: 110, message: created });
-  await project.hook(`/${BOT}`, { update_id: 111, message: joined });
+  await project.hook(`/webhook/${BOT}`, { update_id: 110, message: created });
+  await project.hook(`/webhook/${BOT}`, { update_id: 111, message: joined });
   assert.equal(project.appended.filter((a) => a.path === STREAM).length, 2);
   assert.deepEqual(project.agents, []);
   assert.deepEqual(project.calls, []);
@@ -611,7 +616,7 @@ test("a service message (the group was created, someone joined) is not chat: it 
 test("a location, with no words, still counts as something said", async () => {
   const project = fakeProject();
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 120,
     message: message({ text: undefined, location: { latitude: 51.4, longitude: -2.3 } }),
   });
@@ -623,8 +628,8 @@ test("a location, with no words, still counts as something said", async () => {
 test("every link the page makes has a Copy button, and the page runs one script, under a nonce", async () => {
   const project = fakeProject();
   await project.connected();
-  const made = await project.page("/_/invite", { form: { bot: BOT } });
-  const res = await project.page(`/_/${made.headers.get("location")!.slice(2)}`);
+  const made = await project.page("/invite", { form: { bot: BOT } });
+  const res = await project.page(`/${made.headers.get("location")!.slice(2)}`);
   const html = await res.text();
   const nonce = /script-src 'nonce-([^']+)'/.exec(res.headers.get("content-security-policy")!)![1];
   assert.match(html, /data-copy="https:\/\/t\.me\/Iterate_Bot\?start=[0-9a-f]{32}"/);
@@ -637,7 +642,7 @@ test("every link the page makes has a Copy button, and the page runs one script,
 test("the page says whether the bot can read a whole group, and how to fix it when privacy mode is on", async () => {
   const project = fakeProject();
   await project.connected();
-  const on = await (await project.page("/_/")).text();
+  const on = await (await project.page("/")).text();
   assert.match(on, /privacy mode is on/);
   assert.match(on, /Add Administrator/);
   // one tap: a link that opens Telegram's group picker and makes the bot an admin, with a Copy button
@@ -646,7 +651,7 @@ test("the page says whether the bot can read a whole group, and how to fix it wh
   assert.doesNotMatch(on, /startgroup=/); // no start parameter: no "/start" lands in the group
   assert.match(on, /\/setprivacy/);
   project.readsAll(true);
-  const off = await (await project.page("/_/")).text();
+  const off = await (await project.page("/")).text();
   assert.match(off, /reads every message in a group/);
   assert.match(off, /startgroup&amp;admin=manage_chat/); // and another group is one tap away
   assert.doesNotMatch(off, /privacy mode is on/);
@@ -661,8 +666,8 @@ test("deliver events: a message from someone let in is recorded as accepted, for
     text: "what's for dinner?",
     reply_to_message: { message_id: 3, from: { id: 1001 }, text: "Shall I order?" },
   });
-  await project.hook(`/${BOT}`, { update_id: 200, message: msg });
-  await project.hook(`/${BOT}`, { update_id: 200, message: msg }); // Telegram's resend
+  await project.hook(`/webhook/${BOT}`, { update_id: 200, message: msg });
+  await project.hook(`/webhook/${BOT}`, { update_id: 200, message: msg }); // Telegram's resend
   const accepted = project.appended.filter((a) => a.event.type === "telegram/message-accepted");
   assert.equal(accepted.length, 1);
   assert.equal(accepted[0]!.path, STREAM);
@@ -685,8 +690,11 @@ test("deliver events: a message from someone let in is recorded as accepted, for
 test("deliver events: a group's message is accepted whether or not it addresses the bot, with its files and thread", async () => {
   const project = fakeProject("events");
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, { update_id: 210, message: group({ text: "we need milk" }) });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
+    update_id: 210,
+    message: group({ text: "we need milk" }),
+  });
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 211,
     message: group({
       text: undefined,
@@ -714,12 +722,12 @@ test("deliver events: a group's message is accepted whether or not it addresses 
 test("deliver events: strangers, other bots and service messages are never accepted; the door still works (invites, welcomes, waiting)", async () => {
   const project = fakeProject("events");
   await project.connected({ 42: ME });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 220,
     message: message({}, { id: 555, first_name: "Eve" }),
   });
-  await project.hook(`/${BOT}`, { update_id: 221, message: message({}, { is_bot: true }) });
-  await project.hook(`/${BOT}`, {
+  await project.hook(`/webhook/${BOT}`, { update_id: 221, message: message({}, { is_bot: true }) });
+  await project.hook(`/webhook/${BOT}`, {
     update_id: 222,
     message: {
       message_id: 9,
@@ -728,7 +736,7 @@ test("deliver events: strangers, other bots and service messages are never accep
       group_chat_created: true,
     },
   });
-  await project.hook(`/${BOT}`, { update_id: 223, message: message({ text: "/start" }) });
+  await project.hook(`/webhook/${BOT}`, { update_id: 223, message: message({ text: "/start" }) });
   assert.deepEqual(
     project.appended.filter((a) => a.event.type === "telegram/message-accepted"),
     [],
@@ -760,13 +768,13 @@ const card = (status: object, label: string, routingSlug = "telegram") => ({
   description:
     "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
   status,
-  actions: [{ label, routingSlug, path: "/_/" }],
+  actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (people: string, routingSlug = "telegram") => ({
   account: "@Iterate_Bot",
   status: { kind: "ok" },
   actions: [
-    { label: "Manage", routingSlug, path: "/_/" },
+    { label: "Manage", routingSlug, path: "/" },
     { label: "Open", url: "https://t.me/Iterate_Bot" },
   ],
   details: { "Let in": people },
@@ -814,7 +822,7 @@ test("with no bot the card asks for one; a hook retried after a change does not 
       },
     },
   ]);
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   await project.publish(5); // the same event again, now with a bot: its card's key is spent
   assert.deepEqual(
     project.registry().map((event) => [event.type, event.idempotencyKey]),
@@ -829,7 +837,7 @@ test("with no bot the card asks for one; a hook retried after a change does not 
 
 test("connecting a bot registers the card again and then its row (a row stands under its card alone); letting people in or out updates the row; disconnecting removes it", async () => {
   const project = fakeProject();
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   assert.deepEqual(project.registry(), [
     {
       type: CONFIGURED,
@@ -843,24 +851,28 @@ test("connecting a bot registers the card again and then its row (a row stands u
 
   // someone waits, and is let in on the page; then an invite lets in another
   const secret = (project.secrets[`/secrets/telegram-webhook-${BOT}`] as any).material;
-  await project.hook(`/${BOT}`, { update_id: 1, message: message({}, { id: 555 }) }, secret);
-  await project.page("/_/allow", { form: { bot: BOT, id: "555" } });
+  await project.hook(
+    `/webhook/${BOT}`,
+    { update_id: 1, message: message({}, { id: 555 }) },
+    secret,
+  );
+  await project.page("/allow", { form: { bot: BOT, id: "555" } });
   assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "1 person" });
-  const made = await project.page("/_/invite", { form: { bot: BOT } });
-  const code = new URL(made.headers.get("location")!, "https://x.example/_/").searchParams.get(
+  const made = await project.page("/invite", { form: { bot: BOT } });
+  const code = new URL(made.headers.get("location")!, "https://x.example/").searchParams.get(
     "invite",
   );
   await project.hook(
-    `/${BOT}`,
+    `/webhook/${BOT}`,
     { update_id: 2, message: message({ text: `/start ${code}` }, { id: 77 }) },
     secret,
   );
   assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "2 people" });
-  await project.page("/_/remove", { form: { bot: BOT, id: "555" } });
+  await project.page("/remove", { form: { bot: BOT, id: "555" } });
   assert.deepEqual(project.registry().at(-1)!.payload.row.details, { "Let in": "1 person" });
 
   const before = project.registry().length;
-  await project.page("/_/disconnect", { form: { bot: BOT } });
+  await project.page("/disconnect", { form: { bot: BOT } });
   assert.deepEqual(project.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
@@ -878,7 +890,7 @@ test("connecting a bot registers the card again and then its row (a row stands u
 
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const project = fakeProject(undefined, "tg");
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   assert.deepEqual(project.registry()[0]!.payload.card, card({ kind: "ok" }, "Manage", "tg"));
   assert.deepEqual(project.registry()[1]!.payload.row, row("0 people", "tg"));
   const before = project.appended.length;
@@ -894,10 +906,10 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
 
 test("a Disconnect whose secret cannot be deleted says so, and the bot stays listed for another try", async () => {
   const project = fakeProject();
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   const before = project.registry().length;
   project.faults.deletes = true;
-  const failed = await project.page("/_/disconnect", { form: { bot: BOT } });
+  const failed = await project.page("/disconnect", { form: { bot: BOT } });
   assert.match(
     decodeURIComponent(failed.headers.get("location")!),
     /error=the secret store is unavailable/,
@@ -908,7 +920,7 @@ test("a Disconnect whose secret cannot be deleted says so, and the bot stays lis
   assert.equal(project.registry().length, before, "no row is taken away");
   project.faults.deletes = false;
   assert.equal(
-    (await project.page("/_/disconnect", { form: { bot: BOT } })).headers.get("location"),
+    (await project.page("/disconnect", { form: { bot: BOT } })).headers.get("location"),
     "./",
   );
   assert.deepEqual(project.secrets, {});
@@ -918,9 +930,9 @@ test("a Disconnect whose secret cannot be deleted says so, and the bot stays lis
 test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
   for (const finish of ["disconnect", "publish"] as const) {
     const project = fakeProject();
-    await project.page("/_/connect", { form: { token: TOKEN } });
+    await project.page("/connect", { form: { token: TOKEN } });
     project.faults.registry = 1;
-    const failed = await project.page("/_/disconnect", { form: { bot: BOT } });
+    const failed = await project.page("/disconnect", { form: { bot: BOT } });
     assert.match(
       decodeURIComponent(failed.headers.get("location")!),
       /error=the registry is unavailable/,
@@ -933,7 +945,7 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
     );
     assert.ok(!project.registry().some((event) => event.payload.row === null));
     if (finish === "disconnect") {
-      const again = await project.page("/_/disconnect", { form: { bot: BOT } });
+      const again = await project.page("/disconnect", { form: { bot: BOT } });
       assert.equal(again.headers.get("location"), "./", "not Unknown bot");
       assert.deepEqual(project.registry().at(-2), {
         type: CONNECTION_CONFIGURED,
@@ -963,11 +975,11 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
 
 test("a bot connected again after a Disconnect that did not finish keeps its row at the next publish", async () => {
   const project = fakeProject();
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   project.faults.registry = 1;
-  await project.page("/_/disconnect", { form: { bot: BOT } });
+  await project.page("/disconnect", { form: { bot: BOT } });
   assert.ok(project.kv[`telegram/removed/${BOT}`]);
-  await project.page("/_/connect", { form: { token: TOKEN } });
+  await project.page("/connect", { form: { token: TOKEN } });
   assert.equal(project.kv[`telegram/removed/${BOT}`], undefined);
   await project.publish(9);
   assert.deepEqual(

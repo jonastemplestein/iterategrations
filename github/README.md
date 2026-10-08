@@ -8,10 +8,10 @@ ever sends a placeholder naming the installation's secret, and iterate's egress 
 It is project code: one element, `github()`, in the `integrations` array of the project's config
 worker, which hands it the requests on the project's `github` routing slug, and every event.
 
-- **The page** (members only, at the project's `github` address, `/_/`): the URLs to paste into the
+- **The page** (members only, at the project's `github` address, `/`): the URLs to paste into the
   App's settings, a form for the App's ID and slug, a link that collects its private key and webhook
   secret, an **Install** button, and the installations with a Disconnect button.
-- **The setup URL** (the same address, `/callback`, members only): GitHub sends the person back here
+- **The setup URL** (the same address, `/oauth2/callback`, members only): GitHub sends the person back here
   after an install, and the page connects the installation.
 - **The webhook** (the same address, `/webhook`): GitHub's, checked with the App's webhook secret.
 - **The Dash:** the project's Integrations page shows a GitHub card ("Create a GitHub App and paste
@@ -57,7 +57,7 @@ async (itx) => {
 ### 2. Send the person to the page
 
 ```js
-async (itx) => itx.url({ routingSlug: "github", path: "/_/" });
+async (itx) => itx.url({ routingSlug: "github", path: "/" });
 ```
 
 Say: "Open this, sign in, and follow the steps." The page walks them through it:
@@ -66,7 +66,7 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    `https://github.com/organizations/<org>/settings/apps/new`, with (`<address>` is the project's
    `github` address, `itx.url({ routingSlug: "github" })`):
    - **Homepage URL:** the page's own address.
-   - **Setup URL:** `<address>/callback`, with **Redirect on update** ticked.
+   - **Setup URL:** `<address>/oauth2/callback`, with **Redirect on update** ticked.
    - **Webhook URL:** `<address>/webhook`, and a **webhook secret** they make up
      (`openssl rand -hex 32`).
    - **Permissions** and **events:** what the project needs, and no more. Ask the person what the

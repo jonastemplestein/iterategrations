@@ -28,9 +28,9 @@ export type Integration = {
 /** A project's own GitHub App, as an integration its worker hosts:
  *  `const integrations: Integration[] = [github()];`
  *
- *  On its routing slug it answers, for members only, the Connect GitHub page at `/_/` and the App's
- *  setup URL at `/callback`, and, for GitHub, the App's webhook at `/webhook` (checked with the
- *  App's webhook secret). Its install hook (`project/worker-updated`) lists it on the Dash's
+ *  On its routing slug it answers, for members only, the Connect GitHub page at `/` and the App's
+ *  setup URL at `/oauth2/callback`, and, for GitHub, the App's webhook at `/webhook` (checked with
+ *  the App's webhook secret). Its install hook (`project/worker-updated`) lists it on the Dash's
  *  Integrations page: the card, and a row per installation.
  *
  *  - `slug`: the routing slug to answer on. Default `github`. */
@@ -44,14 +44,12 @@ export function github(options: { slug?: string } = {}): Integration {
         using itx = host.getItx();
         return await receiveDelivery(request, itx);
       }
-      const page = pathname === "/_" || pathname.startsWith("/_/");
-      if (!page && pathname !== "/callback") return new Response("Not found\n", { status: 404 });
       const denied = host.auth.require(request);
       if (denied) return denied;
       using itx = host.getItx();
-      return page
-        ? await servePage(request, itx, routingSlug)
-        : await serveCallback(request, itx, routingSlug);
+      return pathname === "/oauth2/callback"
+        ? await serveCallback(request, itx, routingSlug)
+        : await servePage(request, itx, routingSlug);
     },
     async processEvent({ event, itx }) {
       if (event.type === WORKER_UPDATED)
