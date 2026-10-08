@@ -4,15 +4,7 @@
 // request. `host` is the worker hosting the package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
-import {
-  chatgpt,
-  chatgptBody,
-  chatgptHeaders,
-  chatgptModels,
-  chatgptRequest,
-  chatgptText,
-  EXCHANGE_SOURCE,
-} from "../dist/chatgpt.js";
+import { chatgpt } from "../dist/chatgpt.js";
 
 const b64 = (value: unknown): string =>
   btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -84,8 +76,6 @@ function fakeProject(options: { scope?: string; apiStatus?: number; slug?: strin
         });
       if (origin === "https://api.openai.com") {
         if (options.apiStatus) return new Response("nope", { status: options.apiStatus });
-        if (pathname === "/v1/models")
-          return Response.json({ data: [{ id: "gpt-5.5" }, { id: "gpt-5.4" }] });
         return new Response(
           [
             `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "re" })}\n\n`,
@@ -204,7 +194,6 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   });
   assert.deepEqual(secret.options.urls, ["https://api.openai.com", "https://auth.openai.com"]);
   assert.equal(secret.options.refresh.kind, "worker");
-  assert.equal(secret.options.refresh.source, EXCHANGE_SOURCE);
   assert.equal(project.kv["chatgpt/pending"], undefined, "the sign-in is spent");
 
   // the exchange names OpenAI's issued client, the verifier kept here, and the resource
@@ -220,7 +209,6 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   html = await (await project.page("/")).text();
   assert.match(html, /jonas@example\.com/);
   assert.match(html, /pro/);
-  assert.match(html, /gpt-5\.5/);
   assert.doesNotMatch(html, /access-1|refresh-1/, "no token is ever shown");
 });
 
@@ -263,11 +251,30 @@ test("test it asks OpenAI, and disconnect forgets everything", async () => {
   await project.paste(callbackFor(await (await project.page("/")).text()));
 
   const tested = await project.page("/test", { method: "POST" });
-  assert.match(decodeURIComponent(tested.headers.get("location")!), /gpt-5\.5: ready/);
+  assert.match(decodeURIComponent(tested.headers.get("location")!), /gpt-6\.1-sol: ready/);
   const sent = (project.calls as Call[]).find(
     (c) => c.url === "https://api.openai.com/v1/responses",
   )!;
   assert.equal(sent.method, "POST");
+  // the token is a placeholder, and the body is one a plan's token takes
+  assert.equal(
+    sent.headers.get("authorization"),
+    'Bearer getSecret("/secrets/chatgpt", { field: "accessToken" })',
+  );
+  const body = JSON.parse(sent.body);
+  assert.equal(body.stream, true);
+  assert.equal(body.store, false);
+  assert.ok(Array.isArray(body.input));
+
+  // a refusal is shown with what OpenAI said
+  const refused = fakeProject({ apiStatus: 429 });
+  await refused.page("/start", { method: "POST" });
+  await refused.paste(callbackFor(await (await refused.page("/")).text()));
+  const failed = await refused.page("/test", { method: "POST" });
+  assert.match(
+    decodeURIComponent(failed.headers.get("location")!),
+    /error=OpenAI answered 429: nope/,
+  );
 
   await project.page("/disconnect", { method: "POST" });
   assert.deepEqual(project.secrets, {});
@@ -276,68 +283,14 @@ test("test it asks OpenAI, and disconnect forgets everything", async () => {
   assert.equal((await project.page("/anything-else", { method: "POST" })).status, 404);
 });
 
-test("a model request carries a placeholder for the token, and a body the plan takes", async () => {
-  assert.deepEqual(chatgptHeaders(), {
-    authorization: 'Bearer getSecret("/secrets/chatgpt", { field: "accessToken" })',
-    "content-type": "application/json",
-    accept: "text/event-stream",
-  });
-
-  assert.deepEqual(
-    chatgptBody({
-      model: "m",
-      input: [],
-      max_output_tokens: 5,
-      temperature: 1,
-      top_p: 1,
-      user: "u",
-      previous_response_id: "r",
-      store: true,
-      stream: false,
-      tools: [{ type: "function" }],
-    }),
-    { model: "m", input: [], stream: true, store: false, tools: [{ type: "function" }] },
-  );
-  assert.deepEqual(chatgptBody({ model: "m", input: "hi" }).input, [
-    { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
-  ]);
-
-  const request = chatgptRequest({ model: "gpt-5.5", input: [] });
-  assert.equal(request.url, "https://api.openai.com/v1/responses");
-  assert.equal(request.method, "POST");
-});
-
-test("chatgptText reads the stream, models lists ids, and a failure says what OpenAI said", async () => {
-  const project = fakeProject();
-  assert.equal(await chatgptText(project.itx, { model: "gpt-5.5", input: "hi" }), "ready");
-  const body = JSON.parse(project.calls.at(-1)!.body);
-  assert.deepEqual(body.input, [
-    { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
-  ]);
-  assert.deepEqual(await chatgptModels(project.itx), ["gpt-5.5", "gpt-5.4"]);
-  // a plan's token gets Codex's shape, and hidden models stay unlisted
-  const codexShaped: any = {
-    fetch: async () =>
-      Response.json({
-        models: [
-          { slug: "gpt-6.1-sol", visibility: "list" },
-          { slug: "gpt-reserve", visibility: "hide" },
-        ],
-      }),
-  };
-  assert.deepEqual(await chatgptModels(codexShaped), ["gpt-6.1-sol"]);
-
-  const broken = fakeProject({ apiStatus: 429 });
-  await assert.rejects(
-    chatgptText(broken.itx, { model: "gpt-5.5", input: "hi" }),
-    /chatgpt\/gpt-5\.5 429: nope/,
-  );
-});
-
-// The exchange code, run as the platform runs it: an ES module whose `exchange(material, fetch)`
-// returns the next material.
+// The exchange code the page keeps with the secret, run as the platform runs it: an ES module
+// whose `exchange(material, fetch)` returns the next material.
 async function runExchange(material: any, fetch: (url: string, init: any) => Promise<Response>) {
-  const url = `data:text/javascript;base64,${Buffer.from(EXCHANGE_SOURCE).toString("base64")}`;
+  const project = fakeProject();
+  await project.page("/start", { method: "POST" });
+  await project.paste(callbackFor(await (await project.page("/")).text()));
+  const source: string = project.secrets["/secrets/chatgpt"]!.options.refresh.source;
+  const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   const { exchange } = await import(url);
   return exchange(material, fetch);
 }
