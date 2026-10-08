@@ -119,7 +119,7 @@ async function render(
   const callback = `${here}/oauth2/callback`;
   const sent =
     app?.redirectUri && app.redirectUri !== callback
-      ? `<p class="warn">With the last Connect, the platform sent Google this one: the project's address under iterate's ingress, which a primary hostname never replaces. Add it too:</p>${copyRow(app.redirectUri)}`
+      ? `<p class="warn">With the last Connect, the platform sent Google this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(app.redirectUri)}`
       : "";
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>

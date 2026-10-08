@@ -136,12 +136,13 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 
 ## Good to know
 
-- **The callback URI is the project's address under iterate's ingress**, `x--<project>.<…>`, never a
-  primary hostname: the platform composes it, and sends it to X with each Connect. A rename of the
-  project moves it, and the app's settings at X must follow. X refuses a callback that is not
-  registered exactly, to the trailing slash. A project with a primary hostname serves the page there,
-  under another address: after its first Connect, the page also shows the URI the platform sent, to
-  add to the app.
+- **The platform composes the callback URI** and sends it to X with each Connect: on the hostname
+  the deployment's config pins to the project when it has one (then it is the page's own address),
+  else the project's address under iterate's ingress, `x--<project>.<…>`; never a hostname the
+  project claimed on the Dash. A rename of the project moves the ingress form, and the app's settings
+  at X must follow. X refuses a callback that is not registered exactly, to the trailing slash. A
+  project that claimed a primary hostname serves the page there, under another address: after its
+  first Connect, the page also shows the URI the platform sent, to add to the app.
 - **The app must be a confidential client.** Only a Web App, Automated App or Bot has a Client
   Secret, which the platform sends to X's token endpoint in a Basic header at the exchange and at
   every refresh. A Native App or a Single Page App is a public client, which this page does not

@@ -133,12 +133,14 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 
 ## Good to know
 
-- **The redirect URI is the project's address under iterate's ingress**, `google--<project>.<…>`,
-  never a primary hostname: the platform composes it, and sends it to Google with each Connect. A
-  rename of the project moves it, and the client at Google must follow. Google refuses a redirect
-  URI that is not registered exactly (`redirect_uri_mismatch`). A project with a primary hostname
-  serves the page there, under another address: after its first Connect, the page also shows the URI
-  the platform sent, to add to the client.
+- **The platform composes the redirect URI** and sends it to Google with each Connect: on the
+  hostname the deployment's config pins to the project when it has one (then it is the page's own
+  address), else the project's address under iterate's ingress, `google--<project>.<…>`; never a
+  hostname the project claimed on the Dash. A rename of the project moves the ingress form, and the
+  client at Google must follow. Google refuses a redirect URI that is not registered exactly
+  (`redirect_uri_mismatch`). A project that claimed a primary hostname serves the page there, under
+  another address: after its first Connect, the page also shows the URI the platform sent, to add to
+  the client.
 - **One client secret serves every account.** Each account's secret holds the client ID and a
   placeholder for the client secret,
   `getSecret("/secrets/own-google-app", { field: "clientSecret" })`, which the platform reads at each
