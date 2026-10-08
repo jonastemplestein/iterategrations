@@ -9,14 +9,16 @@ It is project code: one element, `github()`, in the `integrations` array of the 
 worker, which hands it the requests on the project's `github` routing slug, and every event.
 
 - **The page** (members only, at the project's `github` address, `/`): the URLs to paste into the
-  App's settings, a form for the App's ID and slug, a link that collects its private key and webhook
-  secret, an **Install** button, and the installations with a Disconnect button.
+  App's settings, a link that collects the App (its ID, slug, private key and webhook secret, on one
+  form of iterate's Dash), an **Install** button, a form that connects an installation that exists
+  already, and the installations with a Disconnect button.
 - **The setup URL** (the same address, `/oauth2/callback`, members only): GitHub sends the person back here
   after an install, and the page connects the installation.
 - **The webhook** (the same address, `/webhook`): GitHub's, checked with the App's webhook secret.
 - **The Dash:** the project's Integrations page shows a GitHub card ("Create a GitHub App and paste
-  its secrets" until the App is set up) and a row per installation: its account, and buttons to the
-  page and to the account on GitHub.
+  its secrets" until the App is saved) and a row per installation: its account, and buttons to the
+  page and to the account on GitHub. The card changes when the App is saved or deleted: the package
+  registers it again on that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
 
 The deployment's own GitHub App (iterate's, on the Dash's Connect sheet) is another thing: it is
 shared by every project, and the platform keeps it. This package is for an App the project owns.
@@ -78,13 +80,19 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    The page shows each URL with a Copy button. Then they press **Generate a private key**, and
    GitHub downloads a `.pem` file.
 
-2. **Paste the App ID and slug** on the page (both public, kept in the project's kv). The slug is
-   the end of the App's public link, `https://github.com/apps/<slug>`; the link itself works too.
-3. **Save the private key and the webhook secret** through the page's link: a page of iterate's
-   Dash, made by `itx.secrets.collectFromUser`, keeps them as `/secrets/own-github-app`, pinned to
-   `github.com` and `api.github.com`. They never pass through the project's code.
-4. **Install**: GitHub asks which account and which repositories, then sends them back to the page,
-   which connects the installation and shows its account.
+2. **Save the App** through the page's link: a page of iterate's Dash, made by
+   `itx.secrets.collectFromUser`, asks for the App ID, the slug, the private key and the webhook
+   secret on one form, and keeps them as one secret, `/secrets/own-github-app`, pinned to
+   `github.com` and `api.github.com`. The App ID and the slug (the end of the App's public link,
+   `https://github.com/apps/<slug>`) are public fields of that secret: the form shows them as plain
+   text and checks their shapes, and the project reads them from its list of secrets. The key and
+   the webhook secret never pass through the project's code.
+3. **Install**: GitHub asks which account and which repositories, then sends them back to the page,
+   which connects the installation and shows its account. GitHub comes back to the page only after
+   a new install or a change to one, so an App that is installed already (a project that moves to
+   this package) is connected by its installation ID instead, in the form under **Install**: the
+   number at the end of `https://github.com/settings/installations/<id>`, or for an organization
+   `https://github.com/organizations/<org>/settings/installations/<id>`.
 
 Then write the App's name, its installations and where its page is into the project's `AGENTS.md`.
 
@@ -148,25 +156,32 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
 - **The URLs are on the project's host.** Renaming the project moves its hosts, and GitHub keeps
   pointing at the old ones. Set a primary hostname for the project before you create an App that
   should outlive a rename, and paste the URLs the page shows on it.
-- **One App secret serves every installation.** An installation's secret holds the App ID and a
-  placeholder for the key, `getSecret("/secrets/own-github-app", { field: "privateKey" })`, which
-  the platform reads at each mint. To rotate the key, generate a new one at GitHub, save it through
-  the page's link (**Replace them**), then delete the old one at GitHub.
+- **One App secret serves every installation.** The App is one secret, `/secrets/own-github-app`:
+  `appId` and `slug`, public fields that the catalog (`itx.secrets.list()`) answers, and
+  `privateKey` and `webhookSecret`. The package keeps no copy of the ID or the slug. A secret there
+  without the public fields (set by hand, or saved by an older version of this package) is not an
+  App: the page says so, and asks to save the App again. An installation's secret holds the App ID
+  and a placeholder for the key, `getSecret("/secrets/own-github-app", { field: "privateKey" })`,
+  which the platform reads at each mint. To rotate the key, generate a new one at GitHub, save the
+  App again through the page's link (**Replace it**: the form asks for all four values, so a lost
+  webhook secret is replaced in the App's settings too), then delete the old key at GitHub.
 - **No admin proof.** iterate's shared App proves that the person administers an account before an
   installation counts for a project. This App is the project's own: it holds the App's key, so it
   can mint for any installation of its App already. The page binds GitHub's redirect to an install
   it started instead: a nonce in the install link's `state`, good for an hour (or, for a request,
   until it is answered). An installation claims its nonce once, as an `own-github/nonce-used`
   event on `/integrations/own-github` keyed by the nonce, before any secret is written, so two
-  redirects with one nonce never both go on.
+  redirects with one nonce never both go on. The form that connects an installation by its ID needs
+  no nonce: it is a member's own POST from the page, as Install is, and the proof through the App's
+  key refuses an installation of another App.
 - **An update proves itself first.** GitHub sends the person back after every change to an
   installation. The page proves it through a secret of its own,
   `/secrets/own-github-<id>-proof`, and changes the installation's secret only once the proof has
-  passed, so a failure at GitHub, or a wrong App ID saved on the page, leaves a working
+  passed, so a failure at GitHub, or a wrong App ID saved through the link, leaves a working
   installation as it was. The proof's secret goes either way.
 - **The first ping fails.** GitHub sends a `ping` when the App is created, before its webhook
   secret is saved here, so it is refused. Redeliver it from the App's **Advanced** tab once the
-  secrets are saved, if you want to see one go through. A delivery for an installation the page did
+  App is saved, if you want to see one go through. A delivery for an installation the page did
   not connect is acknowledged and dropped.
 - **An installation an owner must approve.** When the person installs on an organization they do not
   own, GitHub asks an owner, and the page shows a request waiting, which keeps its nonce. When GitHub

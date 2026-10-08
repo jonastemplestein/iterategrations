@@ -1,15 +1,16 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a delete of a
-// missing secret refused as SECRET_NOT_SET, and any delete ending the OAuth attempt in flight, as the
-// platform's do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the
-// platform runs them for a client of the project's own (a signed state, the redirect composed under
-// the ingress, the client secret's placeholder refused unless its secret is pinned to the token
-// endpoint, the account named at `account`'s endpoint (a pretend Google's userinfo, called with the
-// new token) and another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and
-// the same callback again answering the same), a kv, appends that refuse a key used twice for
-// another event (as the platform does; the same event again is a no-op), and its egress: the global
-// `fetch` of a loaded worker, which records every call, since the package makes none. `faults`
-// makes a secret's delete or an append on /integrations fail. `host` is the worker hosting the
-// package: a scope per `getItx`, counted.
+// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// answers the public fields a set named and never a secret one, a delete of a missing secret
+// refused as SECRET_NOT_SET, and any delete ending the OAuth attempt in flight, as the platform's
+// do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the platform runs
+// them for a client of the project's own (a signed state, the redirect composed under the ingress,
+// the client secret's placeholder refused unless its secret is pinned to the token endpoint, the
+// account named at `account`'s endpoint (a pretend Google's userinfo, called with the new token)
+// and another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and the same
+// callback again answering the same), a kv, appends that refuse a key used twice for another event
+// (as the platform does; the same event again is a no-op), and its egress: the global `fetch` of a
+// loaded worker, which records every call, since the package makes none. `faults` makes a secret's
+// delete or an append on /integrations fail. `host` is the worker hosting the package: a scope per
+// `getItx`, counted.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "vite-plus/test";
@@ -17,7 +18,14 @@ import { google } from "../dist/google.js";
 
 const ORIGIN = "https://google--iterate.example";
 const CLIENT_ID = "1234-fake.apps.googleusercontent.com";
+/** The client as the Dash's form saves it: one secret, its ID a public field beside its secret. */
 const APP_SECRET = {
+  material: { clientId: CLIENT_ID, clientSecret: "GOCSPX-a-made-up-secret" },
+  options: { urls: ["https://oauth2.googleapis.com"], public: ["clientId"] },
+};
+/** The secret alone, with no public client ID: set by hand, or saved by the package before it asked
+ *  for the ID on the same form. */
+const SECRET_ALONE = {
   material: { clientSecret: "GOCSPX-a-made-up-secret" },
   options: { urls: ["https://oauth2.googleapis.com"] },
 };
@@ -31,6 +39,7 @@ const USERINFO = "https://www.googleapis.com/oauth2/v2/userinfo";
 const CONFIGURED = "events.iterate.com/integration/configured";
 const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
 const DASH_LINK = "https://dash.example/collect-secret/iterate?path=%2Fsecrets%2Fown-google-app";
+const PATTERN = String.raw`\d{1,30}-[0-9a-z]{1,64}\.apps\.googleusercontent\.com`;
 /** What Google grants for `openid email profile`: the long names of the last two. */
 const GRANTED = [
   "openid",
@@ -101,7 +110,14 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
           throw Object.assign(new Error(`secret ${path}: never set`), { code: "SECRET_NOT_SET" });
         delete secrets[path];
       },
-      list: async () => Object.keys(secrets).map((path) => ({ path })),
+      // the catalog: a secret's public fields, as its set named them, and never a secret one
+      list: async () =>
+        Object.entries(secrets).map(([path, { material, options }]) => ({
+          path,
+          public: options.public
+            ? Object.fromEntries(options.public.map((name: string) => [name, material[name]]))
+            : undefined,
+        })),
       collectFromUser: async (input: { path: string }) => {
         collected.push(input);
         return { path: input.path, url: DASH_LINK };
@@ -252,9 +268,8 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
       }),
       requireMember,
     );
-  /** The client made at Google, its ID saved on the page, its secret saved on the Dash. */
+  /** The client made at Google, and saved on the Dash's one form: its ID public, beside its secret. */
   const setUp = async () => {
-    await page("/app", { form: { clientId: CLIENT_ID } });
     secrets["/secrets/own-google-app"] = structuredClone(APP_SECRET);
   };
   /** Press Connect, or Reconnect on `connection`: the state in the link to Google. */
@@ -434,7 +449,6 @@ test("the page and the callback are for members: whatever auth.require answers i
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
-    ["/app", { clientId: CLIENT_ID }],
     ["/connect", {}],
     ["/disconnect", { id: "0a1b2c3d" }],
     ["/oauth2/callback?code=x&state=y", undefined],
@@ -479,11 +493,11 @@ test("the page shows the redirect URI to register at Google, from the request's 
   assert.doesNotMatch(html, /onclick=/);
 });
 
-test("the page links to the Dash's collection of the client secret, which never passes through this code", async () => {
+test("the page links to the Dash's one form for the client, its ID public beside its secret, which never passes through this code; the form checks the ID's shape as the browser does", async () => {
   const project = fakeProject();
   const html = await (await project.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
-  assert.match(html, />Save it</);
+  assert.match(html, />Save the client</);
   assert.match(project.collected[0]!.description, /GOCSPX-/);
   assert.deepEqual(
     project.collected.map((input) => ({ ...input, description: undefined })),
@@ -492,36 +506,57 @@ test("the page links to the Dash's collection of the client secret, which never 
         path: "/secrets/own-google-app",
         egress: { urls: ["https://oauth2.googleapis.com"] },
         description: undefined,
-        fields: [{ name: "clientSecret", label: "Client secret" }],
+        fields: [
+          {
+            name: "clientId",
+            label: "Client ID",
+            public: true,
+            placeholder: "1234-abc.apps.googleusercontent.com",
+            pattern: PATTERN,
+          },
+          { name: "clientSecret", label: "Client secret" },
+        ],
       },
     ],
   );
+  // HTML's pattern takes the whole value, compiled with the `v` flag
+  const shape = new RegExp(`^(?:${PATTERN})$`, "v");
+  for (const id of [CLIENT_ID, "1234-abc.apps.googleusercontent.com"]) assert.match(id, shape);
+  for (const value of ["GOCSPX-a-made-up-secret", "1234-fake.apps.example.com", ""])
+    assert.doesNotMatch(value, shape);
   await project.setUp();
   assert.match(await (await project.page("/")).text(), />Replace it</);
 });
 
-test("the client ID is kept in the kv; a bad one is shown as an error", async () => {
+test("the client is read from the catalog's public field: the page shows its ID, Connect sends it, and the kv keeps no copy", async () => {
   const project = fakeProject();
-  const saved = await project.page("/app", { form: { clientId: ` ${CLIENT_ID} ` } });
-  assert.equal(saved.headers.get("location"), "./");
-  assert.deepEqual(JSON.parse(project.kv["own-google/app"]!), { clientId: CLIENT_ID });
-  for (const clientId of ["GOCSPX-a-made-up-secret", "", "1234-fake.apps.example.com"])
-    assert.match(
-      location(await project.page("/app", { form: { clientId } })),
-      /error=The client ID ends in \.apps\.googleusercontent\.com/,
-      clientId,
-    );
-  assert.deepEqual(JSON.parse(project.kv["own-google/app"]!), { clientId: CLIENT_ID });
+  await project.setUp();
+  const html = await (await project.page("/")).text();
+  assert.match(html, /Client ID 1234-fake\.apps\.googleusercontent\.com/);
+  assert.doesNotMatch(html, /has no public client ID/);
+  await project.start();
+  assert.equal(project.begun[0]!.options.clientId, CLIENT_ID);
+  assert.ok(!Object.values(project.kv).some((value) => value.includes(CLIENT_ID)));
+});
+
+test("a secret without the public field is not set up: the page asks to save the client again, and Connect is refused", async () => {
+  const project = fakeProject();
+  project.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
+  const html = await (await project.page("/")).text();
+  assert.match(html, /has no public client ID\. Save the client again/);
+  assert.match(html, />Save the client</);
+  assert.doesNotMatch(html, /Client ID 1234/);
+  assert.doesNotMatch(html, /action="connect"/);
   assert.match(
-    await (await project.page("/")).text(),
-    /Client ID 1234-fake\.apps\.googleusercontent\.com/,
+    location(await project.page("/connect", { form: {} })),
+    /error=Save the client first/,
   );
+  assert.deepEqual(project.begun, []);
 });
 
 test("no other site can frame the page's answers or the callback's", async () => {
   const { project, connection } = await connected();
   const answers = [
-    await project.page("/app", { form: { clientId: CLIENT_ID } }),
     await project.page("/connect", { form: {} }),
     await project.page("/disconnect", { form: { id: "ffffffff" } }),
     await project.callback({ code: "x", state: "y" }),
@@ -535,19 +570,14 @@ test("no other site can frame the page's answers or the callback's", async () =>
 
 // ------------------------------------------------------------------ connect
 
-test("Connect needs the client ID and its secret; then it begins OAuth with Google's endpoints, the callback, the scopes, offline access, the client secret's placeholder and the userinfo endpoint that names the account, and keeps the attempt by its state", async () => {
+test("Connect needs the client; then it begins OAuth with Google's endpoints, the callback, the scopes, offline access, the client secret's placeholder and the userinfo endpoint that names the account, and keeps the attempt by its state", async () => {
   const project = fakeProject();
   assert.match(
     location(await project.page("/connect", { form: {} })),
-    /error=Save the client ID first/,
-  );
-  await project.page("/app", { form: { clientId: CLIENT_ID } });
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client secret first/,
+    /error=Save the client first/,
   );
   assert.deepEqual(project.begun, []);
-  project.secrets["/secrets/own-google-app"] = structuredClone(APP_SECRET);
+  await project.setUp();
   const res = await project.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
@@ -634,12 +664,9 @@ test("after a Connect whose redirect URI is not the page's own address (a primar
   assert.match(html, /the platform sent Google this one/);
   assert.ok(html.includes('data-copy="https://google--iterate.ingress.example/oauth2/callback"'));
   assert.equal(
-    JSON.parse(project.kv["own-google/app"]!).redirectUri,
+    project.kv["own-google/redirect-uri"],
     "https://google--iterate.ingress.example/oauth2/callback",
   );
-  // saving the client ID again keeps it
-  await project.page("/app", { form: { clientId: CLIENT_ID } });
-  assert.match(await (await project.page("/")).text(), /the platform sent Google this one/);
 });
 
 // --------------------------------------------------------------- the callback
@@ -1012,16 +1039,20 @@ test("the install hook registers the card and a row per account, keyed by the ev
   ]);
 });
 
-test("the card asks for the client and its secret, then for an account, then is ok", async () => {
+test("the card asks for the client, then for an account, then is ok", async () => {
   const project = fakeProject();
   const cardAt = async (offset: number) => {
     await project.publish(offset);
     return project.registry().at(-1)!.payload.card;
   };
   assert.deepEqual(await cardAt(1), NO_CLIENT);
-  await project.page("/app", { form: { clientId: CLIENT_ID } });
-  assert.deepEqual(await cardAt(2), NO_CLIENT, "the client ID alone is not enough");
-  project.secrets["/secrets/own-google-app"] = structuredClone(APP_SECRET);
+  project.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
+  assert.deepEqual(
+    await cardAt(2),
+    NO_CLIENT,
+    "the secret without its public client ID is no client",
+  );
+  await project.setUp();
   assert.deepEqual(await cardAt(3), NO_ACCOUNT);
   await project.connect(ADA);
   await project.publish(4);
@@ -1050,12 +1081,49 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
     path: "/oauth2/callback",
   });
   const count = project.appended.length;
-  for (const type of ["events.iterate.com/secret/set", "events.iterate.com/integration/configured"])
-    await project.integration.processEvent!({
-      event: { type, path: "/", offset: 2 },
+  for (const event of [
+    // another secret's fact, the client's own on its secret's path, and a fact with no payload
+    { type: "events.iterate.com/secret/set", path: "/", payload: { path: "/secrets/other" } },
+    {
+      type: "events.iterate.com/secret/set",
+      path: "/secrets/own-google-app",
+      payload: { path: "/secrets/own-google-app" },
+    },
+    { type: "events.iterate.com/secret/deleted", path: "/" },
+    { type: "events.iterate.com/integration/configured", path: "/integrations" },
+  ])
+    await project.integration.processEvent!({ event: { ...event, offset: 2 }, itx: project.itx });
+  assert.equal(project.appended.length, count);
+});
+
+test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
+  const project = fakeProject();
+  const fact = (type: string, offset: number, payload: object) =>
+    project.integration.processEvent!({
+      event: { type, path: "/", offset, payload },
       itx: project.itx,
     });
-  assert.equal(project.appended.length, count);
+  await project.setUp();
+  for (let attempt = 0; attempt < 2; attempt++)
+    await fact("events.iterate.com/secret/set", 7, {
+      path: "/secrets/own-google-app",
+      urls: ["https://oauth2.googleapis.com"],
+      public: { clientId: CLIENT_ID },
+    });
+  delete project.secrets["/secrets/own-google-app"];
+  await fact("events.iterate.com/secret/deleted", 8, { path: "/secrets/own-google-app" });
+  assert.deepEqual(project.registry(), [
+    {
+      type: CONFIGURED,
+      idempotencyKey: "google:registry:/@7",
+      payload: { integration: "google", card: NO_ACCOUNT },
+    },
+    {
+      type: CONFIGURED,
+      idempotencyKey: "google:registry:/@8",
+      payload: { integration: "google", card: NO_CLIENT },
+    },
+  ]);
 });
 
 test("a long address and many scopes are cut to the registry's limits", async () => {

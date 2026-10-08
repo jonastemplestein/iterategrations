@@ -3,6 +3,7 @@ import {
   APP_PIN,
   APP_SECRET,
   CONNECTION,
+  REDIRECT_URI,
   REMOVED,
   attemptOf,
   connectAccount,
@@ -11,7 +12,6 @@ import {
   hasAppSecret,
   listAccounts,
   readApp,
-  saveApp,
   scopesShown,
   secretOf,
   startConnect,
@@ -87,22 +87,36 @@ const flashOf = (key: "error" | "connected", text: string): string =>
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** What the collection page on the Dash shows the person, above its one field. */
-const COLLECT_DESCRIPTION = `Your Google OAuth client's secret.
+/** What the collection page on the Dash shows the person, above its two fields. */
+const COLLECT_DESCRIPTION = `Your Google OAuth client: its ID and its secret.
 
-- **Client secret:** Google showed it when you created the client, beside the client ID. It starts with \`GOCSPX-\`. If it is lost, add a new secret on the client's page in the [Google Cloud console](https://console.cloud.google.com/apis/credentials).
+- **Client ID:** Google showed it when you created the client. It ends in \`.apps.googleusercontent.com\`.
+- **Client secret:** beside the client ID. It starts with \`GOCSPX-\`. If it is lost, add a new secret on the client's page in the [Google Cloud console](https://console.cloud.google.com/apis/credentials).
 
-The platform sends it only to Google's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
+The platform sends the secret only to Google's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
 
-/** The link to the Dash's page that collects the client secret into `/secrets/own-google-app`. It
- *  only builds a URL, so the page asks for a fresh one each time it renders. */
+/** The client's two fields: its ID, public, in the shape Google gives it (HTML's `pattern`, which
+ *  the browser compiles with the `v` flag), and its secret. */
+const FIELDS = [
+  {
+    name: "clientId",
+    label: "Client ID",
+    public: true,
+    placeholder: "1234-abc.apps.googleusercontent.com",
+    pattern: String.raw`\d{1,30}-[0-9a-z]{1,64}\.apps\.googleusercontent\.com`,
+  },
+  { name: "clientSecret", label: "Client secret" },
+];
+
+/** The link to the Dash's page that collects the client into `/secrets/own-google-app`, on one
+ *  form. It only builds a URL, so the page asks for a fresh one each time it renders. */
 const collectLink = (itx: GoogleItx): Promise<string> =>
   itx.secrets
     .collectFromUser({
       path: APP_SECRET,
       egress: { urls: APP_PIN },
       description: COLLECT_DESCRIPTION,
-      fields: [{ name: "clientSecret", label: "Client secret" }],
+      fields: FIELDS,
     })
     .then((link) => link.url);
 
@@ -113,13 +127,15 @@ async function render(
   flash: string,
 ): Promise<string> {
   const app = await readApp(itx);
-  const secret = await hasAppSecret(itx);
+  // a secret saved without the public client ID: by hand, or before the form asked for it
+  const incomplete = !app && (await hasAppSecret(itx));
   const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
   const accounts = await listAccounts(itx);
   const callback = `${here}/oauth2/callback`;
+  const redirectUri = await itx.kv.get(REDIRECT_URI);
   const sent =
-    app?.redirectUri && app.redirectUri !== callback
-      ? `<p class="warn">With the last Connect, the platform sent Google this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(app.redirectUri)}`
+    redirectUri && redirectUri !== callback
+      ? `<p class="warn">With the last Connect, the platform sent Google this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(redirectUri)}`
       : "";
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>
@@ -129,34 +145,31 @@ async function render(
       <li><b>Name:</b> any name; the project's is a good one.</li>
       <li><b>Authorized redirect URIs:</b> add this one, exactly:${copyRow(callback)}${sent}</li>
     </ul>
-    <p>Press <b>Create</b>. Google shows the <b>Client ID</b> and the <b>Client secret</b>: keep them for steps 2 and 3.</p>
+    <p>Press <b>Create</b>. Google shows the <b>Client ID</b> and the <b>Client secret</b>: keep them for step 2.</p>
     <p>Before the first client, Google asks for the <b>OAuth consent screen</b>: the app's name, and who may use it. While the app's publishing status is <b>Testing</b>, only its test users can connect, and a refresh token for more than an account's name and address lasts 7 days: add each account as a test user, or publish the app. An app of a Google Workspace organization can be <b>Internal</b>, for the organization's own accounts. Then enable each API the scopes need (the Gmail API, the Google Calendar API, …) under <b>APIs &amp; Services</b>, <b>Library</b>.</p>
   </section>`;
   const step2 = `<section>
-    <h2>2. The client ID</h2>
-    ${app ? `<p class="ok">Client ID ${esc(app.clientId)}</p>` : ""}
-    <form method="post" action="app" class="block">
-      <input name="clientId" placeholder="Client ID, e.g. 1234-abc.apps.googleusercontent.com" autocomplete="off" required value="${esc(app?.clientId ?? "")}" />
-      <button>Save</button>
-    </form>
-    <p class="muted">It is public. It is kept in the project's kv.</p>
-  </section>`;
-  const step3 = `<section>
-    <h2>3. The client secret</h2>
-    ${secret ? `<p class="ok">Saved as the project's secret <code>${APP_SECRET}</code>.</p>` : ""}
+    <h2>2. Save the client</h2>
+    ${
+      app
+        ? `<p class="ok">Client ID ${esc(app.clientId)}</p>`
+        : incomplete
+          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
+          : ""
+    }
     ${
       typeof link === "string"
-        ? `<p><a class="button" href="${esc(link)}">${secret ? "Replace it" : "Save it"}</a></p>${copyRow(link)}`
+        ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the client"}</a></p>${copyRow(link)}`
         : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
     }
-    <p class="muted">The link opens a page of iterate's Dash, which asks for the client secret and keeps it as <code>${APP_SECRET}</code>, pinned to oauth2.googleapis.com. It never passes through this page.</p>
+    <p class="muted">The link opens a page of iterate's Dash, which asks for the client ID and the client secret, and keeps them as <code>${APP_SECRET}</code>, pinned to oauth2.googleapis.com. The secret never passes through this page.</p>
   </section>`;
-  const step4 = `<section>
-    <h2>4. Connect an account</h2>
+  const step3 = `<section>
+    <h2>3. Connect an account</h2>
     ${
-      app && secret
+      app
         ? `<p>${post("connect", {}, "Connect an account")}</p><p class="muted">Google asks which account, and for its consent, then sends you back here. Connect again to add another account.</p>`
-        : `<p class="muted">First save the client ID (2) and the client secret (3).</p>`
+        : `<p class="muted">First save the client (2).</p>`
     }
     <p class="muted">It asks Google for ${settings.scopes.map((scope) => `<code>${esc(scope)}</code>`).join(" ")}.</p>
   </section>`;
@@ -168,18 +181,18 @@ async function render(
         )
         .join("")
     : `<p class="muted">None yet.</p>`;
-  const step5 = `<section>
+  const listed = `<section>
     <h2>Accounts</h2>
     ${list}
     <p class="muted">Reconnect asks Google again for the same account: for more scopes, or when its refresh token has stopped working. Disconnect deletes the account's secret and forgets it here. The access stays granted at Google until the account removes it, at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
   </section>`;
-  return `${flash}${step1}${step2}${step3}${step4}${step5}`;
+  return `${flash}${step1}${step2}${step3}${listed}`;
 }
 
-/** The members-only page at `/`: the redirect URI to register at Google, the client ID, the link
- *  that collects the client secret, Connect, and the accounts with Reconnect and Disconnect. Every
- *  write is a plain form POST, answered with a redirect back to the page; Connect's and Reconnect's
- *  go on to Google. */
+/** The members-only page at `/`: the redirect URI to register at Google, the link that collects the
+ *  client on the Dash, Connect, and the accounts with Reconnect and Disconnect. Every write is a
+ *  plain form POST, answered with a redirect back to the page; Connect's and Reconnect's go on to
+ *  Google. */
 export async function servePage(
   request: Request,
   itx: GoogleItx,
@@ -221,11 +234,6 @@ export async function servePage(
     return typeof value === "string" ? value : "";
   };
   try {
-    if (path === "app") {
-      await saveApp(itx, field("clientId"));
-      await registerCard(itx, settings.slug);
-      return redirect();
-    }
     if (path === "connect") {
       // Connect makes a connection; Reconnect names the one it asks again for
       const connection = field("id");

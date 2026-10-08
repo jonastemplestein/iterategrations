@@ -1,6 +1,6 @@
 import { SCOPES, URLS, type XItx, type Settings } from "./app.js";
 import { servePage, serveCallback } from "./page.js";
-import { registerAll, WORKER_UPDATED } from "./registry.js";
+import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
 
 export { APP_PIN, APP_SECRET, SCOPES, URLS, placeholder, secretOf } from "./app.js";
 export type { Account, App, XItx, OAuthOptions } from "./app.js";
@@ -33,7 +33,8 @@ const unique = (list: string[]): string[] => [
  *
  *  On its routing slug it answers, for members only, the Connect X page at `/` and X's return at
  *  `/oauth2/callback`; any other path is a 404. Its install hook (`project/worker-updated`) lists it
- *  on the Dash's Integrations page: the card, and a row per connected account.
+ *  on the Dash's Integrations page: the card, and a row per connected account. The client's secret
+ *  set or deleted on the Dash registers the card again.
  *
  *  - `slug`: the routing slug to answer on. Default `x`.
  *  - `scopes`: more scopes to ask X for, beside `tweet.read users.read offline.access`, which name
@@ -58,8 +59,9 @@ export function x(
         : await servePage(request, itx, settings);
     },
     async processEvent({ event, itx }) {
-      if (event.type === WORKER_UPDATED)
-        await registerAll(itx, settings.slug, `${event.path}@${event.offset}`);
+      const at = `${event.path}@${event.offset}`;
+      if (event.type === WORKER_UPDATED) await registerAll(itx, settings.slug, at);
+      else if (isAppFact(event)) await registerCard(itx, settings.slug, `x:registry:${at}`);
     },
   };
 }

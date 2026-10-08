@@ -1,7 +1,7 @@
 import {
   ACCOUNTS,
+  APP_SECRET,
   CONNECTION,
-  hasAppSecret,
   listAccounts,
   readApp,
   REMOVED,
@@ -19,6 +19,21 @@ import {
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
 export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+
+/** What the platform appends when a secret is set or deleted: first on the secret's own path, then
+ *  on `/`, where the catalog (`secrets.list()`) folds it. */
+const SECRET_FACTS = new Set([
+  "events.iterate.com/secret/set",
+  "events.iterate.com/secret/deleted",
+]);
+
+/** Whether an event is the client's secret set or deleted, on `/`. A person saves the client on the
+ *  Dash, never through this package, so this fact is the moment its card changes. The copy on the
+ *  secret's own path lands before the catalog has it: the hook passes it over. */
+export const isAppFact = (event: { type: string; path: string; payload?: unknown }): boolean =>
+  event.path === "/" &&
+  SECRET_FACTS.has(event.type) &&
+  (event.payload as { path?: unknown } | null | undefined)?.path === APP_SECRET;
 
 /** The package's name on the Dash. */
 const INTEGRATION = "google";
@@ -45,10 +60,10 @@ async function append(
   }
 }
 
-/** Registers the card: whether the client is set up (its ID and its secret), whether an account is
- *  connected, and the button to the page on `slug`. */
+/** Registers the card: whether the client is saved (its ID public beside its secret), whether an
+ *  account is connected, and the button to the page on `slug`. */
 export async function registerCard(itx: GoogleItx, slug: string, key?: string): Promise<void> {
-  const ready = Boolean(await readApp(itx)) && (await hasAppSecret(itx));
+  const ready = Boolean(await readApp(itx));
   const connected = ready && (await itx.kv.list(ACCOUNTS)).keys.length > 0;
   await append(
     itx,

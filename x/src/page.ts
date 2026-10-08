@@ -3,6 +3,7 @@ import {
   APP_PIN,
   APP_SECRET,
   CONNECTION,
+  REDIRECT_URI,
   REMOVED,
   attemptOf,
   connectAccount,
@@ -11,7 +12,6 @@ import {
   hasAppSecret,
   listAccounts,
   readApp,
-  saveApp,
   scopesShown,
   secretOf,
   startConnect,
@@ -87,14 +87,28 @@ const flashOf = (key: "error" | "connected", text: string): string =>
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** What the collection page on the Dash shows the person, above its one field. */
-const COLLECT_DESCRIPTION = `Your X app's OAuth 2.0 Client Secret.
+/** What the collection page on the Dash shows the person, above its two fields. */
+const COLLECT_DESCRIPTION = `Your X app's OAuth 2.0 Client ID and Client Secret.
 
-- **Client secret:** under the app's **Keys and tokens** in [X's developer console](https://console.x.com), at OAuth 2.0 Client ID and Client Secret. X shows it once: if it is lost, regenerate it there.
+- **Client ID:** under the app's **Keys and tokens** in [X's developer console](https://console.x.com), at OAuth 2.0 Client ID and Client Secret.
+- **Client secret:** beside the client ID. X shows it once: if it is lost, regenerate it there.
 
-The platform sends it only to X's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
+The platform sends the secret only to X's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
 
-/** The link to the Dash's page that collects the client secret into `/secrets/own-x-app`. It
+/** The client's two fields: its ID, public, in the shape X gives it (HTML's `pattern`, which the
+ *  browser compiles with the `v` flag), and its secret. */
+const FIELDS = [
+  {
+    name: "clientId",
+    label: "Client ID",
+    public: true,
+    placeholder: "QWJDZEVmR2hJaktsTW5PcFFyU3Q6MTpjaQ",
+    pattern: String.raw`[A-Za-z0-9+\/=_\-]{10,100}`,
+  },
+  { name: "clientSecret", label: "Client secret" },
+];
+
+/** The link to the Dash's page that collects the client into `/secrets/own-x-app`, on one form. It
  *  only builds a URL, so the page asks for a fresh one each time it renders. */
 const collectLink = (itx: XItx): Promise<string> =>
   itx.secrets
@@ -102,19 +116,21 @@ const collectLink = (itx: XItx): Promise<string> =>
       path: APP_SECRET,
       egress: { urls: APP_PIN },
       description: COLLECT_DESCRIPTION,
-      fields: [{ name: "clientSecret", label: "Client secret" }],
+      fields: FIELDS,
     })
     .then((link) => link.url);
 
 async function render(itx: XItx, settings: Settings, here: string, flash: string): Promise<string> {
   const app = await readApp(itx);
-  const secret = await hasAppSecret(itx);
+  // a secret saved without the public client ID: by hand, or before the form asked for it
+  const incomplete = !app && (await hasAppSecret(itx));
   const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
   const accounts = await listAccounts(itx);
   const callback = `${here}/oauth2/callback`;
+  const redirectUri = await itx.kv.get(REDIRECT_URI);
   const sent =
-    app?.redirectUri && app.redirectUri !== callback
-      ? `<p class="warn">With the last Connect, the platform sent X this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(app.redirectUri)}`
+    redirectUri && redirectUri !== callback
+      ? `<p class="warn">With the last Connect, the platform sent X this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(redirectUri)}`
       : "";
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>
@@ -125,33 +141,30 @@ async function render(itx: XItx, settings: Settings, here: string, flash: string
       <li><b>Callback URI / Redirect URL:</b> this one, exactly:${copyRow(callback)}${sent}</li>
       <li><b>Website URL:</b> this page:${copyRow(`${here}/`)}</li>
     </ul>
-    <p>Press <b>Save</b>. Then, under the app's <b>Keys and tokens</b>, find <b>OAuth 2.0 Client ID and Client Secret</b>: keep the Client ID for step 2 and the Client Secret for step 3. X shows the Client Secret once; if it is lost, regenerate it there.</p>
+    <p>Press <b>Save</b>. Then, under the app's <b>Keys and tokens</b>, find <b>OAuth 2.0 Client ID and Client Secret</b>: keep both for step 2. X shows the Client Secret once; if it is lost, regenerate it there.</p>
   </section>`;
   const step2 = `<section>
-    <h2>2. The client ID</h2>
-    ${app ? `<p class="ok">Client ID ${esc(app.clientId)}</p>` : ""}
-    <form method="post" action="app" class="block">
-      <input name="clientId" placeholder="Client ID, from the app's Keys and tokens" autocomplete="off" required value="${esc(app?.clientId ?? "")}" />
-      <button>Save</button>
-    </form>
-    <p class="muted">It is public. It is kept in the project's kv.</p>
-  </section>`;
-  const step3 = `<section>
-    <h2>3. The client secret</h2>
-    ${secret ? `<p class="ok">Saved as the project's secret <code>${APP_SECRET}</code>.</p>` : ""}
+    <h2>2. Save the client</h2>
+    ${
+      app
+        ? `<p class="ok">Client ID ${esc(app.clientId)}</p>`
+        : incomplete
+          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
+          : ""
+    }
     ${
       typeof link === "string"
-        ? `<p><a class="button" href="${esc(link)}">${secret ? "Replace it" : "Save it"}</a></p>${copyRow(link)}`
+        ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the client"}</a></p>${copyRow(link)}`
         : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
     }
-    <p class="muted">The link opens a page of iterate's Dash, which asks for the client secret and keeps it as <code>${APP_SECRET}</code>, pinned to api.x.com. It never passes through this page.</p>
+    <p class="muted">The link opens a page of iterate's Dash, which asks for the client ID and the client secret, and keeps them as <code>${APP_SECRET}</code>, pinned to api.x.com. The secret never passes through this page.</p>
   </section>`;
-  const step4 = `<section>
-    <h2>4. Connect an account</h2>
+  const step3 = `<section>
+    <h2>3. Connect an account</h2>
     ${
-      app && secret
+      app
         ? `<p>${post("connect", {}, "Connect an account")}</p><p class="muted">X asks the account signed in at x.com to authorize the app, then sends you back here. To add another account, sign in to X as that account, then connect again.</p>`
-        : `<p class="muted">First save the client ID (2) and the client secret (3).</p>`
+        : `<p class="muted">First save the client (2).</p>`
     }
     <p class="muted">It asks X for ${settings.scopes.map((scope) => `<code>${esc(scope)}</code>`).join(" ")}.</p>
   </section>`;
@@ -163,18 +176,17 @@ async function render(itx: XItx, settings: Settings, here: string, flash: string
         )
         .join("")
     : `<p class="muted">None yet.</p>`;
-  const step5 = `<section>
+  const listed = `<section>
     <h2>Accounts</h2>
     ${list}
     <p class="muted">Reconnect asks X again: for more scopes, or when its refresh token has stopped working. Sign in to X as the same account first: the platform refuses another account's tokens before it stores them, and the account keeps its old ones. Disconnect deletes the account's secret and forgets it here. The app stays authorized at X until the account revokes it, in X's settings under <b>Security and account access</b>, <b>Apps and sessions</b>, <b>Connected apps</b>.</p>
   </section>`;
-  return `${flash}${step1}${step2}${step3}${step4}${step5}`;
+  return `${flash}${step1}${step2}${step3}${listed}`;
 }
 
-/** The members-only page at `/`: the URLs to register at X, the client ID, the link that collects
- *  the client secret, Connect, and the accounts with Reconnect and Disconnect. Every write is a
- *  plain form POST, answered with a redirect back to the page; Connect's and Reconnect's go on to
- *  X. */
+/** The members-only page at `/`: the URLs to register at X, the link that collects the client on
+ *  the Dash, Connect, and the accounts with Reconnect and Disconnect. Every write is a plain form
+ *  POST, answered with a redirect back to the page; Connect's and Reconnect's go on to X. */
 export async function servePage(
   request: Request,
   itx: XItx,
@@ -216,11 +228,6 @@ export async function servePage(
     return typeof value === "string" ? value : "";
   };
   try {
-    if (path === "app") {
-      await saveApp(itx, field("clientId"));
-      await registerCard(itx, settings.slug);
-      return redirect();
-    }
     if (path === "connect") {
       // Connect makes a connection; Reconnect names the one it asks again for
       const connection = field("id");
