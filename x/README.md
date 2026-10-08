@@ -118,7 +118,10 @@ The X API v2 reference, <https://docs.x.com/x-api/introduction>, says what each 
 scope it needs: posts, timelines and search under `/2/tweets` and `/2/users/<id>/…`, bookmarks, likes
 and DMs.
 
-Which secret is which account: the page lists them, and so does the kv.
+Which secret is which account: the page lists them, and so does the kv. The platform names each
+account at X's `/2/users/me`, with the new token, before it stores anything: `externalId` is the
+account's `data.id` there, and `account` its `@username`. A Reconnect is held to the same account,
+so a secret always holds the tokens of the account the kv names.
 
 ```js
 async (itx) => {
@@ -151,16 +154,16 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
   placeholder for the client secret, `getSecret("/secrets/own-x-app", { field: "clientSecret" })`,
   which the platform reads at each refresh. To rotate it, regenerate it at X and save the new one
   through the page's link (**Replace it**) right away.
-- **A row per account.** The page names each account with one call to X's `/2/users/me`, through
-  the project's egress, right after the platform has stored its tokens. The same account connected
-  again replaces its older connection: that secret goes, and its row.
+- **A row per account.** X's token answer names no account (X has no ID token), so the platform
+  names each account at X's `/2/users/me`, with the new token, before it stores anything (`account`
+  in `beginOAuth`), and the page keeps what it answers. The same account connected again replaces
+  its older connection: that secret goes, and its row.
 - **Reconnect** asks X again on the same connection: for more scopes, or when the refresh token has
-  stopped working. Sign in to X as the same account first. X's token answer names no account (X has
-  no ID token), so the platform cannot hold a reconnect to the account (`expectAccount` would refuse
-  every one). The page checks the account itself, once the tokens are stored: if X signed another
-  account in, or `/2/users/me` does not answer, it deletes those tokens, and the connection with
-  them, since they replaced the old ones. A change to `scopes` or `urls` reaches an account at its
-  next Reconnect: its grant and its pin are set when it connects.
+  stopped working. Sign in to X as the same account first. It is held to the same account: the
+  platform refuses another account's tokens before it stores them (`expectAccount`, against the id
+  `/2/users/me` names), the page shows the refusal, and the account keeps its old tokens. A change
+  to `scopes` or `urls` reaches an account at its next Reconnect: its grant and its pin are set when
+  it connects.
 - **Refresh tokens rotate.** X issues a refresh token only for `offline.access`, and can answer a
   refresh with a new one: the platform keeps the newest.
 - **Disconnect** deletes the account's secret, then forgets it here. A secret that cannot be deleted

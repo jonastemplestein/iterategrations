@@ -15,8 +15,12 @@ export type OAuthOptions = {
   /** The origins the tokens may be sent to: the token endpoint's, and the APIs'. */
   urls: string[];
   extra?: Record<string, string>;
-  /** The account the tokens must be for, by its id at the provider: another account's tokens are
-   *  refused before anything is stored. */
+  /** Where the provider names the account the new tokens are for: an endpoint within `urls`, which
+   *  the platform calls once with the new access token before it stores anything, and the JSON
+   *  paths of the account's id and name. `completeOAuth` answers the account. */
+  account: { url: string; id: string; name?: string };
+  /** The account the tokens must be for, by the id `account`'s endpoint names: the platform refuses
+   *  another account's tokens before it stores anything (`IDENTITY_CONFLICT`). */
   expectAccount?: string;
 };
 
@@ -42,7 +46,7 @@ export type GoogleItx = {
     completeOAuth(
       path: string,
       input: { code: string; state: string },
-    ): Promise<{ path: string; scopes: string[] }>;
+    ): Promise<{ path: string; scopes: string[]; account?: { id: string; name: string | null } }>;
   };
   cd(path: string): {
     append(event: {
@@ -73,9 +77,12 @@ export const APP_SECRET = "/secrets/own-google-app";
 export const APP_PIN: string[] = ["https://oauth2.googleapis.com"];
 const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-const USERINFO = "https://www.googleapis.com/oauth2/v2/userinfo";
+/** Where Google names the account a token is for: the userinfo endpoint, whose `id` is the ID
+ *  token's `sub` and whose `email` is the account's address. The platform calls it with the new
+ *  token before it stores anything. */
+const ACCOUNT = { url: "https://www.googleapis.com/oauth2/v2/userinfo", id: "id", name: "email" };
 /** The scopes every connection asks for, whatever more it asks: `openid` and `email` name the
- *  account, at the userinfo endpoint and in the ID token that holds a reconnect to it. */
+ *  account at the userinfo endpoint. */
 export const SCOPES: string[] = ["openid", "email", "profile"];
 /** The origins every account's tokens may be sent to: the token endpoint, and Google's APIs on
  *  www.googleapis.com (userinfo, Calendar, Drive) and gmail.googleapis.com. */
@@ -84,10 +91,6 @@ export const URLS: string[] = [
   "https://www.googleapis.com",
   "https://gmail.googleapis.com",
 ];
-/** Google's token answer names the account (its ID token's `sub`, the userinfo `id`), so the
- *  platform holds a reconnect to its account (`expectAccount`): another account's tokens are
- *  refused before they are stored. */
-const HOLDS_ACCOUNT = true;
 
 /** An account's secret: its tokens, which the platform refreshes with the client's secret. */
 export const secretOf = (connection: string): string => `/secrets/own-google-${connection}`;
@@ -120,10 +123,8 @@ export type Account = { account: string; externalId: string; scopes: string[]; a
 /** A sign-in the page started: the connection it is for, and when. */
 export type Attempt = { connection: string; at: number };
 /** What a callback came to: the account connected, with the connections of the same account it
- *  replaced; or a reconnect's tokens refused, with the connection that went with them. */
-export type Outcome =
-  | { connected: string; replaced: string[] }
-  | { refused: string; forgotten: string };
+ *  replaced. */
+export type Outcome = { connected: string; replaced: string[] };
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -195,9 +196,9 @@ export async function listAccounts(
 export const scopesShown = (scopes: string[]): string[] =>
   scopes.map((scope) => scope.replace(/^https:\/\/www\.googleapis\.com\/auth\//, ""));
 
-/** What Connect begins OAuth with, and Reconnect with `existing`: held to its account, which Google
- *  is also hinted to ask for. Google issues a refresh token only with offline access and the
- *  consent screen. */
+/** What Connect begins OAuth with, and Reconnect with `existing`: held to its account by the id the
+ *  userinfo endpoint names, and Google is hinted to ask for it. Google issues a refresh token only
+ *  with offline access and the consent screen. */
 function oauthOptionsOf(app: App, settings: Settings, existing: Account | null): OAuthOptions {
   return {
     authorizationEndpoint: AUTHORIZATION_ENDPOINT,
@@ -212,32 +213,8 @@ function oauthOptionsOf(app: App, settings: Settings, existing: Account | null):
       prompt: "consent",
       ...(existing && { login_hint: existing.account }),
     },
+    account: ACCOUNT,
     ...(existing && { expectAccount: existing.externalId }),
-  };
-}
-
-/** Names the account a secret's token is for, with one call to Google's userinfo through the
- *  project's egress, which swaps the token in for the placeholder: the account's address, and its
- *  id at Google. */
-async function nameAccount(path: string): Promise<{ account: string; externalId: string }> {
-  const response = await fetch(
-    new Request(USERINFO, {
-      headers: { authorization: `Bearer getSecret("${path}", { field: "accessToken" })` },
-    }),
-  );
-  const body = (await response.json().catch(() => null)) as {
-    id?: unknown;
-    email?: unknown;
-    error?: { message?: unknown };
-  } | null;
-  const id = body?.id;
-  if (!response.ok || typeof id !== "string" || !id) {
-    const message = typeof body?.error?.message === "string" ? `: ${body.error.message}` : "";
-    throw new Error(`Google's userinfo named no account (HTTP ${response.status}${message})`);
-  }
-  return {
-    account: typeof body?.email === "string" && body.email ? body.email : id,
-    externalId: id,
   };
 }
 
@@ -308,14 +285,14 @@ export async function dropAttempt(itx: GoogleItx, state: string, attempt: Attemp
 }
 
 /** Finish an attempt the page started. The platform exchanges the code inside the secret's facet
- *  (the page never sees a token), one call names the account, and the kv keeps it. A connection
- *  of the same account made before goes: one row per account.
+ *  (the page never sees a token), names the account at the userinfo endpoint before it stores the
+ *  tokens, and refuses a reconnect's tokens for another account (`IDENTITY_CONFLICT`). The kv
+ *  keeps the account it names. A connection of the same account made before goes: one row per
+ *  account.
  *
- *  What fails is undone as far as it went. An exchange that fails stores nothing: a new
- *  connection's pending secret goes, and a reconnected one keeps its old tokens. Tokens that no
- *  account can be named for go with a new connection. A reconnect's new tokens replaced its old
- *  ones: they stay when the platform held them to its account (`HOLDS_ACCOUNT`); when it could not,
- *  tokens that may be another account's go, and the connection with them. */
+ *  An exchange that fails or is refused stores nothing: a new connection's pending secret goes, and
+ *  a reconnected one keeps its old tokens. Tokens the platform names no account for go with a new
+ *  connection. */
 export async function connectAccount(
   itx: GoogleItx,
   state: string,
@@ -333,26 +310,16 @@ export async function connectAccount(
       });
     throw error;
   };
-  const refuse = async (why: string, held: Account): Promise<Outcome> => {
-    await forget(itx, connection).catch((leftover: unknown) => {
-      throw new Error(`${why}; ${path} is left: ${messageOf(leftover)}`);
-    });
-    return {
-      refused: `${why}. Those tokens were deleted, and ${held.account} is no longer connected: sign in to Google as ${held.account}, then connect it again.`,
-      forgotten: connection,
-    };
+  const { scopes, account: named } = await itx.secrets
+    .completeOAuth(path, { code, state })
+    .catch(undo);
+  if (!named) return await undo(new Error("The platform named no account for these tokens"));
+  const account: Account = {
+    account: named.name ?? named.id,
+    externalId: named.id,
+    scopes,
+    at: new Date().toISOString(),
   };
-  const { scopes } = await itx.secrets.completeOAuth(path, { code, state }).catch(undo);
-  let named: { account: string; externalId: string };
-  try {
-    named = await nameAccount(path);
-  } catch (error) {
-    if (existing && !HOLDS_ACCOUNT) return await refuse(messageOf(error), existing);
-    return await undo(error);
-  }
-  if (existing && named.externalId !== existing.externalId)
-    return await refuse(`Google signed in ${named.account}, not ${existing.account}`, existing);
-  const account: Account = { ...named, scopes, at: new Date().toISOString() };
   // connected again after a removal that did not finish: that removal is over
   await itx.kv.delete(`${REMOVED}${connection}`);
   await itx.kv.put(`${ACCOUNTS}${connection}`, JSON.stringify(account));

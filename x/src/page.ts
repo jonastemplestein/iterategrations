@@ -166,7 +166,7 @@ async function render(itx: XItx, settings: Settings, here: string, flash: string
   const step5 = `<section>
     <h2>Accounts</h2>
     ${list}
-    <p class="muted">Reconnect asks X again: for more scopes, or when its refresh token has stopped working. Sign in to X as the same account first. X does not say which account it signed in until the tokens are stored, so the page checks then: another account's tokens are deleted, and the connection with them. Disconnect deletes the account's secret and forgets it here. The app stays authorized at X until the account revokes it, in X's settings under <b>Security and account access</b>, <b>Apps and sessions</b>, <b>Connected apps</b>.</p>
+    <p class="muted">Reconnect asks X again: for more scopes, or when its refresh token has stopped working. Sign in to X as the same account first: the platform refuses another account's tokens before it stores them, and the account keeps its old ones. Disconnect deletes the account's secret and forgets it here. The app stays authorized at X until the account revokes it, in X's settings under <b>Security and account access</b>, <b>Apps and sessions</b>, <b>Connected apps</b>.</p>
   </section>`;
   return `${flash}${step1}${step2}${step3}${step4}${step5}`;
 }
@@ -288,11 +288,6 @@ export async function serveCallback(
       );
     }
     const outcome = await connectAccount(itx, state, code, attempt);
-    if ("refused" in outcome) {
-      await registerRemoval(itx, settings.slug, outcome.forgotten);
-      await registerCard(itx, settings.slug);
-      return back(flashOf("error", outcome.refused));
-    }
     for (const connection of outcome.replaced)
       await registerRemoval(itx, settings.slug, connection);
     await registerCard(itx, settings.slug);
