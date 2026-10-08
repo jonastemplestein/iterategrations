@@ -19,6 +19,8 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`telegram/`](telegram)             | `iterate-telegram`                         | A Telegram bot with its own Connect Telegram page: private chats and groups, each handed to an agent; invite links to let people in.                  |
 | [`chatgpt/`](chatgpt)               | `iterate-chatgpt`                          | Bring your own ChatGPT: a Connect ChatGPT page, and model requests paid by the subscription instead of an API key.                                    |
 | [`github/`](github)                 | `iterate-github`                           | A project's own GitHub App, with a Connect GitHub page: each installation's webhooks as events, and its API with tokens the platform mints.           |
+| [`google/`](google)                 | `iterate-google`                           | A project's own Google OAuth client, with a Connect Google page: Google's APIs as each connected account, with tokens the platform refreshes.         |
+| [`x/`](x)                           | `iterate-x`                                | A project's own X app, with a Connect X page: X's API as each connected account, with tokens the platform refreshes.                                  |
 
 ## Adding one to a project
 
