@@ -2,27 +2,7 @@ import type { ChatgptItx } from "./auth.js";
 import { servePage } from "./page.js";
 import { register, WORKER_UPDATED } from "./registry.js";
 
-export {
-  ACCOUNT_KEY,
-  EXCHANGE_SOURCE,
-  PIN,
-  RESOURCE,
-  SECRET,
-  accountOf,
-  claimsOf,
-  isConnected,
-  readAccount,
-} from "./auth.js";
 export type { Account, ChatgptItx } from "./auth.js";
-export {
-  chatgptBody,
-  chatgptHeaders,
-  chatgptModels,
-  chatgptRequest,
-  chatgptResponses,
-  chatgptText,
-  serverEvents,
-} from "./request.js";
 
 /** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
  *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the

@@ -5,12 +5,12 @@ import {
   readAccount,
   readPending,
   REDIRECT_URI,
+  RESOURCE,
   SECRET,
   startLogin,
   type ChatgptItx,
 } from "./auth.js";
 import { register } from "./registry.js";
-import { chatgptModels, chatgptText } from "./request.js";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 const esc = (text: string): string => text.replace(/[&<>"]/g, (c) => ESCAPES[c]!);
@@ -25,7 +25,6 @@ const STYLE = `
   textarea { font: .85rem ui-monospace, monospace; width: 100%; box-sizing: border-box; min-height: 5rem; }
   .error { background: #c0392b22; border: 1px solid #c0392b; border-radius: 8px; padding: .5rem .75rem; }
   .ok { background: #27ae6022; border: 1px solid #27ae60; border-radius: 8px; padding: .5rem .75rem; }
-  .warn { background: #e67e2222; border: 1px solid #e67e22; border-radius: 8px; padding: .5rem .75rem; }
   .muted { opacity: .7; font-size: .9rem; } code, pre { word-break: break-all; white-space: pre-wrap; }
   form { display: inline; }
 `;
@@ -46,31 +45,75 @@ const redirect = (query = ""): Response =>
 const flash = (key: "error" | "test", text: string): string =>
   `?${key}=${encodeURIComponent(text)}`;
 
-const USAGE = `// in the project's code (itx is the project's root)
-import { chatgptText, chatgptResponses } from "iterate-chatgpt";
+/** The model the Test button asks: the first one OpenAI lists for a plan's token. */
+const TEST_MODEL = "gpt-6.1-sol";
+const AUTHORIZATION = `Bearer getSecret("${SECRET}", { field: "accessToken" })`;
+const README = "https://github.com/jonastemplestein/iterategrations/tree/main/chatgpt";
 
-await chatgptText(itx, { model: "gpt-5.5", input: "Say hello." });
-// or the Responses API itself, streamed: the body you would send to api.openai.com
-const response = await chatgptResponses(itx, { model: "gpt-5.5", input: [/* … */] });`;
+const USAGE = `// project code, a run script, an agent: the global fetch is the project's egress
+const response = await fetch("${RESOURCE}/responses", {
+  method: "POST",
+  headers: {
+    authorization: '${AUTHORIZATION}',
+    "content-type": "application/json",
+  },
+  // a plan's token answers only a stream, keeps nothing, and takes input as a list
+  body: JSON.stringify({
+    model: "${TEST_MODEL}",
+    input: [{ role: "user", content: "Say hello." }],
+    stream: true,
+    store: false,
+  }),
+});`;
 
-/** The model the Test button tries: the first the token can see that is a GPT, else a guess. */
-const testModelOf = (models: string[] | null): string =>
-  models?.find((model) => model === "gpt-5.5") ??
-  models?.find((m) => m.startsWith("gpt-")) ??
-  "gpt-5.5";
+/** The Test button's one request: the model's one-word answer, read from the server-sent events
+ *  as the README's example reads them. Throws what OpenAI says when it refuses. */
+async function testAnswer(itx: Pick<ChatgptItx, "fetch">): Promise<string> {
+  const response = await itx.fetch(
+    new Request(`${RESOURCE}/responses`, {
+      method: "POST",
+      headers: { authorization: AUTHORIZATION, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: TEST_MODEL,
+        input: [{ role: "user", content: "Reply with the single word: ready" }],
+        reasoning: { effort: "low" },
+        stream: true,
+        store: false,
+      }),
+    }),
+  );
+  const stream = await response.text();
+  if (!response.ok) throw new Error(`OpenAI answered ${response.status}: ${stream.slice(0, 400)}`);
+  let answer = "";
+  for (const block of stream.replace(/\r\n/g, "\n").split("\n\n")) {
+    const data = block
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    if (data === "") continue;
+    const event = JSON.parse(data);
+    if (event.type === "response.output_text.delta") answer += event.delta;
+    if (event.type === "response.completed") return answer;
+    if (event.type === "error") throw new Error(event.message);
+    if (event.type === "response.failed" || event.type === "response.incomplete")
+      throw new Error(JSON.stringify(event.response.error ?? event.response.incomplete_details));
+  }
+  throw new Error("OpenAI's answer ended before response.completed");
+}
 
 async function card(itx: ChatgptItx): Promise<string> {
   if (await isConnected(itx)) {
     const account = await readAccount(itx);
-    const models = await chatgptModels(itx).catch(() => null);
     return `<section>
       <h2>Connected <span class="muted">${esc(account?.email ?? "")}${account?.plan ? ` · ${esc(account.plan)}` : ""}</span></h2>
       <p>This project can make model requests with that ChatGPT plan. The tokens are the secret <code>${SECRET}</code>, only ever sent to api.openai.com and OpenAI's sign-in, and refreshed on their own.</p>
-      ${models ? `<p class="muted">Models the token can see: ${models.map((m) => `<code>${esc(m)}</code>`).join(", ")}</p>` : `<p class="warn">OpenAI did not list the models. Try <b>Test it</b>.</p>`}
       <p>${post("test", "Test it")} ${post("disconnect", "Disconnect", true)}</p>
     </section>
-    <section><h2>Use it</h2><pre>${esc(USAGE)}</pre>
-    <p class="muted">Requests count against the plan's usage. Only the Responses API takes this token: voice, Realtime and transcription do not.</p></section>`;
+    <section><h2>Use it</h2>
+    <p>Project code and agents call the Responses API with plain <code>fetch</code> and a placeholder for the token. The project's egress puts the real token in.</p>
+    <pre>${esc(USAGE)}</pre>
+    <p class="muted">The answer is server-sent events. <a href="${README}#calling-the-responses-api" target="_blank" rel="noopener">The README</a> reads them into text, and lists the fields a plan's token refuses. Requests count against the plan's usage. Only the Responses API takes this token: voice, Realtime and transcription do not.</p></section>`;
   }
   const pending = await readPending(itx);
   if (pending)
@@ -149,13 +192,8 @@ export async function servePage(
       return redirect();
     }
     if (path === "test") {
-      const model = testModelOf(await chatgptModels(itx).catch(() => null));
-      const answer = await chatgptText(itx, {
-        model,
-        input: "Reply with the single word: ready",
-        effort: "low",
-      });
-      return redirect(flash("test", `${model}: ${answer.trim()}`));
+      const answer = await testAnswer(itx);
+      return redirect(flash("test", `${TEST_MODEL}: ${answer.trim()}`));
     }
     return new Response("Not found\n", { status: 404 });
   } catch (error) {
