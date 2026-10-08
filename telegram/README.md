@@ -54,7 +54,7 @@ each message to the project's own agents (below). The project must have the agen
 ```js
 async (itx) => {
   const url = await itx.url({ routingSlug: "telegram", path: "/webhook/nope" });
-  const res = await itx.fetch(new Request(url));
+  const res = await fetch(url);
   return { url, status: res.status }; // 405 = the package is there. 404: not published yet
 };
 ```
@@ -101,7 +101,7 @@ Then write the bot's username and where its page is into the project's `AGENTS.m
 For each message from someone who is in, one `events.iterate.com/agent/context-added` on
 `/agents/telegram/<bot>/chat-<chat id>` (a group's id is negative), keyed by the update. It says where
 the message is from (a group's title), who wrote it, the text or caption, the attachments with their
-`file_id`, and how to answer: a plain `itx.fetch` with the token placeholder, to any Bot API method,
+`file_id`, and how to answer: a plain `fetch` with the token placeholder, to any Bot API method,
 and how to read a file. In a group the reply is aimed at the message it answers. A group message that
 is not for the bot arrives with `llmRequestPolicy: { behaviour: "dont-trigger-request" }`: the agent
 reads it on its next turn but does not wake for it.
@@ -122,6 +122,36 @@ the package appends its null. Disconnect deletes the bot's two secrets first. On
 deleted is shown as an error, and the bot stays listed, so Disconnect again can finish. A row the
 Dash could not be told to take away is taken away by Disconnect again, or at the next publish: until
 then `telegram/removed/<bot>` in the kv marks it.
+
+## Calling Telegram
+
+The package exports no Telegram client. An agent, or the project's own code, calls the
+[Bot API](https://core.telegram.org/bots/api) with `fetch`. In every worker the platform loads (the
+project's config worker, a run script, an agent's script) the global `fetch` is the project's egress.
+
+Each bot's token is the secret `/secrets/telegram-<bot>`, field `token`. It is pinned to
+`https://api.telegram.org`, so egress sends it nowhere else. A request names it with a placeholder,
+and egress swaps in the real token on the way out. Telegram puts the token in the URL path, so the
+placeholder goes there:
+
+```js
+await fetch(
+  "https://api.telegram.org/bot" +
+    'getSecret("/secrets/telegram-<bot>", { field: "token" })' +
+    "/sendMessage",
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id, text }),
+  },
+);
+```
+
+`<bot>` is the bot's name here (`payload.bot` of each `telegram/…` event). Any other method is the
+same call under its own name. A message holds at most 4096 characters: split longer text yourself.
+The package checks Telegram's deliveries against the bot's other secret,
+`/secrets/telegram-webhook-<bot>`. It is pinned to `https://telegram.invalid`, a host that can never
+exist, so egress sends it nowhere.
 
 ## Good to know
 
@@ -160,8 +190,9 @@ agents of its own (a chief of staff that already answers WhatsApp, say) lists
 welcomes, who waits.
 For each message from someone who is let in it records `telegram/message-accepted` on
 `/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The project routes that event
-to its agents and sends their answers itself, with `api`, `placeholder` and `splitText`, which the
-package exports. Its payload: `bot`, `updateId`, `messageId`, `chat { id, type, title }`, `threadId`,
+to its agents and sends their answers itself, with `fetch` ([Calling Telegram](#calling-telegram)):
+`bot` names the secret, `chat.id` is the `chat_id` and `threadId` the `message_thread_id`. Its
+payload: `bot`, `updateId`, `messageId`, `chat { id, type, title }`, `threadId`,
 `from { id, name, username }`, `text`, `caption`, `files [{ kind, fileId }]`, `location`,
 `replyTo { messageId, fromId, text }` and `addressed` (whether the bot was @mentioned, replied to,
 named or commanded). A service message is never accepted.
