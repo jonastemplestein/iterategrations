@@ -6,6 +6,7 @@ packages:
   - whatsapp-calls
   - phone-calls
   - herdr
+  - chatgpt-desktop
   - jmap
   - telegram
   - chatgpt
