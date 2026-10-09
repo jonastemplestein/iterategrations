@@ -747,8 +747,15 @@ test("deliver events: strangers, other bots and service messages are never accep
   assert.match(sent(project)[1]!.body.text, /You're in/); // an allowed person's /start is welcomed
 });
 
-test("the package exports the integration and no Telegram client: a project calls the Bot API with fetch", async () => {
-  assert.deepEqual(Object.keys(await import("../dist/telegram.js")), ["telegram"]);
+test("the package exports the integration and the helpers a project's own code answers with, and no Telegram client", async () => {
+  assert.deepEqual(Object.keys(await import("../dist/telegram.js")).sort(), [
+    "MESSAGE_LIMIT",
+    "api",
+    "placeholder",
+    "sendAnswer",
+    "splitText",
+    "telegram",
+  ]);
 });
 
 // --------------------------------------------- the Dash's Integrations page

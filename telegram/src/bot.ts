@@ -17,6 +17,14 @@ export type TelegramItx = {
   fetch(request: Request): Promise<Response>;
   /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: Kv;
+  /** The project's files, as `sendAnswer` attaches them: whether a file exists and what it is, and
+   *  a short-lived signed URL that Telegram fetches it from. */
+  files: {
+    get(path: string): {
+      head(): Promise<{ contentType: string } | null>;
+      url(input: { expiresInSeconds: number }): Promise<{ url: string }>;
+    };
+  };
   secrets: {
     set(
       path: string,
@@ -64,8 +72,10 @@ export const PRIVATE = "This bot is private. I have asked its owner to let you i
 export const placeholder = (bot: string): string =>
   `getSecret("/secrets/telegram-${bot}", { field: "token" })`;
 
-/** One Bot API call. `credential` is `placeholder(bot)`, or a token not yet stored. */
-export async function api<T = unknown>(
+/** One Bot API call with `itx.fetch`. `credential` is `placeholder(bot)`, or a token not yet
+ *  stored. Throws `<method>: <description>` when Telegram refuses the call. The exported `api`
+ *  (send.ts) is this call with the global `fetch` and the bot's placeholder. */
+export async function call<T = unknown>(
   itx: Pick<TelegramItx, "fetch">,
   credential: string,
   method: string,
@@ -96,7 +106,9 @@ export async function say(
   chatId: number,
   text: string,
 ): Promise<void> {
-  await api(itx, placeholder(bot), "sendMessage", { chat_id: chatId, text }).catch(() => undefined);
+  await call(itx, placeholder(bot), "sendMessage", { chat_id: chatId, text }).catch(
+    () => undefined,
+  );
 }
 
 const hex = (bytes: number): string =>
@@ -141,7 +153,7 @@ export async function connectBot(
 ): Promise<{ name: string; username: string }> {
   if (!/^\d+:[\w-]{20,}$/.test(token.trim()))
     throw new Error("That does not look like a bot token");
-  const me = await api<{ id: number; username: string; first_name?: string }>(
+  const me = await call<{ id: number; username: string; first_name?: string }>(
     itx,
     token.trim(),
     "getMe",
@@ -161,7 +173,7 @@ export async function connectBot(
   await itx.secrets.set(`/secrets/telegram-webhook-${name}`, secret, {
     urls: ["https://telegram.invalid"],
   });
-  await api(itx, placeholder(name), "setWebhook", {
+  await call(itx, placeholder(name), "setWebhook", {
     url: `${webhookBase}/webhook/${name}`,
     secret_token: secret,
     allowed_updates: ["message"],
@@ -200,7 +212,7 @@ export async function removing(itx: TelegramItx, bot: string): Promise<boolean> 
  *  landed, a tombstone, `telegram/removed/<bot>`, says what is left to do: Disconnect again
  *  finishes it, and so does the install hook. Who was let in stays, for a bot connected again. */
 export async function disconnectBot(itx: TelegramItx, bot: string, slug: string): Promise<void> {
-  await api(itx, placeholder(bot), "deleteWebhook").catch(() => undefined);
+  await call(itx, placeholder(bot), "deleteWebhook").catch(() => undefined);
   await dropSecret(itx, `/secrets/telegram-${bot}`);
   await dropSecret(itx, `/secrets/telegram-webhook-${bot}`);
   await itx.kv.put(`${REMOVED}${bot}`, new Date().toISOString());

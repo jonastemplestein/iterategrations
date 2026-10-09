@@ -33,6 +33,12 @@ export type GoogleItx = {
     delete(key: string): Promise<unknown>;
     list(prefix?: string): Promise<{ keys: string[] }>;
   };
+  /** The project's files, where a Gmail sync (gmail.ts) keeps attachments and long bodies. */
+  files: {
+    get(path: string): {
+      put(input: { contentType: string; data: Uint8Array }): Promise<unknown>;
+    };
+  };
   secrets: {
     delete(path: string): Promise<unknown>;
     /** The catalog: each secret's path, and the values of its public fields, never a secret one. */
