@@ -74,6 +74,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.0
+      jmap-jam:
+        specifier: 0.13.8
+        version: 0.13.8
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -1260,6 +1263,12 @@ packages:
       react:
         optional: true
 
+  jmap-jam@0.13.8:
+    resolution: {integrity: sha512-ffcpPrQLRikdvfhe3SKdPj1DQDA0djBAoyjdjv9pSXF4DDnKqQ46wx0EILHY5JdfXWh9xINWLcQxBNpndAtCCw==}
+
+  jmap-rfc-types@0.5.0:
+    resolution: {integrity: sha512-/x6xiTaV7EvX6lA2aFiRaJG5dmfALWcHCNiDH5YVIqf3Yitkfq0RQr1M8kLNA5RDmT5gmTpziTluJY8qcOeJAg==}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -1530,6 +1539,10 @@ packages:
     resolution: {integrity: sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==}
     engines: {node: '>=18'}
 
+  tagged-tag@1.0.0:
+    resolution: {integrity: sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng==}
+    engines: {node: '>=20'}
+
   thread-stream@3.2.0:
     resolution: {integrity: sha512-zLBvqpwr4Esa0kRjcrzGU6zL25lePWaCLMx0RQFrmteozIfeNdaMLpG5U7PeHzvlFkAWaRKA9/KVW4F60iB+qw==}
 
@@ -1563,6 +1576,10 @@ packages:
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
+
+  type-fest@5.10.0:
+    resolution: {integrity: sha512-NoSdpq/WEiAg5sjmBkmV/hfxv6HJH4NqPNrqjtSO5CwRmpsDfaf4begxW34KdJykH/l1yHtwBWQkCRdoXO8mPA==}
+    engines: {node: '>=20'}
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -2399,6 +2416,15 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
+  jmap-jam@0.13.8:
+    dependencies:
+      jmap-rfc-types: 0.5.0
+      type-fest: 5.10.0
+
+  jmap-rfc-types@0.5.0:
+    dependencies:
+      type-fest: 5.10.0
+
   js-tokens@4.0.0: {}
 
   json5@2.2.3: {}
@@ -2694,6 +2720,8 @@ snapshots:
     dependencies:
       '@tokenizer/token': 0.3.0
 
+  tagged-tag@1.0.0: {}
+
   thread-stream@3.2.0:
     dependencies:
       real-require: 0.2.0
@@ -2720,6 +2748,10 @@ snapshots:
   totalist@3.0.1: {}
 
   tslib@2.8.1: {}
+
+  type-fest@5.10.0:
+    dependencies:
+      tagged-tag: 1.0.0
 
   typescript@7.0.2:
     optionalDependencies:

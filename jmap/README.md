@@ -5,9 +5,10 @@ that Fastmail designed and serves natively: send from it, search it, read whole 
 Fastmail's [Masked Email](https://www.fastmail.com/dev/#masked-email-api): throwaway addresses an
 agent makes for one site and switches off later.
 
-There is no client to install. An agent's script, or the project's own code, calls Fastmail's JMAP
-API with plain `fetch`: [Using the mailbox](#using-the-mailbox) has every call. The package,
-`iterate-jmap`, is only the mailbox's card on the Dash and a page with its status.
+An agent's run script cannot import a package, so an agent calls Fastmail's JMAP API with plain
+`fetch`: [Using the mailbox](#using-the-mailbox) has every call. The project's own code imports
+`mailbox()` from the package instead: [In the project's code](#in-the-projects-code). The package,
+`iterate-jmap`, is also the mailbox's card on the Dash and a page with its status.
 
 Mail the project sends goes through the mailbox itself: it is written to Drafts, submitted, and moved
 to Sent. So the mailbox holds everything the project sent and received, as a person's mailbox would,
@@ -72,8 +73,8 @@ page and a **Recipe** button to this recipe.
 
 Earlier builds of this package shipped a client (`connectJmap`, `maskedEmails`), and an earlier
 version of this recipe added `mail.ts` and a `mailbox()` member to `worker.ts` that use it. Move any
-code that imports the client to `fetch` first, in a commit of its own: otherwise the script's probe
-fails on the newer build and nothing is committed.
+code that imports that client to [`mailbox()`](#in-the-projects-code) first, in a commit of its own:
+otherwise the script's probe fails on the newer build and nothing is committed.
 
 ## 3. Prove it
 
@@ -84,12 +85,111 @@ proof.
 Then write into the project's `AGENTS.md` the mailbox's address, that agents call it with `fetch` and
 the token's placeholder, and a link to this README's
 [Using the mailbox](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#using-the-mailbox).
+The project's code uses `mailbox()`:
+[In the project's code](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#in-the-projects-code).
+
+## In the project's code
+
+The project's own code (`worker.ts`, or a file it imports) imports the helpers from the package.
+They are built on [jmap-jam](https://github.com/htunnicliff/jmap-jam) (MIT), which the package
+compiles in, so the project installs nothing else.
+
+```ts
+import { mailbox } from "iterate-jmap";
+
+const mail = mailbox({ secret: "/secrets/fastmail" });
+```
+
+`mailbox({ secret, sessionUrl })` sends the token as the placeholder
+`getSecret("/secrets/fastmail", { field: "token" })`, and egress swaps the token in. `sessionUrl` is
+Fastmail's, `https://api.fastmail.com/jmap/session`, unless you give another server's. The mailbox
+reads the session at its first call and keeps it. When that read fails, the next call reads it again.
+
+**The pin.** Every request goes to the session URL's origin, `https://api.fastmail.com`, so the secret
+is pinned to that origin alone (step 1). Fastmail's session names a regional host (such as
+`ams.api.fastmail.com`), which answers on `api.fastmail.com` too, and `mailbox()` never sends to it.
+When the secret is pinned elsewhere, the first call throws an error that quotes egress's refusal: the
+origins the secret is pinned to, and the origin it was not sent to.
+
+```ts
+// from an address one of the identities covers: written to Drafts, submitted, filed in Sent
+const { emailId, submissionId, filedInSent } = await mail.send({
+  from: { name: "The project", email: "project@your-domain.example" },
+  to: ["someone@example.com"],
+  subject: "Re: the order",
+  text: "Thanks, all received.",
+  inReplyTo: "<their-message-id@example.com>",
+  attachments: [{ name: "receipt.pdf", type: "application/pdf", data: bytes }],
+});
+
+// newest first: { text, from, to, after, mailbox: "inbox" | "sent" | an id, limit (20) }
+const recent = await mail.search({ mailbox: "inbox", after: "2026-10-01T00:00:00Z", limit: 10 });
+
+// a thread's messages, oldest first
+const thread = await mail.getThread(recent[0].threadId);
+
+// one message with its text, HTML and attachments ({ name, type, size, blobId }); null when none
+const full = await mail.getEmail(recent[0].id, { bodies: true });
+
+// the mailboxes, one by its role, and the addresses the account may send as
+const mailboxes = await mail.mailboxes();
+const sent = await mail.mailbox("sent");
+const identities = await mail.identities();
+
+// a blob, such as an attachment's body (send uploads its attachments itself)
+const { blobId, size } = await mail.upload(bytes, "application/pdf");
+
+// Masked Email: a new address for one site, every address, and one switched off
+const { id, email } = await mail.createMaskedEmail({
+  forDomain: "https://shop.example",
+  description: "one order",
+});
+const all = await mail.listMaskedEmails();
+await mail.setMaskedEmailState(id, "disabled");
+```
+
+- `send` takes `cc`, `bcc`, `html` and `references` too. An attachment's `data`, as `upload`'s
+  first argument, is a `Uint8Array`, an `ArrayBuffer` or a string.
+- `send` throws before it writes anything when no identity covers `from`. A submission the server
+  refuses throws, and leaves its draft in Drafts. `filedInSent` is false when the message was sent
+  but not moved to Sent.
+- A failed call throws an `Error` that names the call and JMAP's error type, such as
+  `MaskedEmail/set: notFound`.
+- The package exports the types too: `SendInput`, `SendResult`, `SearchInput`, `EmailSummary`,
+  `EmailDetail`, `Attachment`, `Mailbox`, `Identity`, `MaskedEmail`, `CreateMaskedEmail` and
+  `JmapMailbox`.
+
+### Who sent a forwarded mail
+
+Mail that Fastmail forwards to the project's address ([Mail arriving](#mail-arriving)) reaches the
+platform from Fastmail's servers, so the platform's own check sees Fastmail, not the sender.
+Fastmail checked the sender when the mail arrived, and its copy says so in an ARC set that Fastmail
+sealed on top of the message. `fastmailCopies` reads that copy with the mailbox's token, by the
+forwarded mail's Message-ID. `fastmailVerdict` says whether Fastmail's check passed for the From
+domain: a DMARC pass, or a DKIM pass aligned with it.
+
+```ts
+import { fastmailCopies, fastmailVerdict } from "iterate-jmap";
+
+// `received`: the payload of an events.iterate.com/email/received event
+const { messageId, from, subject, text } = received;
+const copies = messageId ? await fastmailCopies({ secret: "/secrets/fastmail" }, messageId) : [];
+const { verified, reason } = fastmailVerdict({ messageId, from, subject, text }, copies);
+```
+
+- `fastmailCopies` tries three times, two seconds apart, since the forwarded copy can reach the
+  platform before Fastmail finds its own. It leaves out copies in Sent.
+- Every copy must match the forwarded mail (From, Subject, the start of the text).
+- Only Fastmail's own ARC set counts: the first and highest, sealed by `messagingengine.com`. A
+  sender's own results sit below it and are never read. The seal's signature is not checked, since
+  the copy comes from Fastmail itself.
+- Whom to trust once a sender is verified is the project's own rule.
 
 ## Using the mailbox
 
-Read this before the first call. Every call is plain `fetch`. The examples are scripts for `run`;
-the config repo's code (`worker.ts`, or a file it imports) makes the same requests with the same
-global `fetch`.
+Read this before the first call. Every call is plain `fetch`. The examples are scripts for `run`,
+which cannot import a package. The project's code makes the same requests through
+[`mailbox()`](#in-the-projects-code).
 
 - **The placeholder:** `authorization: Bearer getSecret("/secrets/fastmail", { field: "token" })`,
   on every request.
@@ -439,7 +539,9 @@ return { id, email };
 
 The fastest way in is a Fastmail rule that forwards a copy of each message to the project's own
 address, `<project>@<its email domain>`, where it lands as an event straight away. The other way is
-to poll on a schedule: [Search](#search-and-read) with `after` set to the last time.
+to poll on a schedule: [Search](#search-and-read) with `after` set to the last time. For a forwarded
+mail, [Who sent a forwarded mail](#who-sent-a-forwarded-mail) says whether Fastmail verified its
+sender.
 
 ## Removing it
 
