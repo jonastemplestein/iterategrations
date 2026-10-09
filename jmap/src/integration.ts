@@ -67,8 +67,8 @@ const hasToken = async (itx: JmapItx): Promise<boolean> =>
  *
  *  On the `jmap` routing slug it answers, for members only, its page at `/`; any other path is a
  *  404. Its install hook (`project/worker-updated`) lists the mailbox on the Dash's Integrations
- *  page. That is all it does: agents and the project's code call Fastmail's JMAP API with `fetch`
- *  and the token's placeholder, as the README says. */
+ *  page. That is all it does: agents call Fastmail's JMAP API with `fetch` and the token's
+ *  placeholder, and the project's code calls it through `mailbox()`, as the README says. */
 export function jmap(): Integration {
   return {
     routingSlug: SLUG,
