@@ -391,6 +391,7 @@ test("the page links to the Dash's one form for the App, its ID and slug public 
           { name: "privateKey", label: "Private key (.pem)", multiline: true },
           { name: "webhookSecret", label: "Webhook secret" },
         ],
+        redirectUrl: `${ORIGIN}/`,
       },
     ],
   );
