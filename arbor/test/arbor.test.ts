@@ -724,6 +724,7 @@ test("an unclear answer to the checkout POST is CheckoutOutcomeUnknownError, and
     () => new Response("", { status: 500 }),
     () => new Response("", { status: 503 }),
     () => new Response("", { status: 408 }),
+    () => new Response("", { status: 302, headers: { location: "/guardians/basket" } }),
     () => new Response("<html>", { status: 200 }),
     () => Response.json({ action_params: [] }),
     () => Response.json([]),

@@ -260,7 +260,8 @@ export async function checkoutBasket(options: {
     throw new CheckoutOutcomeUnknownError(expectedTotal);
   }
   if (!response.ok) {
-    if (response.status >= 500 || response.status === 408)
+    // a redirect can follow a checkout that went through, so only a 4xx is a clear refusal
+    if (response.status < 400 || response.status >= 500 || response.status === 408)
       throw new CheckoutOutcomeUnknownError(expectedTotal);
     throw new Error(
       `Arbor rejected the checkout (HTTP ${response.status}). Read the basket before trying again.`,

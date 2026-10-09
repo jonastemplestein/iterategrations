@@ -750,7 +750,7 @@ order, it:
 6. Returns Arbor's answer, `{ success: true, action_params }`: `action_params.loadPage` can name
    the page the app opens next.
 
-When the answer is unclear (none within 30 seconds, a network failure, HTTP 408 or 5xx, or an
+When the answer is unclear (none within 30 seconds, a network failure, a redirect, HTTP 408 or 5xx, or an
 answer that is not `{ success }`), it throws `CheckoutOutcomeUnknownError`: the basket may have been
 checked out. Read the basket, the invoices
 (`/guardians/customer-account-ui/invoices-dashboard/student-id/<studentId>`) and the week's meal
