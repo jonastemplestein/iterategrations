@@ -142,6 +142,24 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  seesaw:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  tapestry:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   telegram:
     devDependencies:
       '@cloudflare/workers-types':
