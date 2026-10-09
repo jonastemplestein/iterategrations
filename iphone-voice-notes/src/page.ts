@@ -97,7 +97,7 @@ export function servePage(request: Request, view: PageView): Response {
         <li>Tap <b>+</b> at the top right. Name the shortcut <b>Voice Note</b>.</li>
         <li>Add <b>Record Audio</b>. Tap its arrow and set <b>Audio Quality</b> to Normal, <b>Start Recording</b> to Immediately, and <b>Finish Recording</b> to On Tap.</li>
         <li>Add <b>Get Contents of URL</b>, and set its URL to:${copyRow(`${here}/webhook`)}</li>
-        <li>Tap its arrow. Set <b>Method</b> to POST. Under <b>Headers</b>, tap <b>Add new header</b>: the key is${copyRow(view.header)}and the value is the token. Add a second header, <code>Content-Type</code>, with the value <code>audio/mp4</code>. Do not use <code>Authorization</code>: the project's host answers that header itself, so the token never reaches this receiver.</li>
+        <li>Tap its arrow. Set <b>Method</b> to POST. Under <b>Headers</b>, tap <b>Add new header</b>: the key is${copyRow(view.header)}and the value is the token. Do not use <code>Authorization</code>: the project's host answers that header itself, so the token never reaches this receiver.</li>
         <li>Set <b>Request Body</b> to File, tap the <b>File</b> field, and choose <b>Recorded Audio</b>.</li>
         <li>Optional: add <b>Vibrate Device</b> at the end, to feel a buzz when the upload is in. A failed upload shows an error banner.</li>
         <li>Tap the play button once, while the phone is unlocked, and choose <b>Always Allow</b> for the microphone and for this domain. Otherwise those questions come up on the lock screen and stop the shortcut.</li>
