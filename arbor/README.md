@@ -11,9 +11,10 @@ not affiliated with Arbor Education.
 The project never holds the password or the token: they live in a secret, and iterate's egress
 swaps the token into each request and logs in again when Arbor answers 401.
 
-It is the package `iterate-arbor`. `arborFetch` and `arborGet` add what every call needs,
-`readForm` and the other readers take apart Arbor's pages, and `submitForm` is the one call that
-changes something. The login is the secret's refresh. `arbor()` is one element in the
+It is the package `iterate-arbor`. `arborFetch` and `arborGet` add what every call needs, and
+`readForm` and the other readers take apart Arbor's pages. `submitForm`, `chooseMeals` and
+`removeMealChoices` change things at the school, and `checkoutBasket` is the one call that can spend
+money, with its guards ([Booking meals](#booking-meals)). The login is the secret's refresh. `arbor()` is one element in the
 `integrations` array of the project's config worker, with a page of its own for the project's
 members: the status. The project's Integrations page in the Dash shows an Arbor card ("Set up by
 your coding agent" until the account's secret exists), with an **Open** button to the page and a
@@ -148,7 +149,8 @@ can import the helpers.
 By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/index.ts`](src/index.ts) (`arbor()` and the exports),
 [`src/page.ts`](src/page.ts) (its page), [`src/fetch.ts`](src/fetch.ts) (`arborFetch`, `arborGet`,
-`arborUrl` and `submitForm`), [`src/tree.ts`](src/tree.ts) (the readers) and
+`arborUrl` and `submitForm`), [`src/tree.ts`](src/tree.ts) (the readers),
+[`src/basket.ts`](src/basket.ts) (the basket and meal booking) and
 [`src/exchange.ts`](src/exchange.ts), and commit them to `/repos/config` under `arbor/`. They have no
 dependencies. You own the copy. The import then reads `from "./arbor/index.ts"`.
 
@@ -203,9 +205,14 @@ import {
   arborGet,
   arborUrl,
   attributesOf,
+  checkoutBasket,
+  chooseMeals,
   fieldValues,
   findNodes,
+  moneyOf,
+  readBasket,
   readForm,
+  removeMealChoices,
   submitForm,
   textOf,
 } from "iterate-arbor";
@@ -222,7 +229,9 @@ import {
   `attributesOf(node)` gives a component's attributes (Arbor sends `[]` for none). `textOf(html)`
   makes Arbor's HTML text plain. `fieldValues(item)` flattens one item of a data answer.
   `readForm(page)` gives a page's form actions and its fields, with their options and the value the
-  app would send.
+  app would send. `moneyOf(text)` reads an amount (`£2.50`, `GBP 2.50`) as `{ amount, currency }`.
+- `readBasket(site)`, `chooseMeals(site, formUrl, choices)`, `removeMealChoices(site, formUrl)` and
+  `checkoutBasket({ site, expectedTotal })`: [Booking meals](#booking-meals).
 
 ```js
 const site = "https://your-school.uk.arbor.education"; // the secret's public site
@@ -407,8 +416,10 @@ return [
   `meal_provision_<Unix time of that day's midnight, UK time>`, `label` the date, and a
   `form-field-combobox-option` per meal (`value` such as `"12_3"`, `content` "Pasta Bake -
   £0.00", `selected: "1"` for the current choice, and `value: ""` for "No choice selected").
-  Hidden fields carry the student and `is_mobile_app: 1`. To change the choices, see
-  [Choosing meals](#choosing-meals).
+  Hidden fields carry the student and `is_mobile_app: 1`. The form also has a
+  `delete-meal-provisions` action (`/guardians/basket-item/delete-meal-provisions/`) whose hidden
+  `basketItems` names the week's choices in the basket. To change the choices, see
+  [Booking meals](#booking-meals).
 - `GET /guardians/customer-account/meals-balance-kpi/student-id/<studentId>` (live): the meals
   balance, as a KPI: `[{ mainValue: "£0.00", url }]`, the `url` being the meals account.
 - The meals account: [Payments and balances](#payments-and-balances).
@@ -511,9 +522,9 @@ Read-only here. Paying is not part of this package: see [Payments](#payments).
   notes, in the same shape.
 - `GET /guardians/customer-account/payment-total-kpi/student-id/<studentId>` (live): the total
   outstanding, as a KPI.
-- `GET /guardians/my-mis-ui/my-basket` (live): the basket. Its `column-title` is "My Basket:
+- `GET /guardians/my-mis-ui/my-basket` (live, empty): the basket. Its `column-title` is "My Basket:
   £0.00"; an empty basket is a `banner`. Meal choices, top-ups, trips and clubs go into the basket,
-  and the parent pays for it in one checkout.
+  and the parent checks it out in one go. `readBasket` reads it: [Booking meals](#booking-meals).
 
 ### Trips and clubs
 
@@ -593,25 +604,7 @@ success, `action_params.loadPage` or `downloadUrl` can name where the app goes n
 change. `readForm(page)` gives the actions and the fields with the values the app would send, so
 the person can see the change before you send it.
 
-#### Choosing meals
-
-The week's form ([Meals](#meals)) has the action `process-meal-provisions`
-(`/guardians/basket/process-meal-provisions/meal-rotation-menu-id/<menuId>/start-date/<YYYY-MM-DD>/end-date/<YYYY-MM-DD>`).
-Send every field of that action, with the day you change set to the option's `value`. The banner
-says the choices take effect only after the basket checkout, which is a payment step this package
-does not do ([Payments](#payments)). Not tried.
-
-```js
-// The task: choose a meal for one day (this changes the child's meals: only with the person's say-so)
-const form = await arborGet("<the form url of the week, from the menu's weeks>");
-const { actions, fields } = readForm(form); // paste readForm from src/tree.ts into the script
-const action = actions.find((candidate) => candidate.name === "process-meal-provisions");
-const values = Object.fromEntries(
-  fields.filter((field) => field.action === action.name).map((field) => [field.field, field.value]),
-);
-values["meal_provision_<the day's field>"] = "<the chosen option's value>";
-return submitForm(site, action.url, values); // paste submitForm from src/fetch.ts into the script
-```
+Meal choices and the basket's checkout are forms too: [Booking meals](#booking-meals).
 
 #### Writing to the school
 
@@ -627,14 +620,8 @@ same way: load the page a row or button links to, and read its form. A `button` 
 
 #### Payments
 
-The app pays by card through Stripe (code), and this package does not. For the record: it posts an
-order to `POST <site>/api/payments/v1/orders` (`orderType` such as `basket`, `trip_registration`,
-`club_membership`, `school_shop`, with `client: "parent_app"`), then
-`POST <site>/api/payments/v1/payment-sessions` with the order's `orderId`, and hands the answer's
-`paymentSession.paymentIntent.clientSecret` to Stripe's payment sheet. Older schools take a card
-form instead (`role: "sca-credit-card-action"`), and
-`/?/guardians/arbor-app-ui/process-payment-on-mobile-app-v2?stripeurl=…` finishes a payment in a
-web view.
+Card payments (a basket, a top-up, a trip, a club, the school shop) need a person: see
+[How the app pays](#how-the-app-pays).
 
 #### Other calls in the app
 
@@ -649,6 +636,149 @@ web view.
   `POST <site>/oauth/authorize` then `/oauth/token` with `client_id: "Arbor"` (code): logins to
   one school's site, which the app keeps for its admin login screen. The parent login is the one
   in step 1.
+
+### Booking meals
+
+**`chooseMeals`, `removeMealChoices` and `checkoutBasket` change the child's meals, and
+`checkoutBasket` can spend money.** Never call them without the person's say-so for those meals
+and that total. **None of this was tried against a real school:** it is from the app's code, and
+from the pages read live (the meal forms, and an empty basket). A meal choice is booked in two
+steps, as in the app: the choices go into the basket, and the basket's checkout confirms them. The
+form's banner says so: "complete your basket checkout to confirm".
+
+```js
+const week = "<the form url of a week, from a menu's weeks: Meals>";
+await chooseMeals(site, week, { "<the day's field, meal_provision_…>": "<the option's value>" });
+const basket = await readBasket(site); // show the person basket.items and basket.total
+const answer = await checkoutBasket({
+  site,
+  expectedTotal: basket.total, // the total the person agreed to, such as { amount: 0, currency: "GBP" }
+  expectedItems: basket.items.length, // optional: the rows the person saw
+});
+```
+
+#### The basket
+
+`readBasket(site)` sends `GET /guardians/my-mis-ui/my-basket` (live) and returns:
+
+- `total`: the amount in the page's `column-title` ("My Basket: £5.00"), as
+  `{ amount: 5, currency: "GBP" }`, or null.
+- `items`: each `property-row` of the page, as `{ label, lines, amount }`. Only an empty basket was
+  read live, so the rows of a full basket were not seen: show them to the person as they are.
+- `empty`: the page's "There are no items in your basket" banner, or no rows.
+- `checkout`: the checkout button and its form, or null: `route` (below), `role`, `label`,
+  `action` (`{ name, url }`), the action's `fields` (as `readForm` gives them: hidden fields, and a
+  choice of how to pay if the school offers one) and the form's `amount` (its `amount` or `payment`
+  field), and the whole `page`.
+
+#### Choosing and removing meals
+
+`chooseMeals(site, formUrl, choices)` reads the week's form again (`GET` of `formUrl`, live), and
+refuses a day or an option the form does not have. Then it sends the form's
+`process-meal-provisions` action once, through `submitForm` (code):
+
+```http
+POST <site>/guardians/basket/process-meal-provisions/meal-rotation-menu-id/<menuId>/start-date/<YYYY-MM-DD>/end-date/<YYYY-MM-DD>?format=json
+
+{ "fields": { "student": { "value": { "value": "1_<studentId>_0", … } }, "is_mobile_app": { "value": 1 },
+  "meal_provision_<time>": { "value": "<option value>" }, … } }
+```
+
+It sends every field of the action that has a value (the hidden fields and each day's current
+choice), with the chosen days changed. The answer is `submitForm`'s: check `success` and
+`action_params.validation_errors`. A day past its deadline has no field in the form.
+
+`removeMealChoices(site, formUrl)` sends the same form's `delete-meal-provisions` action once
+(`POST <site>/guardians/basket-item/delete-meal-provisions/?format=json`, code) with its hidden
+`basketItems`: the week's choices that are in the basket. It refuses when there are none.
+
+#### How the app pays
+
+The app reads the checkout button's `role` and the form action's `url` (code):
+
+1. **A plain form action** (`role: "form-action"`, the action's `url` under
+   `/guardians/basket/checkout`): the app posts the form, as every other form. No card is part of
+   it: this is how a basket that costs nothing (free school meals) or one the form pays otherwise
+   would check out. `checkoutBasket` sends only this route. We did not see the server offer it: an
+   empty basket has no checkout button.
+2. **Stripe's payment sheet** (`role: "sca-credit-card-action"`, a `url` under
+   `/guardians/basket/checkout`): the app posts `{ orderType: "basket", client: "parent_app" }` to
+   `POST <site>/api/payments/v1/orders`, then the order's `{ orderId }` to
+   `POST <site>/api/payments/v1/payment-sessions`, and opens Stripe's payment sheet with the
+   answer's `paymentSession.paymentIntent.clientSecret`. The person pays there with a card or Google
+   Pay, and Stripe tells Arbor. The app calls nothing after that.
+3. **Google Pay** (`role: "sca-credit-card-action"`, when the user settings'
+   `payment.enableMobilePay` is on): the phone's wallet makes a Stripe payment method, and the app
+   posts the form with its `payment_method_id`.
+4. **A card form**: the app takes the card number in its own fields and tokenises it with Stripe,
+   and a 3-D Secure check runs in a web view of
+   `<site>/?/guardians/arbor-app-ui/process-payment-on-mobile-app-v2?stripeurl=<action>&amount=<amount>&fields=<fields>`.
+
+Routes 2 to 4 need a person, a card or a phone wallet, and often a 3-D Secure check in a browser.
+An API cannot finish them, so `checkoutBasket` refuses them with that reason, before it sends
+anything: the person pays in the Arbor app or on the Arbor website instead. Paying from a meals
+account's balance is not in the app's code: if a school offers it, it is a choice in the checkout
+form (route 1), which `readBasket` shows in `checkout.fields`.
+
+#### Checking out
+
+`checkoutBasket({ site, expectedTotal, expectedItems? })` checks out the basket by route 1. In
+order, it:
+
+1. Checks its arguments: an `https` site, a total with an amount of 0 or more and a currency, and,
+   if given, a whole number of rows of 1 or more.
+2. Reads the basket again (`readBasket`).
+3. Refuses with every blocker it finds: the basket is empty; its row count is not `expectedItems`; it has
+   no total; it has no checkout button; the checkout is a card payment (routes 2 to 4); the button
+   has no form action; the action is not under `/guardians/basket/checkout`; the form's amount is
+   not the basket's total; a required field, or a choice in the form, has no value.
+4. Refuses unless the total is still `expectedTotal`, in pence and currency.
+5. Sends one POST of the checkout form, as the app sends a form, and never sends it again:
+
+   ```js
+   const url = arborUrl(site, basket.checkout.action.url);
+   url.searchParams.set("format", "json");
+   await arborFetch(url, {
+     method: "POST",
+     // every field of the checkout action, at the value readForm gives it
+     body: JSON.stringify({ fields: { "<targetField>": { value: "<its value>" } } }),
+     redirect: "manual",
+     signal: AbortSignal.timeout(30_000),
+   });
+   ```
+
+6. Returns Arbor's answer, `{ success: true, action_params }`: `action_params.loadPage` can name
+   the page the app opens next.
+
+When the answer is unclear (none within 30 seconds, a network failure, HTTP 408 or 5xx, or an
+answer that is not `{ success }`), it throws `CheckoutOutcomeUnknownError`: the basket may have been
+checked out. Read the basket, the invoices
+(`/guardians/customer-account-ui/invoices-dashboard/student-id/<studentId>`) and the week's meal
+choices before anything else, and never check out again blindly. Any other HTTP error, or
+`success: false` (with Arbor's reasons from `validation_errors`), is "Arbor rejected the checkout":
+nothing was booked. Egress sends a request again only after a 401, when Arbor refused the token.
+
+A run script cannot import these helpers. To let the project's agents book meals, give the
+worker's class methods that call them: an agent's script calls each as `itx.config.<method>(…)`.
+Keep choosing and paying apart, so the person sees the basket's total between the two. For
+example, as the recipe's `MEMBER`, with `chooseMeals`, `readBasket` and `checkoutBasket` added to
+its `IMPORT`:
+
+```ts
+async arborChooseMeals(formUrl: string, choices: Record<string, string>) {
+  return chooseMeals("<the school's site>", formUrl, choices);
+}
+async arborBasket() {
+  const { page, ...basket } = await readBasket("<the school's site>");
+  return basket;
+}
+async arborCheckout(expectedTotal: { amount: number; currency: string }, expectedItems?: number) {
+  return checkoutBasket({ site: "<the school's site>", expectedTotal, expectedItems });
+}
+```
+
+Show the person `arborBasket()`'s rows and total, and pass the total they agree to as
+`expectedTotal`.
 
 ### The login
 

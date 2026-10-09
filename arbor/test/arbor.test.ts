@@ -8,6 +8,12 @@ import { afterEach, test } from "vite-plus/test";
 import { EXCHANGE_SOURCE, exchange } from "../dist/exchange.js";
 import {
   arbor,
+  checkoutBasket,
+  CheckoutOutcomeUnknownError,
+  chooseMeals,
+  moneyOf,
+  readBasket,
+  removeMealChoices,
   arborFetch,
   arborGet,
   arborUrl,
@@ -37,7 +43,13 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-type Sent = { url: string; method: string; headers: Record<string, string>; body: any };
+type Sent = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any;
+  init: RequestInit;
+};
 
 /** Arbor behind the global `fetch`: `answer` gets each request's URL, and what it leaves
  *  unanswered is HTTP 500. */
@@ -50,6 +62,7 @@ function fakeArbor(answer: (url: string) => Response | Promise<Response> | undef
       method: request.method,
       headers: Object.fromEntries(request.headers),
       body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      init,
     });
     return (await answer(request.url)) ?? new Response("no answer", { status: 500 });
   }) as typeof fetch;
@@ -343,6 +356,418 @@ test("readForm gives the form actions and each field with its action, options an
     required: true,
     value: null,
   });
+});
+
+// ------------------------------------------- the basket and meal booking
+
+const BASKET_URL = `${SITE}/guardians/my-mis-ui/my-basket`;
+const CHECKOUT_ACTION = "/guardians/basket/checkout/payment-method/free";
+const CHECKOUT_URL = `${SITE}${CHECKOUT_ACTION}?format=json`;
+const WEEK_FORM =
+  "/guardians/meal-ui/setup-meal-choice/meal-rotation-menu-id/9/student-id/42/date/2030-01-07";
+const REVIEWED = { site: SITE, expectedTotal: { amount: 5, currency: "GBP" } };
+
+/** A basket page with two meal rows at £2.50, a total of £5.00, and a checkout button: a plain form
+ *  action (`form-action`) unless `role` says otherwise. `change` alters the page before it is sent. */
+function basketPage(
+  options: { role?: string; total?: string; amount?: string; change?: (page: any) => void } = {},
+) {
+  const row = (label: string, date: string) =>
+    node("property-row", { label, value: "£2.50" }, [
+      node("property-row-content", [], [], `<b>Date:</b> ${date}`),
+    ]);
+  const page = node(
+    "page",
+    [],
+    [
+      node(
+        "column",
+        [],
+        [
+          node("column-title", [], [], `My Basket: ${options.total ?? "£5.00"}`),
+          node("section", { title: "Meals" }, [
+            row("Lunch: Pasta Bake (Sam Example)", "07 Jan 2030"),
+            row("Lunch: Fish Pie (Sam Example)", "08 Jan 2030"),
+          ]),
+          node("form-action", { name: "checkout", url: CHECKOUT_ACTION }),
+          node("form-field-hidden", {
+            targetField: "amount",
+            formActionName: "checkout",
+            value: options.amount ?? "GBP 5.00",
+          }),
+          node("form-field-hidden", {
+            targetField: "client",
+            formActionName: "checkout",
+            value: "parent_app",
+          }),
+          node(
+            "action-panel",
+            [],
+            [
+              node("button", {
+                formActionName: "checkout",
+                label: "Checkout",
+                role: options.role ?? "form-action",
+              }),
+            ],
+          ),
+        ],
+      ),
+    ],
+  );
+  options.change?.(page);
+  return page;
+}
+
+/** Arbor with a basket, a week's meal form, and answers for the form actions. `checkout` answers the
+ *  checkout POST. */
+function bookingArbor(
+  options: Parameters<typeof basketPage>[0] & {
+    checkout?: () => Response | Promise<Response>;
+    form?: any;
+  } = {},
+) {
+  const sent = fakeArbor((url) => {
+    if (url === BASKET_URL) return Response.json(basketPage(options));
+    if (url === `${SITE}${WEEK_FORM}`) return Response.json(options.form ?? MEAL_FORM);
+    if (url === CHECKOUT_URL)
+      return options.checkout
+        ? options.checkout()
+        : Response.json({
+            success: true,
+            action_params: { loadPage: "/guardians/my-mis-ui/my-basket" },
+          });
+    if (url.endsWith("?format=json")) return Response.json({ success: true, action_params: [] });
+  });
+  return { sent, checkouts: () => sent.filter((request) => request.url === CHECKOUT_URL) };
+}
+
+test("moneyOf reads Arbor's amounts and never a date", () => {
+  assert.deepEqual(moneyOf("£2.50"), { amount: 2.5, currency: "GBP" });
+  assert.deepEqual(moneyOf("GBP 1,234.50"), { amount: 1234.5, currency: "GBP" });
+  assert.deepEqual(moneyOf("<b>Amount: </b>&pound;8.00"), { amount: 8, currency: "GBP" });
+  assert.deepEqual(moneyOf("12.5"), { amount: 12.5, currency: "GBP" });
+  assert.deepEqual(moneyOf(3), { amount: 3, currency: "GBP" });
+  for (const text of ["Week beginning 07 Jan 2030", "", null, undefined, "free"])
+    assert.equal(moneyOf(text), null, String(text));
+});
+
+test("readBasket reads the total, the rows and the checkout route, and an empty basket", async () => {
+  const sent = bookingArbor();
+  const basket = await readBasket(SITE);
+  assert.deepEqual(basket.total, { amount: 5, currency: "GBP" });
+  assert.equal(basket.empty, false);
+  assert.deepEqual(basket.items, [
+    {
+      label: "Lunch: Pasta Bake (Sam Example)",
+      lines: ["Date: 07 Jan 2030"],
+      amount: { amount: 2.5, currency: "GBP" },
+    },
+    {
+      label: "Lunch: Fish Pie (Sam Example)",
+      lines: ["Date: 08 Jan 2030"],
+      amount: { amount: 2.5, currency: "GBP" },
+    },
+  ]);
+  assert.equal(basket.checkout!.route, "form");
+  assert.deepEqual(basket.checkout!.action, { name: "checkout", url: CHECKOUT_ACTION });
+  assert.deepEqual(basket.checkout!.amount, { amount: 5, currency: "GBP" });
+  assert.deepEqual(
+    basket.checkout!.fields.map((field: any) => field.field),
+    ["amount", "client"],
+  );
+  assert.equal(sent.sent.length, 1);
+  assert.equal(sent.sent[0]!.method, "GET");
+
+  bookingArbor({ role: "sca-credit-card-action" });
+  assert.equal((await readBasket(SITE)).checkout!.route, "card");
+
+  const empty = node(
+    "page",
+    [],
+    [
+      node(
+        "column",
+        [],
+        [
+          node("column-title", [], [], "My Basket: £0.00"),
+          node("banner", { type: "info", title: "There are no items in your basket" }),
+        ],
+      ),
+    ],
+  );
+  fakeArbor(() => Response.json(empty));
+  const nothing = await readBasket(SITE);
+  assert.deepEqual(
+    {
+      total: nothing.total,
+      empty: nothing.empty,
+      items: nothing.items,
+      checkout: nothing.checkout,
+    },
+    { total: { amount: 0, currency: "GBP" }, empty: true, items: [], checkout: null },
+  );
+});
+
+test("chooseMeals reads the week's form again, then sends its process action once with every field and the chosen days changed", async () => {
+  const { sent } = bookingArbor();
+  await chooseMeals(SITE, WEEK_FORM, { meal_provision_1894060800: "7_1" });
+  assert.deepEqual(
+    sent.map((request) => [request.method, request.url]),
+    [
+      ["GET", `${SITE}${WEEK_FORM}`],
+      [
+        "POST",
+        `${SITE}/guardians/basket/process-meal-provisions/meal-rotation-menu-id/9/start-date/2030-01-07/end-date/2030-01-11?format=json`,
+      ],
+    ],
+  );
+  assert.deepEqual(sent[1]!.body, {
+    fields: {
+      student: { value: { value: "1_42_0", label: "Sam Example", group: "Student" } },
+      meal_provision_1893974400: { value: "7_1" },
+      meal_provision_1894060800: { value: "7_1" },
+    },
+  });
+});
+
+test("chooseMeals refuses a day or an option the form does not have, and no choices, before it sends anything", async () => {
+  for (const [choices, message] of [
+    [{}, "No meal choices given"],
+    [{ meal_provision_1: "7_1" }, "The meal form has no day meal_provision_1"],
+    [{ student: "7_1" }, "The meal form has no day student"],
+    [
+      { meal_provision_1894060800: "7_2" },
+      "The meal form has no option 7_2 for meal_provision_1894060800",
+    ],
+  ] as const) {
+    const { sent } = bookingArbor();
+    await assert.rejects(chooseMeals(SITE, WEEK_FORM, choices), { message });
+    assert.ok(sent.every((request) => request.method === "GET"));
+  }
+  const { sent } = bookingArbor({ form: node("page") });
+  await assert.rejects(chooseMeals(SITE, WEEK_FORM, { a: "b" }), {
+    message: "This page has no meal choice form (process-meal-provisions)",
+  });
+  assert.ok(sent.every((request) => request.method === "GET"));
+});
+
+test("removeMealChoices sends the week's delete action once with the basket items it names, and refuses when it names none", async () => {
+  const withItems = structuredClone(MEAL_FORM);
+  findNodes(withItems as any, "form-field-hidden")[1]!.attributes = {
+    targetField: "basketItems",
+    formActionName: "delete-meal-provisions",
+    value: [{ _objectTypeId: 77, _objectId: 501 }],
+  };
+  const { sent } = bookingArbor({ form: withItems });
+  await removeMealChoices(SITE, WEEK_FORM);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]!.url, `${SITE}/guardians/basket-item/delete-meal-provisions/?format=json`);
+  assert.deepEqual(sent[1]!.body, {
+    fields: { basketItems: { value: [{ _objectTypeId: 77, _objectId: 501 }] } },
+  });
+  const none = bookingArbor();
+  await assert.rejects(removeMealChoices(SITE, WEEK_FORM), {
+    message: "This week has no meal choices in the basket",
+  });
+  assert.equal(none.sent.length, 1);
+});
+
+test("checkoutBasket reads the basket again, then posts the checkout form once, with redirect manual and a timeout, and returns Arbor's answer", async () => {
+  const { sent, checkouts } = bookingArbor();
+  assert.deepEqual(await checkoutBasket({ ...REVIEWED, expectedItems: 2 }), {
+    success: true,
+    action_params: { loadPage: "/guardians/my-mis-ui/my-basket" },
+  });
+  assert.deepEqual(
+    sent.map((request) => [request.method, request.url]),
+    [
+      ["GET", BASKET_URL],
+      ["POST", CHECKOUT_URL],
+    ],
+  );
+  const [checkout] = checkouts();
+  assert.deepEqual(checkout!.body, {
+    fields: { amount: { value: "GBP 5.00" }, client: { value: "parent_app" } },
+  });
+  assert.equal(checkout!.headers.authorization, AUTHORIZATION);
+  assert.equal(checkout!.headers["arbor-client"], "Mobile");
+  assert.equal(checkout!.headers["content-type"], "application/json");
+  assert.equal(checkout!.init.redirect, "manual");
+  assert.ok(checkout!.init.signal instanceof AbortSignal);
+});
+
+test("checkoutBasket refuses bad arguments before any request", async () => {
+  const { sent } = bookingArbor();
+  for (const bad of [
+    { site: "not a url", expectedTotal: { amount: 5, currency: "GBP" } },
+    {
+      site: "http://example-primary.uk.arbor.education",
+      expectedTotal: { amount: 5, currency: "GBP" },
+    },
+    { site: SITE, expectedTotal: { amount: -1, currency: "GBP" } },
+    { site: SITE, expectedTotal: { amount: Number.NaN, currency: "GBP" } },
+    { site: SITE, expectedTotal: { amount: 5, currency: "" } },
+    { site: SITE },
+    { ...REVIEWED, expectedItems: 0 },
+    { ...REVIEWED, expectedItems: 1.5 },
+  ])
+    await assert.rejects(checkoutBasket(bad as typeof REVIEWED), {
+      message:
+        "The school's site and the reviewed expected total/currency (and item count, if given) are required",
+    });
+  assert.equal(sent.length, 0);
+});
+
+test("checkoutBasket refuses when the total is not the one the person agreed to, and posts nothing", async () => {
+  for (const expectedTotal of [
+    { amount: 4.99, currency: "GBP" },
+    { amount: 5, currency: "EUR" },
+  ]) {
+    const { checkouts } = bookingArbor();
+    await assert.rejects(checkoutBasket({ site: SITE, expectedTotal }), {
+      message: "The basket's total has changed; review the basket again",
+    });
+    assert.equal(checkouts().length, 0);
+  }
+  const { checkouts } = bookingArbor({ total: "£5.0000001" });
+  assert.equal((await checkoutBasket(REVIEWED)).success, true); // pence, not floating point
+  assert.equal(checkouts().length, 1);
+});
+
+test("checkoutBasket refuses a card payment with a clear reason, and posts nothing", async () => {
+  const { sent } = bookingArbor({ role: "sca-credit-card-action" });
+  await assert.rejects(checkoutBasket(REVIEWED), {
+    message:
+      "Checkout blocked: This basket is paid by card (Stripe's payment sheet, Google Pay or a card form with 3-D Secure), which only a person can do in the Arbor app or on the Arbor website",
+  });
+  assert.deepEqual(
+    sent.map((request) => request.method),
+    ["GET"],
+  );
+});
+
+test("checkoutBasket names every other blocker, and posts nothing", async () => {
+  const drop = (name: string) => (page: any) => {
+    const column = page.children[0];
+    column.children = column.children.filter((child: any) => child.name !== name);
+  };
+  const cases: [Parameters<typeof bookingArbor>[0], string, number?][] = [
+    [
+      {
+        change: (page) => {
+          const column = page.children[0];
+          column.children = column.children.filter((child: any) => child.name !== "section");
+          column.children.push(node("banner", { title: "There are no items in your basket" }));
+        },
+      },
+      "The basket is empty",
+    ],
+    [{}, "The basket has 2 rows, not the 3 the person reviewed", 3],
+    [{ total: "unknown" }, "The basket's total is unavailable"],
+    [{ change: drop("action-panel") }, "The basket has no checkout button"],
+    [
+      {
+        role: "sca-credit-card-action",
+        change: drop("form-action"),
+      },
+      "This basket is paid by card (Stripe's payment sheet, Google Pay or a card form with 3-D Secure), which only a person can do in the Arbor app or on the Arbor website; The checkout button has no form action",
+    ],
+    [
+      {
+        role: "sca-credit-card-action",
+        change: (page) => {
+          findNodes(page, "form-action")[0]!.attributes = {
+            name: "checkout",
+            url: "/guardians/trip/pay",
+          };
+        },
+      },
+      "This basket is paid by card (Stripe's payment sheet, Google Pay or a card form with 3-D Secure), which only a person can do in the Arbor app or on the Arbor website; The checkout action is not a basket checkout: /guardians/trip/pay",
+    ],
+    [{ amount: "GBP 4.00" }, "The checkout form's amount is not the basket's total"],
+    [
+      {
+        change: (page) =>
+          page.children[0].children.push(
+            node(
+              "form-field-combobox",
+              { targetField: "payment_method", formActionName: "checkout", label: "Pay with" },
+              [
+                node(
+                  "form-field-combobox-option",
+                  { selected: "", value: "credit" },
+                  [],
+                  "Account credit",
+                ),
+              ],
+            ),
+          ),
+      },
+      "The checkout form's Pay with has no value",
+    ],
+  ];
+  for (const [change, blocker, expectedItems] of cases) {
+    const { checkouts } = bookingArbor(change);
+    await assert.rejects(
+      checkoutBasket({ ...REVIEWED, ...(expectedItems ? { expectedItems } : {}) }),
+      { message: `Checkout blocked: ${blocker}` },
+    );
+    assert.equal(checkouts().length, 0);
+  }
+});
+
+test("an unclear answer to the checkout POST is CheckoutOutcomeUnknownError, and the POST is never sent again", async () => {
+  const unclear: (() => Response | Promise<Response>)[] = [
+    () => Promise.reject(new TypeError("fetch failed")),
+    () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError")),
+    () => new Response("", { status: 500 }),
+    () => new Response("", { status: 503 }),
+    () => new Response("", { status: 408 }),
+    () => new Response("<html>", { status: 200 }),
+    () => Response.json({ action_params: [] }),
+    () => Response.json([]),
+  ];
+  for (const checkout of unclear) {
+    const { checkouts } = bookingArbor({ checkout });
+    const error = await checkoutBasket(REVIEWED).catch((error: unknown) => error);
+    assert.ok(error instanceof CheckoutOutcomeUnknownError);
+    assert.deepEqual(error.expectedTotal, { amount: 5, currency: "GBP" });
+    assert.equal(
+      error.message,
+      "The basket checkout outcome is unknown. Read the basket (readBasket), the invoices and the meal choices before anything else; the basket may have been checked out.",
+    );
+    assert.equal(checkouts().length, 1);
+  }
+});
+
+test("a refusal of the checkout POST says so, and is not an unknown outcome", async () => {
+  for (const [checkout, message] of [
+    [
+      () => new Response("", { status: 409 }),
+      "Arbor rejected the checkout (HTTP 409). Read the basket before trying again.",
+    ],
+    [
+      () =>
+        Response.json({
+          success: false,
+          action_params: {
+            validation_errors: { __form__: ["<b>Deadline</b> passed"], amount: ["Too low"] },
+          },
+        }),
+      "Arbor rejected the checkout: Deadline passed; Too low. Read the basket before trying again.",
+    ],
+    [
+      () => Response.json({ success: false }),
+      "Arbor rejected the checkout. Read the basket before trying again.",
+    ],
+  ] as const) {
+    const { checkouts } = bookingArbor({ checkout });
+    const error = await checkoutBasket(REVIEWED).catch((error: unknown) => error);
+    assert.ok(error instanceof Error && !(error instanceof CheckoutOutcomeUnknownError));
+    assert.equal(error.message, message);
+    assert.equal(checkouts().length, 1);
+  }
 });
 
 // ------------------------------------------- the login, as the secret's refresh

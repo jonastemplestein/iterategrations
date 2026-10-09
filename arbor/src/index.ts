@@ -1,5 +1,14 @@
 import { servePage } from "./page.js";
 
+export {
+  checkoutBasket,
+  CheckoutOutcomeUnknownError,
+  chooseMeals,
+  moneyOf,
+  readBasket,
+  removeMealChoices,
+} from "./basket.js";
+export type { Basket, BasketCheckout, Money } from "./basket.js";
 export { exchange, EXCHANGE_SOURCE } from "./exchange.js";
 export { arborFetch, arborGet, arborUrl, submitForm } from "./fetch.js";
 export type { FormAnswer } from "./fetch.js";
