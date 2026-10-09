@@ -9,6 +9,8 @@ export type VoiceNotesItx = {
       path: string;
       egress: { urls: string[] };
       description?: string;
+      /** Where the Dash's form sends the person once it is saved. */
+      redirectUrl?: string;
     }): Promise<{ url: string }>;
   };
   files: {
@@ -116,14 +118,16 @@ const cardOf = (slug: string, saved: boolean) => ({
 const hasToken = async (itx: VoiceNotesItx): Promise<boolean> =>
   (await itx.secrets.list()).some((secret) => secret.path === TOKEN_SECRET);
 
-/** The platform's page where a member enters the token (or replaces it): the link is stateless,
- *  and nothing is stored until they save. Null when the platform could not make one. */
-const collectUrl = async (itx: VoiceNotesItx): Promise<string | null> =>
+/** The platform's page where a member enters the token (or replaces it), which sends them back to
+ *  `here` once it is saved: the link is stateless, and nothing is stored until they save. Null when
+ *  the platform could not make one. */
+const collectUrl = async (itx: VoiceNotesItx, here: string): Promise<string | null> =>
   itx.secrets
     .collectFromUser({
       path: TOKEN_SECRET,
       egress: { urls: ["https://iphone-voice-notes.invalid"] }, // only ever compared, never sent
       description: `The token your iPhone voice-note shortcut sends in its **${TOKEN_HEADER}** header: make it up, save it here, and put the same value in the shortcut.`,
+      redirectUrl: here,
     })
     .then((link) => link.url)
     .catch(() => null);
@@ -258,7 +262,8 @@ export function iphoneVoiceNotes(options: IphoneVoiceNotesOptions = {}): Integra
   return {
     routingSlug: slug,
     async fetch(request, host) {
-      const { pathname } = new URL(request.url);
+      const url = new URL(request.url);
+      const { pathname } = url;
       if (pathname === "/webhook") {
         using itx = host.getItx();
         return await receive(request, itx);
@@ -268,9 +273,11 @@ export function iphoneVoiceNotes(options: IphoneVoiceNotesOptions = {}): Integra
       if (request.method !== "GET" || pathname !== "/")
         return new Response("Not found\n", { status: 404 });
       using itx = host.getItx();
+      // this page, under the base path a paths ingress strips
+      const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}/`;
       const [saved, collect, notes] = await Promise.all([
         hasToken(itx),
-        collectUrl(itx),
+        collectUrl(itx, here),
         newestNotes(itx, 5),
       ]);
       return servePage(request, {

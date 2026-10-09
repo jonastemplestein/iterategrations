@@ -45,6 +45,8 @@ export type GithubItx = {
         placeholder?: string;
         pattern?: string;
       }[];
+      /** Where the Dash's form sends the person once it is saved. */
+      redirectUrl?: string;
     }): Promise<{ path: string; url: string }>;
   };
   cd(path: string): {

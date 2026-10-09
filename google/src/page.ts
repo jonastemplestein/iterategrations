@@ -109,14 +109,16 @@ const FIELDS = [
 ];
 
 /** The link to the Dash's page that collects the client into `/secrets/own-google-app`, on one
- *  form. It only builds a URL, so the page asks for a fresh one each time it renders. */
-const collectLink = (itx: GoogleItx): Promise<string> =>
+ *  form, which sends the person back to this page once it is saved. It only builds a URL, so the page
+ *  asks for a fresh one each time it renders. */
+const collectLink = (itx: GoogleItx, here: string): Promise<string> =>
   itx.secrets
     .collectFromUser({
       path: APP_SECRET,
       egress: { urls: APP_PIN },
       description: COLLECT_DESCRIPTION,
       fields: FIELDS,
+      redirectUrl: `${here}/`,
     })
     .then((link) => link.url);
 
@@ -129,7 +131,9 @@ async function render(
   const app = await readApp(itx);
   // a secret saved without the public client ID: by hand, or before the form asked for it
   const incomplete = !app && (await hasAppSecret(itx));
-  const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
+  const link = await collectLink(itx, here).catch((error: unknown) => ({
+    failed: messageOf(error),
+  }));
   const accounts = await listAccounts(itx);
   const callback = `${here}/oauth2/callback`;
   const redirectUri = await itx.kv.get(REDIRECT_URI);
