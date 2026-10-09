@@ -129,10 +129,11 @@ const registration = (callback: string, scopes: string[]): string =>
   -H "Authorization: Bearer <an API token with OAuth Clients Write>" \\
   -H "Content-Type: application/json" \\
   --data '${JSON.stringify({
-    name: "iterate",
+    client_name: "iterate",
     redirect_uris: [callback],
     scopes,
     grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
     token_endpoint_auth_method: "client_secret_post",
   })}'`;
 
