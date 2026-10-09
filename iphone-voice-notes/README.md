@@ -8,8 +8,9 @@ and no Face ID: a shortcut does it from the lock screen.
 
 The receiver is the package `iterate-iphone-voice-notes`: one element, `iphoneVoiceNotes()`, in the
 `integrations` array of the project's config worker. It has a page of its own, for the project's
-members: the status, and the URL and header to put in the shortcut. The project's Integrations page
-in the Dash shows an iPhone voice notes card ("Set up by your coding agent" until the token exists),
+members: the status with a button to set the token, every step of the shortcut with the URL and
+header to copy, and the five newest notes. The project's Integrations page
+in the Dash shows an iPhone voice notes card ("Open it to set the token" until the token exists),
 with an **Open** button to the page and a **Recipe** button to this recipe.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
@@ -17,6 +18,9 @@ project's root; read <https://os.iterate.com/connect-a-service.md> first if that
 never take a secret in chat). Follow the steps in order.
 
 ## 1. The token (the person makes it up)
+
+The package's page (step 3) can do this step too: its **Set the token** button opens the same
+form, and **Change the token** replaces it later.
 
 The shortcut proves itself with a token in a header, and the project compares it with a secret.
 Nobody hands it out: the person invents it, and it has to be the same in the project and in the

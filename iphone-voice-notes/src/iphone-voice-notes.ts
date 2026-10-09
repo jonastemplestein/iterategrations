@@ -1,10 +1,15 @@
-import { servePage } from "./page.js";
+import { servePage, type PageNote } from "./page.js";
 
 /** The project, as this package uses it: what a config worker's `itx` already has. */
 export type VoiceNotesItx = {
   secrets: {
     list(): Promise<{ path: string }[]>;
     verifyEquals(path: string, input: { value: string; field?: string }): Promise<boolean>;
+    collectFromUser(input: {
+      path: string;
+      egress: { urls: string[] };
+      description?: string;
+    }): Promise<{ url: string }>;
   };
   files: {
     get(path: string): {
@@ -23,6 +28,14 @@ export type VoiceNotesItx = {
       idempotencyKey?: string;
       payload: Record<string, unknown>;
     }): Promise<unknown>;
+    readEvents(
+      afterOffset?: number,
+      limit?: number,
+    ): Promise<{
+      events: { type: string; payload?: unknown }[];
+      scannedThroughOffset: number;
+      atHead: boolean;
+    }>;
   };
 };
 
@@ -93,9 +106,7 @@ const cardOf = (slug: string, saved: boolean) => ({
   title: TITLE,
   description: DESCRIPTION,
   icon: "https://www.google.com/s2/favicons?domain=apple.com&sz=64",
-  status: saved
-    ? { kind: "ok" }
-    : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
+  status: saved ? { kind: "ok" } : { kind: "attention", text: "Open it to set the token" },
   actions: [
     { label: "Open", routingSlug: slug, path: "/" },
     { label: "Recipe", url: RECIPE },
@@ -104,6 +115,45 @@ const cardOf = (slug: string, saved: boolean) => ({
 
 const hasToken = async (itx: VoiceNotesItx): Promise<boolean> =>
   (await itx.secrets.list()).some((secret) => secret.path === TOKEN_SECRET);
+
+/** The platform's page where a member enters the token (or replaces it): the link is stateless,
+ *  and nothing is stored until they save. Null when the platform could not make one. */
+const collectUrl = async (itx: VoiceNotesItx): Promise<string | null> =>
+  itx.secrets
+    .collectFromUser({
+      path: TOKEN_SECRET,
+      egress: { urls: ["https://iphone-voice-notes.invalid"] }, // only ever compared, never sent
+      description: `The token your iPhone voice-note shortcut sends in its **${TOKEN_HEADER}** header: make it up, save it here, and put the same value in the shortcut.`,
+    })
+    .then((link) => link.url)
+    .catch(() => null);
+
+/** The newest transcribed notes, newest first: the stream read to its head (two events a note). */
+async function newestNotes(itx: VoiceNotesItx, count: number): Promise<PageNote[]> {
+  const notes: PageNote[] = [];
+  const stream = itx.cd(STREAM);
+  let after = 0;
+  try {
+    for (;;) {
+      const page = await stream.readEvents(after, 1000);
+      for (const event of page.events) {
+        if (event.type !== TRANSCRIBED) continue;
+        const p = (event.payload ?? {}) as Record<string, unknown>;
+        notes.push({
+          receivedAt: typeof p.receivedAt === "string" ? p.receivedAt : "",
+          transcript: typeof p.transcript === "string" ? p.transcript : null,
+          error: typeof p.error === "string" ? p.error : null,
+          test: p.test === true,
+        });
+      }
+      if (page.atHead || page.scannedThroughOffset <= after) break;
+      after = page.scannedThroughOffset;
+    }
+  } catch {
+    // no stream yet: no notes
+  }
+  return notes.slice(-count).reverse();
+}
 
 const hex = (bytes: ArrayBuffer): string =>
   [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -218,13 +268,21 @@ export function iphoneVoiceNotes(options: IphoneVoiceNotesOptions = {}): Integra
       if (request.method !== "GET" || pathname !== "/")
         return new Response("Not found\n", { status: 404 });
       using itx = host.getItx();
+      const [saved, collect, notes] = await Promise.all([
+        hasToken(itx),
+        collectUrl(itx),
+        newestNotes(itx, 5),
+      ]);
       return servePage(request, {
         title: TITLE,
         description: DESCRIPTION,
         recipe: RECIPE,
         secret: TOKEN_SECRET,
         header: TOKEN_HEADER,
-        saved: await hasToken(itx),
+        testHeader: TEST_HEADER,
+        saved,
+        collectUrl: collect,
+        notes,
       });
     },
     async processEvent({ event, itx }) {
