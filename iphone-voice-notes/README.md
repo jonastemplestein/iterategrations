@@ -6,6 +6,10 @@ audio becomes the file `/iphone-voice-notes/<recordingId>.m4a` and an
 later Whisper's transcript follows as `iphone-voice-notes/recording-transcribed`. No app to install,
 and no Face ID: a shortcut does it from the lock screen.
 
+It needs an iPhone with an Action Button (iPhone 15 Pro and later, and every iPhone 16 and later).
+On another iPhone the same shortcut runs from **Back Tap** (Settings → Accessibility → Touch →
+Back Tap), a Home Screen icon, or Siri ("Voice Note").
+
 The receiver is the package `iterate-iphone-voice-notes`: one element, `iphoneVoiceNotes()`, in the
 `integrations` array of the project's config worker. It has a page of its own, for the project's
 members: the status with a button to set the token, every step of the shortcut with the URL and
@@ -100,7 +104,39 @@ transcribed as usual, with `test: true` on both events, and a consumer skips it.
 iOS does not tell a shortcut when the button is released, so a note ends with a tap on the screen
 (or a fixed length: **Finish Recording** After Time). Say so.
 
-## 5. Prove it
+## 5. Hand each note to an agent
+
+The package puts notes on `/iphone-voice-notes` and hands them to no one. For an agent to act on
+each one, add this to the project's own `processEvent` in `worker.ts`, beside its other cases (it
+returns nothing, so the packages' hooks still run), and commit it as any change to the config repo. Name the agent that should get them
+(`await itx.agents.list()` lists them):
+
+```ts
+const note = (event.payload ?? {}) as Record<string, any>;
+// a test note, or one with nothing said, is no input
+if (
+  event.type === "iphone-voice-notes/recording-transcribed" &&
+  !note.test &&
+  note.transcript !== ""
+)
+  await itx.cd("/agents/assistant").append({
+    type: "events.iterate.com/agent/context-added",
+    // a retried event appends nothing twice
+    idempotencyKey: `voice-note:${event.path}@${event.offset}`,
+    payload: {
+      role: "user",
+      content:
+        note.transcript === null
+          ? `[voice note · ${note.receivedAt}] Not transcribed (${note.error}): transcribe the audio at ${note.audioPath}`
+          : `[voice note · ${note.receivedAt}] Said into the iPhone:\n${note.transcript}\n(audio: ${note.audioPath})`,
+    },
+  });
+```
+
+The agent reads the note on its next turn, and the append wakes it for one. A project that routes
+inputs already (a chief of staff, a triage gate) gives notes the same path as its other messages.
+
+## 6. Prove it
 
 Ask for a note from the lock screen (hold the Action Button until it buzzes, speak, tap stop), then:
 
@@ -126,8 +162,9 @@ upload again is the same note):
   `{ recordingId, receivedAt, audioPath, transcript, model, error, test }`. A failed transcription
   lands too, with `transcript: null` and the `error`: the audio is still at `audioPath`.
 
-The body is the raw audio, no multipart: M4A (AAC) from Record Audio, about 0.25 to 0.5 MB a
-minute; other types keep their own extension (`audio/mpeg`, `.mp3`), and anything that is not
+The body is the raw audio, no multipart: M4A (AAC) from Record Audio, which an iPhone sends as
+`audio/x-m4a` (about 110 KB for a short sentence; 0.25 to 0.5 MB a minute). The transcript follows
+two to six seconds after the upload; other types keep their own extension (`audio/mpeg`, `.mp3`), and anything that is not
 audio is taken for M4A. A body over 25 MiB is refused with `413`.
 
 ## Removing it
