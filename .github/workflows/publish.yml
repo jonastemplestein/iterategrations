@@ -21,4 +21,4 @@ jobs:
       - run: vp install
       - run: vp check
       - run: pnpm test
-      - run: pnpm dlx pkg-pr-new publish --pnpm ./pebble ./iphone-voice-notes ./waitrose ./monzo ./jmap ./telegram ./chatgpt ./github ./google ./x ./amazon
+      - run: pnpm dlx pkg-pr-new publish --pnpm ./pebble ./iphone-voice-notes ./waitrose ./monzo ./jmap ./telegram ./chatgpt ./github ./google ./x ./amazon ./cloudflare
