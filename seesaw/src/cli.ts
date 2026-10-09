@@ -18,7 +18,7 @@ const HELP = `Seesaw parent API
   seesaw like <item-id>               --write
   seesaw unlike <item-id>             --write
   seesaw notifications               --cursor KEY
-  seesaw conversations               --cursor KEY --search TEXT
+  seesaw conversations               --cursor KEY --search TEXT --hidden
   seesaw messages <conversation-id>  --limit 20 --cursor KEY
   seesaw send <conversation-id> <text> --write
 
@@ -38,6 +38,7 @@ async function main(): Promise<void> {
       search: { type: "string" },
       states: { type: "string" },
       write: { type: "boolean", default: false },
+      hidden: { type: "boolean", default: false },
     },
   });
   if (command === "help") {
@@ -131,7 +132,11 @@ async function main(): Promise<void> {
       result = await client.getNotifications(values.cursor);
       break;
     case "conversations":
-      result = await client.getConversations({ cursor: values.cursor, searchText: values.search });
+      result = await client.getConversations({
+        cursor: values.cursor,
+        searchText: values.search,
+        hidden: values.hidden,
+      });
       break;
     case "messages":
       result = await client.getMessages(arg(0), { cursor: values.cursor, limit: options.limit });

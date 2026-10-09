@@ -526,6 +526,8 @@ export class TapestryClient {
       const auth = this.#schoolAuthentication(result, selected.school.id);
       if (this.#school !== selected)
         throw new Error("Tapestry: session changed during refresh; repeat the read");
+      // Refresh returns only school.id. Retain the slug needed by embedded website requests.
+      auth.school = { ...selected.school, ...auth.school };
       // Keep this object so waiting reads can use the new credentials.
       Object.assign(selected, this.#makeSchoolSession(auth));
     })();

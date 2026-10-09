@@ -96,9 +96,8 @@ The client never retries a send automatically.
 
 Live checks: email/password login, email two-factor login, parent/children, three classes,
 dashboard, journal and second page, class journal, item details, notifications and conversation
-query. The conversation list was empty. The message query passed live GraphQL schema
-validation and returned the expected auth error without a token. Message reads also have mock
-tests. The parent account receives HTTP 403 from the activities feed. No roles or permissions
+query. The default conversation list was empty; a follow-up read with `isHidden=true` found
+parent conversations and confirmed live message retrieval. Message reads also have mock tests. The parent account receives HTTP 403 from the activities feed. No roles or permissions
 were changed. No school messages, comments or likes were sent.
 
 ## Tapestry
@@ -115,6 +114,8 @@ Authentication is two-stage:
    The response contains `{school, user, credentials}`. Save the school token separately.
 4. POST `refresh-authenticate-school` with `{refresh}` and the old school access token.
    `credentials.expiry` is a lifetime in seconds. The app refreshes 60 seconds before expiry.
+   The refresh response includes only `school.id`; preserve the existing school metadata,
+   including `furlSlug`, when replacing credentials.
 
 Evidence in `tapestry.decompiled.js`: auth service around 362850–363450; axios interceptor
 around 375430; expiry around 381817; refresh around 550950; default production origin around 952657. School MFA uses a `multi-factor-authentication-required` problem and a `process-code`

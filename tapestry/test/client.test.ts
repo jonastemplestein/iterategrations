@@ -78,7 +78,7 @@ test("concurrent reads share a refresh and use the rotated credentials", async (
       assert.deepEqual(await r.json(), { refresh: "refresh-token" });
       assert.equal(r.headers.get("x-api-key"), "school-token");
       return Response.json({
-        school,
+        school: { id: school.id },
         credentials: { access: "rotated", refresh: "rotated-refresh", expiry: 3600 },
       });
     }
@@ -89,6 +89,7 @@ test("concurrent reads share a refresh and use the rotated credentials", async (
   await Promise.all([client.getChildren(), client.getCurrentUser(), client.getUpdateCounts()]);
   assert.equal(refreshCalls, 1);
   assert.equal(client.getSession().selectedSchool?.credentials.refresh, "rotated-refresh");
+  assert.equal(client.getSession().selectedSchool?.school.furlSlug, "fixture-school");
 });
 
 test("failed refresh stops the read and never loops", async () => {
