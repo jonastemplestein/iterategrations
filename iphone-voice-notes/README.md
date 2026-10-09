@@ -83,9 +83,9 @@ Give the person these taps, on the iPhone:
    **Finish Recording** On Tap.
 3. Add **Get Contents of URL**. URL: the webhook URL from the page (its **Copy** button). Expand it:
    - **Method:** POST
-   - **Headers:** `X-Voice-Note-Token` with the token from step 1, and `Content-Type` with
-     `audio/mp4`. Not `Authorization`: the project's host answers bearer tokens itself, before the
-     receiver sees them.
+   - **Headers:** one, `X-Voice-Note-Token`, with the token from step 1. No `Content-Type` is
+     needed: without one, the receiver takes the body for M4A. Not `Authorization`: the project's
+     host answers bearer tokens itself, before the receiver sees them.
    - **Request Body:** File, and choose the **Recorded Audio** variable.
 4. Optional: add **Vibrate Device** at the end. It buzzes once the upload is in; a failed upload
    shows an error banner instead.
