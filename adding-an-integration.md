@@ -56,10 +56,14 @@ What a package has: `host.getItx()` is the project's scope (`itx.secrets`, `itx.
 credential is set through `collectFromUser` or OAuth, pinned to the hosts it may go to, and spent as a
 `getSecret("/secrets/<name>", { field })` placeholder in an outbound request, which egress
 substitutes. In every worker the platform loads the global `fetch` is the project's egress, so a
-package, a run script and an agent all call a service with plain `fetch`: a package ships no API
-client. Its README names the secret's placeholder, the pinned origins and the service's own HTTP
-docs; its code is what the service pushes (webhooks), what a person does (the page) and what the
-platform cannot do.
+package, a run script and an agent all call a service with plain `fetch`. A package ships no client
+for agents: a run script cannot import a package, so the README gives the secret's placeholder, the
+pinned origins and the service's own HTTP docs. For the project's own code, a package exports small
+helpers, as few as that code needs, built on a public package when a good one exists: iterate-jmap's
+`mailbox()` on jmap-jam is the example. The platform installs a package's tarball and none of its
+dependencies, so the build compiles that public package in (`deps.onlyBundle`, and
+`deps.onlyImport: []` to fail the build on any import). The rest of a package's code is what the
+service pushes (webhooks), what a person does (the page) and what the platform cannot do.
 
 ## Registering on the Dash
 
