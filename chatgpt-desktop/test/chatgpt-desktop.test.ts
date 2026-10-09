@@ -2,7 +2,10 @@
 // 4-byte little-endian length, then JSON-RPC; tools/list and tools/call) and a pretend project: ask
 // makes a named task with the browser mention and answers its turn; send waits for the new turn, not
 // the last one; the tasks' rollout lines land as chatgpt-desktop/<kind>, and the app's own developer
-// messages never do; a taken name is refused; with no app, the error says so.
+// messages never do; a taken name is refused; with no app, the error says so. A task is a fork of the
+// full-access template when there is one (so it never asks for approval), and the fork's first turn,
+// the template's own, is not taken for the answer; with no template, or a fork that fails, the task is
+// made the old way and the result says it is sandboxed.
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
@@ -15,6 +18,8 @@ import type { DesktopEvent } from "../src/chatgpt-desktop.ts";
 const BRIDGE = "01a1aaaa-0000-7000-8000-000000000001";
 const OLD = "01a1aaaa-0000-7000-8000-000000000002";
 const TASK = "01a1aaaa-0000-7000-8000-000000000003";
+const TEMPLATE = "01a1aaaa-0000-7000-8000-000000000004";
+const FORK = "01a1aaaa-0000-7000-8000-000000000005";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -29,7 +34,7 @@ function frame(message: unknown) {
 }
 
 /** An app with one bridge, one older thread, and the task it makes. */
-function pretendApp() {
+function pretendApp(options: { failFork?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "chatgpt-desktop-test-"));
   const socketDir = join(root, "sockets");
   const codexHome = join(root, "codex");
@@ -39,6 +44,8 @@ function pretendApp() {
   writeFileSync(join(day, `rollout-2026-10-09T10-00-00-${OLD}.jsonl`), "{}\n");
   const calls: { tool: string; args: any; threadId: string }[] = [];
   let turn = 1;
+  let forkSent = 0;
+  let forkLag = 0;
   const reply = (id: number, value: unknown) =>
     frame({
       id,
@@ -68,6 +75,33 @@ function pretendApp() {
         return socket.end(reply(id, { threads: [{ id: BRIDGE, title: "Agent bridge" }] }));
       if (tool === "create_thread")
         return socket.end(reply(id, { threadId: TASK, hostId: "local" }));
+      if (tool === "fork_thread" && !options.failFork)
+        return socket.end(
+          reply(id, { status: "created", threadId: FORK, sourceThreadId: args.threadId }),
+        );
+      if (tool === "set_thread_title") return socket.end(reply(id, { ok: true }));
+      if (tool === "send_message_to_thread" && args.threadId === FORK) {
+        forkSent += 1;
+        forkLag = 1;
+        return socket.end(reply(id, { ok: true }));
+      }
+      if (tool === "wait_threads" && args.targets[0].threadId === FORK) {
+        // the fork starts with the template's finished turn, and shows it once more just after a send
+        const old = forkSent === 0 || forkLag-- > 0;
+        return socket.end(
+          reply(id, {
+            timedOut: false,
+            wake: { reason: "turnCompleted" },
+            polls: [
+              {
+                cursor: `f${forkSent}${forkLag}`,
+                latestTurn: { id: old ? "turn-template" : "turn-fork", status: "completed" },
+                latestAssistantMessage: { text: old ? "ready" : "fork answer" },
+              },
+            ],
+          }),
+        );
+      }
       if (tool === "send_message_to_thread") {
         turn += 1;
         return socket.end(reply(id, { ok: true }));
@@ -110,7 +144,15 @@ function pretendApp() {
     pollMs: 60_000,
   });
   cleanups.push(lend.stop);
-  return { lend, calls, day, root };
+  /** Name a thread the template, the way `name("agent-template", id)` does. */
+  const nameTemplate = () => {
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(
+      join(root, "state", "state.json"),
+      JSON.stringify({ names: { "agent-template": TEMPLATE } }),
+    );
+  };
+  return { lend, calls, day, root, nameTemplate };
 }
 
 test("ask makes a named task with the browser mention, from the bridge, and answers its turn", async () => {
@@ -128,6 +170,40 @@ test("ask makes a named task with the browser mention, from the bridge, and answ
   assert.equal(create.args.title, "example");
   assert.equal(create.threadId, BRIDGE);
   assert.deepEqual(await lend.lent.names(), { example: TASK });
+});
+
+test("with a template, a task is a fork of it, and the template's own turn is not the answer", async () => {
+  const { lend, calls, nameTemplate } = pretendApp();
+  nameTemplate();
+  const result = await lend.lent.ask("Open example.org and read its link.", { name: "forked" });
+  assert.equal(result.thread, FORK);
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer, "fork answer");
+  assert.equal(result.hint, undefined);
+  assert.ok(!calls.some((call) => call.tool === "create_thread"));
+  assert.equal(calls.find((call) => call.tool === "fork_thread")!.args.threadId, TEMPLATE);
+  const send = calls.find((call) => call.tool === "send_message_to_thread")!;
+  assert.equal(send.args.threadId, FORK);
+  assert.match(
+    send.args.prompt,
+    /^\[@Browser\]\(plugin:\/\/browser@openai-bundled\) Open example\.org/,
+  );
+  assert.equal(calls.find((call) => call.tool === "set_thread_title")!.args.title, "forked");
+  assert.deepEqual(await lend.lent.names(), { "agent-template": TEMPLATE, forked: FORK });
+});
+
+test("with no template, or a fork that fails, the task is made the old way and the result says so", async () => {
+  const none = pretendApp();
+  const plain = await none.lend.lent.ask("Open example.org.");
+  assert.equal(plain.thread, TASK);
+  assert.match(String(plain.hint), /sandbox/i);
+  const failing = pretendApp({ failFork: true });
+  failing.nameTemplate();
+  const fallback = await failing.lend.lent.ask("Open example.org.");
+  assert.equal(fallback.thread, TASK);
+  assert.match(String(fallback.hint), /sandbox/i);
+  assert.ok(failing.calls.some((call) => call.tool === "fork_thread"));
+  assert.ok(failing.calls.some((call) => call.tool === "create_thread"));
 });
 
 test("send by name waits for the turn it starts, not the one before", async () => {

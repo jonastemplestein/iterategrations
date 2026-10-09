@@ -34,6 +34,11 @@ const LOG_PATH = process.env.CHATGPT_DESKTOP_LOG_PATH || "/integrations/chatgpt-
 const LABEL = process.env.CHATGPT_DESKTOP_LABEL || "The ChatGPT desktop app's agent";
 
 const BRIDGE_TITLE = "Agent bridge";
+/** The name of the full-access template task. Tasks that `create_thread` makes run in the app's
+ *  workspace sandbox and ask before a network command; a fork keeps its source's permissions
+ *  (approval never, danger-full-access), so a task is a fork of this one. Make it once in the app:
+ *  a new chat (a chat the app's own screen makes has full access), then `name("agent-template", id)`. */
+export const TEMPLATE_NAME = "agent-template";
 const BRIDGE_PROMPT =
   "This task is the caller identity for outside agents that give website tasks to this app through " +
   "its local tool pipe (iterategrations chatgpt-desktop, and the chatgpt-browser command line). " +
@@ -396,7 +401,7 @@ export function createLend(options: Options = {}) {
     }
   };
 
-  const start = async (
+  const startTask = async (
     task: string,
     opts: { name?: string; title?: string; model?: string; thinking?: string } = {},
   ) => {
@@ -409,28 +414,65 @@ export function createLend(options: Options = {}) {
         throw new DesktopError(`The name ${opts.name} is taken; send to it instead`);
     }
     const prompt = task.includes("@Browser") ? task : `${BROWSER_MENTION} ${task}`;
-    const args: Record<string, unknown> = { prompt, target: { type: "projectless" } };
     const title = opts.title ?? opts.name;
-    if (title) args.title = title;
-    if (opts.model) args.model = opts.model;
-    if (opts.thinking) args.thinking = opts.thinking;
-    const created = await callTool("create_thread", args);
-    const thread: string | undefined = created?.threadId;
-    if (!thread)
-      throw new DesktopError(`The app made no thread: ${JSON.stringify(created).slice(0, 300)}`);
+    let thread: string | undefined;
+    /** The turn a fork starts with (the template's last one), which `wait` must not answer with. */
+    let first: string | undefined;
+    let sandboxed: string | undefined;
+    const template = loadState().names?.[TEMPLATE_NAME];
+    if (!template) sandboxed = `no task named ${TEMPLATE_NAME}`;
+    else
+      try {
+        thread = (await callTool("fork_thread", { threadId: template }))?.threadId;
+        if (!thread) throw new DesktopError("the app made no fork");
+        first = (await snapshot(thread)).latestTurn?.id;
+        await callTool("send_message_to_thread", {
+          threadId: thread,
+          prompt,
+          ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.thinking ? { thinking: opts.thinking } : {}),
+        });
+        if (title) await callTool("set_thread_title", { threadId: thread, title });
+      } catch (error) {
+        sandboxed = error instanceof Error ? error.message : String(error);
+        thread = undefined;
+        first = undefined;
+      }
+    if (!thread) {
+      log(`${sandboxed}; the task runs in the app's workspace sandbox and may ask for approval`);
+      const args: Record<string, unknown> = { prompt, target: { type: "projectless" } };
+      if (title) args.title = title;
+      if (opts.model) args.model = opts.model;
+      if (opts.thinking) args.thinking = opts.thinking;
+      const created = await callTool("create_thread", args);
+      thread = created?.threadId;
+    }
+    if (!thread) throw new DesktopError("The app made no thread");
+    const started = thread;
     await changeState((state) => {
-      state.threads = [...(state.threads ?? []), { id: thread, at: Date.now() }].slice(-200);
+      state.threads = [...(state.threads ?? []), { id: started, at: Date.now() }].slice(-200);
       if (opts.name) {
         state.names ??= {};
         if (state.names[opts.name])
           throw new DesktopError(
-            `The name ${opts.name} was taken meanwhile; the task is ${thread}`,
+            `The name ${opts.name} was taken meanwhile; the task is ${started}`,
           );
-        state.names[opts.name] = thread;
+        state.names[opts.name] = started;
       }
     });
-    follow(thread, 0);
-    return { thread, name: opts.name };
+    follow(started, 0);
+    return {
+      thread: started,
+      name: opts.name,
+      first,
+      ...(sandboxed
+        ? { hint: `Sandboxed task (${sandboxed}): it may wait on an approval prompt.` }
+        : {}),
+    };
+  };
+  const start = async (...input: Parameters<typeof startTask>) => {
+    const { first: _first, ...started } = await startTask(...input);
+    return started;
   };
 
   // ---- events: the rollout files of the tasks started here ----
@@ -581,8 +623,9 @@ export function createLend(options: Options = {}) {
         thinking?: string;
       } = {},
     ) => {
-      const { thread } = await start(task, opts);
-      return await wait(thread, opts.timeoutMs ?? 240_000);
+      const { thread, first, hint } = await startTask(task, opts);
+      const result = await wait(thread, opts.timeoutMs ?? 240_000, first);
+      return hint ? { ...result, hint: result.hint ?? hint } : result;
     },
     /** Start a task and answer at once with its thread id (and name); its events tell how it goes. */
     start,

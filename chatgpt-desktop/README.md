@@ -57,6 +57,22 @@ permissions, and the approval policy). A prompt it shows ends `ask` with status
 still applies: before a payment, a deletion or sending a message it asks, and its answer is then a
 question for `send`.
 
+## Permissions: tasks are forks of a full-access template
+
+A task that the app's `create_thread` makes runs in the app's workspace sandbox with approval on
+request, even when its settings say Full access: a command that needs the network (such as `op`) stops
+on an approval prompt in the app. A **fork** keeps its source's permissions, and a chat the app's own
+screen starts has full access (approval never, `:danger-full-access`). So `ask` and `start` fork a
+task named `agent-template` and send it the prompt. Make that task once, in the app: start a new chat
+with the text "Reply ready; keep this task", then name it (`name("agent-template", threadId)`, or
+`chatgpt-browser name agent-template ID`). It keeps almost no history, so a fork starts almost clean
+(`wait` skips the turn a fork starts with). With no template, or a fork that fails, the task is made
+the old way and the result carries a `hint` that it is sandboxed.
+
+The agent still follows OpenAI's own browser rules inside the task: before it types a password, pays or
+deletes it asks, and its answer is then a question for `send`. A task can read a login from 1Password
+itself, in the same code that fills the form, so the value never appears in its output.
+
 ## Run it
 
 You need Node 22.18 or later, an `iterate` CLI with `provide`, this repository, and the ChatGPT
