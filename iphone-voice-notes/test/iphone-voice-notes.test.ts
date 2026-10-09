@@ -153,7 +153,7 @@ test("an upload with the token stores its audio under its hash and lands once as
   const first = await project.serve(upload({ contentType: "audio/x-m4a" }));
   assert.deepEqual(await first.json(), { ok: true, recordingId: ID });
   const again = await project.serve(upload({ contentType: "audio/x-m4a" }));
-  assert.deepEqual(await again.json(), { ok: true, recordingId: ID, duplicate: true });
+  assert.deepEqual(await again.json(), { ok: true, recordingId: ID });
   assert.deepEqual(project.files[`/iphone-voice-notes/${ID}.m4a`], {
     contentType: "audio/x-m4a",
     data: AUDIO,

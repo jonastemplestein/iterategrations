@@ -116,19 +116,18 @@ const base64 = (bytes: Uint8Array): string => {
 };
 
 /** An append the platform may already hold: the same key for another payload is a retry of what
- *  landed (IDEMPOTENCY_CONFLICT), not an error. Answers whether this append landed it. */
+ *  landed (IDEMPOTENCY_CONFLICT), not an error. */
 const appendOnce = async (
   itx: VoiceNotesItx,
   event: { type: string; idempotencyKey: string; payload: Record<string, unknown> },
-): Promise<boolean> =>
-  itx
+): Promise<void> => {
+  await itx
     .cd(STREAM)
     .append(event)
-    .then(() => true)
     .catch((error: unknown) => {
       if ((error as { code?: unknown } | null)?.code !== "IDEMPOTENCY_CONFLICT") throw error;
-      return false;
     });
+};
 
 /** The shortcut's upload: the raw audio as the body, the token in its header. Stores the audio as
  *  /iphone-voice-notes/<recordingId>.<ext> and appends `recording-received`, then answers at once;
@@ -151,7 +150,7 @@ async function receive(request: Request, itx: VoiceNotesItx): Promise<Response> 
   const recordingId = hex(await crypto.subtle.digest("SHA-256", audio)).slice(0, 32);
   const audioPath = `${STREAM}/${recordingId}.${extension}`;
   await itx.files.get(audioPath).put({ contentType, data: audio });
-  const landed = await appendOnce(itx, {
+  await appendOnce(itx, {
     type: RECEIVED,
     idempotencyKey: `iphone-voice-notes:${recordingId}`,
     payload: {
@@ -163,7 +162,7 @@ async function receive(request: Request, itx: VoiceNotesItx): Promise<Response> 
       test: request.headers.get(TEST_HEADER) === "true",
     },
   });
-  return Response.json({ ok: true, recordingId, ...(landed ? {} : { duplicate: true }) });
+  return Response.json({ ok: true, recordingId });
 }
 
 /** A received recording, transcribed with Whisper on Workers AI: `recording-transcribed`, once.
