@@ -19,6 +19,7 @@ function fakeProject(
   secrets: Record<string, string> = { "/secrets/iphone-voice-notes": TOKEN },
   options: {
     member?: boolean;
+    collectFails?: boolean;
     whisper?: (body: any) => Promise<unknown>;
     kv?: Record<string, unknown>;
     integration?: Parameters<typeof iphoneVoiceNotes>[0];
@@ -27,12 +28,21 @@ function fakeProject(
   const appended: { path: string; event: any }[] = [];
   const files: Record<string, { contentType?: string; data: Uint8Array }> = {};
   const whispered: { model: string; body: any }[] = [];
+  const collected: any[] = [];
   const scopes = { opened: 0, disposed: 0 };
   const itx: any = {
     secrets: {
       list: async () => Object.keys(secrets).map((path) => ({ path })),
       verifyEquals: async (path: string, input: { value: string }) =>
         secrets[path] !== undefined && secrets[path] === input.value,
+      collectFromUser: async (input: { path: string; egress: { urls: string[] } }) => {
+        collected.push(input);
+        if (options.collectFails) throw new Error("no collection pages here");
+        return {
+          path: input.path,
+          url: `https://dash.iterate.example/collect-secret?path=${input.path}&a=1`,
+        };
+      },
     },
     files: {
       get: (path: string) => ({
@@ -62,6 +72,20 @@ function fakeProject(
         if (earlier && JSON.stringify(earlier.event) === JSON.stringify(event)) return;
         if (earlier) throw Object.assign(new Error("conflict"), { code: "IDEMPOTENCY_CONFLICT" });
         appended.push({ path, event });
+      },
+      // one event a page, so a test reads several pages
+      readEvents: async (after = 0) => {
+        const mine = appended
+          .map((a, offset) => ({ ...a, offset: offset + 1 }))
+          .filter((a) => a.path === path);
+        const next = mine.find((a) => a.offset > after);
+        return next
+          ? {
+              events: [next.event],
+              scannedThroughOffset: next.offset,
+              atHead: next === mine.at(-1),
+            }
+          : { events: [], scannedThroughOffset: after, atHead: true };
       },
     }),
   };
@@ -103,6 +127,7 @@ function fakeProject(
     appended,
     files,
     whispered,
+    collected,
     scopes,
     serve,
     page,
@@ -273,7 +298,7 @@ test("the install hook registers the card, keyed by the event's path and offset:
       idempotencyKey: "iphone-voice-notes:registry:/@5",
       payload: {
         integration: "iphone-voice-notes",
-        card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        card: card({ kind: "attention", text: "Open it to set the token" }),
       },
     },
   ]);
@@ -315,18 +340,33 @@ test("the page is for members: a non-member gets what auth.require answers, and 
   assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
 });
 
-test("the page shows the status, the webhook URL and the header name with Copy buttons, with the base path a paths ingress strips", async () => {
+test("the page shows the status with a link to set the token, every step of the shortcut with the URL and header to copy, under the base path a paths ingress strips", async () => {
   const project = fakeProject({}, { member: true });
   let res = await project.page("/");
   let html = await res.text();
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
   assert.match(html, /<h1>iPhone voice notes<\/h1>/);
-  assert.match(html, /Set up by your coding agent: see the recipe/);
-  const hint = `Set up iPhone voice notes in my iterate project. Follow the recipe at ${RECIPE}`;
-  assert.ok(html.includes(`data-copy="${hint}"`), hint);
+  assert.match(html, /Not set up yet: the project has no token/);
+  assert.ok(
+    html.includes(
+      `<a class="button" href="https://dash.iterate.example/collect-secret?path=/secrets/iphone-voice-notes&amp;a=1">Set the token</a>`,
+    ),
+  );
+  assert.deepEqual(project.collected[0].path, "/secrets/iphone-voice-notes");
+  assert.deepEqual(project.collected[0].egress, { urls: ["https://iphone-voice-notes.invalid"] });
   assert.ok(html.includes(`data-copy="${ORIGIN}/webhook"`));
   assert.ok(html.includes(`data-copy="x-voice-note-token"`));
+  for (const step of [
+    "Record Audio",
+    "Get Contents of URL",
+    "Recorded Audio",
+    "Always Allow",
+    "Action Button",
+    "x-voice-note-test",
+  ])
+    assert.ok(html.includes(step), step);
+  assert.match(html, /No notes yet/);
   assert.ok(html.includes(`href="${RECIPE}"`));
 
   project.secrets["/secrets/iphone-voice-notes"] = TOKEN;
@@ -336,7 +376,7 @@ test("the page shows the status, the webhook URL and the header name with Copy b
     html,
     /Set up\. The project has the token <code>\/secrets\/iphone-voice-notes<\/code>/,
   );
-  assert.doesNotMatch(html, /coding agent/);
+  assert.match(html, />Change the token</);
   assert.ok(
     html.includes(
       `data-copy="https://os.iterate.example/projects/iterate/iphone-voice-notes/webhook"`,
@@ -344,6 +384,44 @@ test("the page shows the status, the webhook URL and the header name with Copy b
   );
   assert.ok(!html.includes(TOKEN));
   assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+});
+
+test("the page lists the newest transcribed notes, newest first, across pages of the stream, at most five", async () => {
+  let n = 0;
+  const project = fakeProject(undefined, {
+    member: true,
+    whisper: async () => (n++ === 0 ? { text: "" } : { text: `note <${n}>` }),
+  });
+  for (let i = 0; i < 7; i++) {
+    await project.serve(upload({ body: new Uint8Array([i + 1]), test: i === 6 }));
+    await project.deliver(project.appended.length - 1);
+  }
+  const html = await (await project.page("/")).text();
+  const shown = [
+    ...html.matchAll(/<div class="note"><small>[^<]*?( · test)?<\/small>(.*?)<\/div>/g),
+  ].map((m) => `${m[2]}${m[1] ?? ""}`);
+  assert.deepEqual(shown, [
+    "note &lt;7&gt; · test",
+    "note &lt;6&gt;",
+    "note &lt;5&gt;",
+    "note &lt;4&gt;",
+    "note &lt;3&gt;",
+  ]);
+});
+
+test("a note that failed shows its error, and with no link to be had the page still shows", async () => {
+  const project = fakeProject(undefined, {
+    member: true,
+    collectFails: true,
+    whisper: async () => {
+      throw new Error("AiError: 3010");
+    },
+  });
+  await project.serve(upload());
+  await project.deliver(0);
+  const html = await (await project.page("/")).text();
+  assert.match(html, /<i>Not transcribed: Error: AiError: 3010<\/i>/);
+  assert.doesNotMatch(html, /class="button"/);
 });
 
 test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
