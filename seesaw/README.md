@@ -24,6 +24,7 @@ node seesaw/dist/cli.js login
 node seesaw/dist/cli.js children
 node seesaw/dist/cli.js journal --limit 10
 node seesaw/dist/cli.js conversations
+node seesaw/dist/cli.js conversations --hidden
 node seesaw/dist/cli.js messages CONVERSATION_ID --limit 20
 ```
 
@@ -62,8 +63,9 @@ const messages = await client.getMessages(id, { limit: 20 });
 `login(email, password, { twoFactorCode?, captchaResponse? })` returns a session.
 `getSession()` returns a copy; `setSession()` restores one. Save it securely in your application.
 Live reads passed for children, classes, journals, pagination, item details, dashboard,
-notifications and the conversation query. The tested account has no conversations, and its
-activity-feed request returns HTTP 403. Message query schema validation and mock tests passed.
+notifications and messages, including hidden conversations. An empty default inbox can still
+have hidden conversations: use `getConversations({ hidden: true })` or CLI `--hidden`.
+The tested parent account receives HTTP 403 from the activity feed.
 
 There is no confirmed refresh-token flow. Log in again when the service rejects an expired token.
 
