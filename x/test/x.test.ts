@@ -515,6 +515,7 @@ test("the page links to the Dash's one form for the client, its ID public beside
           },
           { name: "clientSecret", label: "Client secret" },
         ],
+        redirectUrl: `${ORIGIN}/`,
       },
     ],
   );

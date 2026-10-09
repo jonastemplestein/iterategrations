@@ -117,7 +117,7 @@ Every integration seen so far is one of these, or a mix.
 
 **A service with its own page and webhook** (Telegram, ChatGPT). The page at `/` collects what the
 service needs (`itx.secrets.collectFromUser` gives a link where the person pastes a token: the
-package never sees it), sets the webhook at the service to `/webhook/<name>` on the project's host, and
+package never sees it, and `redirectUrl`, the page's own URL, brings them back once it is saved), sets the webhook at the service to `/webhook/<name>` on the project's host, and
 registers a row. The webhook proves itself: `itx.secrets.verifyHmac(path, { payload, signature })`
 for a signed body, `itx.secrets.verifyEquals(path, { value })` for a token in the URL. Each delivery
 lands once on `/integrations/<slug>/<connection>`, keyed by the service's delivery id. The page and
@@ -150,6 +150,7 @@ const { url } = await itx.secrets.collectFromUser({
     { name: "clientId", label: "Client ID", public: true, pattern: String.raw`[a-z0-9\-]{1,64}` },
     { name: "clientSecret", label: "Client secret" },
   ],
+  redirectUrl: here, // this page's URL: the form sends the person back once it is saved
 });
 // the catalog answers a public field's value, and never a secret one
 const app = (await itx.secrets.list()).find((entry) => entry.path === "/secrets/acme-app");

@@ -115,15 +115,17 @@ const FIELDS = [
   { name: "webhookSecret", label: "Webhook secret" },
 ];
 
-/** The link to the Dash's page that collects the App into `/secrets/own-github-app`, on one form.
- *  It only builds a URL, so the page asks for a fresh one each time it renders. */
-const collectLink = (itx: GithubItx): Promise<string> =>
+/** The link to the Dash's page that collects the App into `/secrets/own-github-app`, on one form,
+ *  which sends the person back to this page once it is saved. It only builds a URL, so the page asks
+ *  for a fresh one each time it renders. */
+const collectLink = (itx: GithubItx, here: string): Promise<string> =>
   itx.secrets
     .collectFromUser({
       path: APP_SECRET,
       egress: { urls: PIN },
       description: COLLECT_DESCRIPTION,
       fields: FIELDS,
+      redirectUrl: `${here}/`,
     })
     .then((link) => link.url);
 
@@ -141,7 +143,9 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
   const app = await readApp(itx);
   // a secret saved without the public App ID and slug: by hand, or before the form asked for them
   const incomplete = !app && (await hasAppSecret(itx));
-  const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
+  const link = await collectLink(itx, here).catch((error: unknown) => ({
+    failed: messageOf(error),
+  }));
   const installations = await listInstallations(itx);
   const step1 = `<section>
     <h2>1. Create the App</h2>
