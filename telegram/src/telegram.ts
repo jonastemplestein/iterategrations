@@ -3,7 +3,10 @@ import { servePage } from "./page.js";
 import { WORKER_UPDATED } from "./registry.js";
 import { receiveUpdate, type Deliver } from "./webhook.js";
 
-// No Telegram client: an agent or the project calls the Bot API with `fetch` (see the README)
+// No Telegram client: an agent calls the Bot API with `fetch` (see the README). The project's own
+// code can import the small helpers it needs to answer in a chat.
+export { placeholder } from "./bot.js";
+export { api, MESSAGE_LIMIT, sendAnswer, splitText } from "./send.js";
 export type { Deliver } from "./webhook.js";
 export type { TelegramItx } from "./bot.js";
 
@@ -37,7 +40,7 @@ export type Integration = {
  *  - `deliver`: `agents` (default): each chat gets an agent of its own here, which wakes for what is
  *    meant for it. `events`: the package keeps the door (who is let in, invites, welcomes) and
  *    records `telegram/message-accepted` for each message from someone let in; the project routes
- *    it to its own agents and sends their answers with `fetch` and the token placeholder. */
+ *    it to its own agents and sends their answers (`sendAnswer`, or `api` for any other call). */
 export function telegram(options: { slug?: string; deliver?: Deliver } = {}): Integration {
   const routingSlug = options.slug ?? "telegram";
   return {

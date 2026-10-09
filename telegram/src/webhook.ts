@@ -1,6 +1,6 @@
 import {
   allow,
-  api,
+  call,
   BOT_NAME,
   placeholder,
   PRIVATE,
@@ -207,7 +207,7 @@ async function route(
   await Promise.all([
     (itx as TelegramItx & AgentsItx).agents.create(agent),
     addressed
-      ? api(itx, placeholder(bot), "sendChatAction", {
+      ? call(itx, placeholder(bot), "sendChatAction", {
           chat_id: message.chat.id,
           action: "typing",
           ...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}),

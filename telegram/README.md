@@ -125,9 +125,11 @@ then `telegram/removed/<bot>` in the kv marks it.
 
 ## Calling Telegram
 
-The package exports no Telegram client. An agent, or the project's own code, calls the
-[Bot API](https://core.telegram.org/bots/api) with `fetch`. In every worker the platform loads (the
-project's config worker, a run script, an agent's script) the global `fetch` is the project's egress.
+The package exports no Telegram client. An agent calls the
+[Bot API](https://core.telegram.org/bots/api) with `fetch`. The project's own code can do the same,
+or import a few small helpers ([In the project's code](#in-the-projects-code)). In every worker the
+platform loads (the project's config worker, a run script, an agent's script) the global `fetch` is
+the project's egress.
 
 Each bot's token is the secret `/secrets/telegram-<bot>`, field `token`. It is pinned to
 `https://api.telegram.org`, so egress sends it nowhere else. A request names it with a placeholder,
@@ -152,6 +154,61 @@ same call under its own name. A message holds at most 4096 characters: split lon
 The package checks Telegram's deliveries against the bot's other secret,
 `/secrets/telegram-webhook-<bot>`. It is pinned to `https://telegram.invalid`, a host that can never
 exist, so egress sends it nowhere.
+
+## In the project's code
+
+A run script cannot import a package, so an agent calls Telegram with `fetch`, as above. The
+project's own code (`worker.ts` and the files it imports) can import these helpers. `api` and
+`sendAnswer` send with the global `fetch` and the bot's placeholder, as above:
+
+```ts
+import { api, MESSAGE_LIMIT, placeholder, sendAnswer, splitText } from "iterate-telegram";
+```
+
+- `api(bot, method, params?)` is one Bot API call. It posts `params` as JSON and answers Telegram's
+  `result`. When Telegram refuses the call, it throws `<method>: <description>`.
+
+  ```ts
+  const { file_path } = await api<{ file_path: string }>("acme-bot", "getFile", { file_id });
+  ```
+
+- `placeholder(bot)` is the token's placeholder,
+  `getSecret("/secrets/telegram-<bot>", { field: "token" })`, for a request you write yourself. A
+  file's download is one:
+
+  ```ts
+  const file = await fetch(
+    `https://api.telegram.org/file/bot${placeholder("acme-bot")}/${file_path}`,
+  );
+  ```
+
+- `splitText(text, limit?)` cuts a text into pieces of at most `limit` characters, by default
+  `MESSAGE_LIMIT` (4096, the most a message holds). It cuts at a blank line, a line end or a space
+  in the second half of a piece, and never inside a surrogate pair.
+
+  ```ts
+  for (const text of splitText(report)) await api("acme-bot", "sendMessage", { chat_id: 42, text });
+  ```
+
+- `sendAnswer(itx, to, answer)` sends an agent's answer to a chat: the words, then each project
+  file (`itx.files`) as the photo, video, voice note, audio or document its content type and name
+  say. The words go as messages of at most 4096 characters. One photo, video or document with words
+  of at most 1,000 characters carries the words as its caption. A file that does not exist is said
+  in the words. `to` is `{ bot, chatId, threadId? }`: a `telegram/message-accepted` payload's
+  `bot`, `chat.id` and `threadId`.
+
+  ```ts
+  await sendAnswer(
+    itx,
+    { bot: "acme-bot", chatId: 42 },
+    { text: "Here is the plan.", files: [{ path: "/plans/floor.pdf", caption: "Ground floor" }] },
+  );
+  ```
+
+Telegram fetches each file from a signed URL that lasts ten minutes. By URL, it takes a photo of at
+most 5 MB and any other file of at most 20 MB. It promises a document by URL only for a PDF or a ZIP
+file, and a voice note only for an Ogg file of at most 1 MB: a larger one arrives as a file
+([Sending files](https://core.telegram.org/bots/api#sending-files)).
 
 ## Good to know
 
@@ -190,12 +247,14 @@ agents of its own (a chief of staff that already answers WhatsApp, say) lists
 welcomes, who waits.
 For each message from someone who is let in it records `telegram/message-accepted` on
 `/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The project routes that event
-to its agents and sends their answers itself, with `fetch` ([Calling Telegram](#calling-telegram)):
-`bot` names the secret, `chat.id` is the `chat_id` and `threadId` the `message_thread_id`. Its
-payload: `bot`, `updateId`, `messageId`, `chat { id, type, title }`, `threadId`,
-`from { id, name, username }`, `text`, `caption`, `files [{ kind, fileId }]`, `location`,
-`replyTo { messageId, fromId, text }` and `addressed` (whether the bot was @mentioned, replied to,
-named or commanded). A service message is never accepted.
+to its agents and sends their answers itself, with `sendAnswer`
+([In the project's code](#in-the-projects-code)) or with `fetch`
+([Calling Telegram](#calling-telegram)): `bot` names the secret, `chat.id` is the `chat_id` and
+`threadId` the `message_thread_id`. Its payload: `bot`, `updateId`, `messageId`,
+`chat { id, type, title }`, `threadId`, `from { id, name, username }`, `text`, `caption`,
+`files [{ kind, fileId }]`, `location`, `replyTo { messageId, fromId, text }` and `addressed`
+(whether the bot was @mentioned, replied to, named or commanded). A service message is never
+accepted.
 
 ## One tap, later
 

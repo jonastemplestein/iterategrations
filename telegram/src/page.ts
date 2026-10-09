@@ -1,6 +1,6 @@
 import {
   allow,
-  api,
+  call,
   BOT_NAME,
   connectBot,
   disconnectBot,
@@ -96,7 +96,7 @@ const personLine = (p: Person & { id: string }) =>
 
 async function botCard(itx: TelegramItx, bot: string, invite: string | null): Promise<string> {
   const info = await readJson<BotInfo>(itx, bot, "bot");
-  const readsAll = await api<{ can_read_all_group_messages?: boolean }>(
+  const readsAll = await call<{ can_read_all_group_messages?: boolean }>(
     itx,
     placeholder(bot),
     "getMe",

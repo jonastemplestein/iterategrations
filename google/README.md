@@ -20,6 +20,8 @@ worker, which hands it the requests on the project's `google` routing slug, and 
   its address, its scopes, and buttons to the page and to the account's third-party access at
   Google. The card changes when the client is saved or deleted: the package registers it again on
   that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
+- **Gmail as a stream** (if the project wants it): three helpers for the project's code that put
+  an account's mail on a stream, pushed by Gmail: [Gmail: push and sync](#gmail-push-and-sync).
 
 The deployment's own Google client (iterate's, on the Dash's Connect sheet) is another thing: it is
 shared by every project, and the platform keeps it. This package is for a client the project owns,
@@ -136,6 +138,113 @@ async (itx) => {
 ```
 
 The package exports `placeholder(connection)` (that string) and `secretOf`.
+
+## Gmail: push and sync
+
+Three helpers put a Gmail account's mail on a stream of the project, with no polling: Gmail pushes
+each change, and the project fetches what is new. The project's own code imports them (a run script
+cannot import a package):
+
+```ts
+import { pullGmail, receiveGmailPush, watchGmail } from "iterate-google";
+```
+
+Each call to Gmail goes with the global `fetch` and the account's placeholder,
+`Bearer getSecret("<secret>", { field: "accessToken" })`. `secret` is the account's secret:
+`secretOf(connection)` for an account connected on this package's page, or any other secret that
+holds a Google access token the platform refreshes (iterate's shared Google client keeps one per
+account, `/secrets/google-<connection>`). The account needs a scope that reads mail
+(`google({ scopes: ["https://www.googleapis.com/auth/gmail.readonly"] })`), and the client's Cloud
+project needs the Gmail API.
+
+- `watchGmail(itx, { secret, path, topicName })` asks Gmail (`users.watch`) to publish each change
+  to the account's INBOX and SENT labels to the Pub/Sub topic `topicName`, and records the watch on
+  `path` as `gmail/watch-registered`. Gmail stops a watch after 7 days, so call it again every day.
+- `receiveGmailPush(request, itx, { tokenSha256, streamOf })` answers the push subscription's POST.
+  `tokenSha256` is the SHA-256, in lowercase hex, of the token in the subscription's URL (its `token`
+  query parameter). A request without that token gets 401, and one that is not a POST gets 405.
+  Pub/Sub delivers again anything but a 2xx, so a body that is no Gmail notification, or one for an
+  address that `streamOf` answers null for, gets 204 and appends nothing. `streamOf` gets the
+  address in lowercase and answers the account's stream, where the notification lands once as
+  `gmail/push-received`.
+- `pullGmail(itx, { secret, path })` syncs. It reads the account's history since its cursor (kv
+  `gmail-sync:<path>`) and adds each new message on `path` as `gmail/message-added`, oldest first,
+  at most 25 a call: the rest wait for the next call. The first call starts from the last day's
+  mail, and so does a call whose history Gmail no longer keeps (about a week). Attachments, and a
+  body over 256 KiB, are project files under `<path>/<message id>/`. Drafts are skipped.
+
+### At Google Cloud
+
+In the Cloud project of the OAuth client that the account's secret uses
+([Gmail's push guide](https://developers.google.com/workspace/gmail/api/guides/push)):
+
+1. Turn on the Pub/Sub API and make a topic, `projects/<cloud project>/topics/<topic>`: that is
+   `topicName`.
+2. Let Gmail publish to it: give `gmail-api-push@system.gserviceaccount.com` the **Pub/Sub
+   Publisher** role on the topic.
+3. Make a push subscription on the topic. Its endpoint is the project's URL that hands the request
+   to `receiveGmailPush`, with a long random token: `https://<address>/push?token=<token>`. Keep the
+   token in the password vault, never in chat. The project keeps only the token's SHA-256, which is
+   no secret: in its kv, or in its code.
+
+The token in the URL is the only proof that a request comes from the subscription. Pub/Sub can also
+sign each push with an OIDC token, which `receiveGmailPush` does not check.
+
+### In the project's worker
+
+A project with one account connected here, its pushes on the routing slug `gmail-push`, and the
+token's hash in kv `gmail-push/token-sha256`:
+
+```ts
+import { pullGmail, receiveGmailPush, secretOf, watchGmail } from "iterate-google";
+
+const GMAIL = { secret: secretOf("1a2b3c4d"), path: "/integrations/gmail-ada" };
+const TOPIC = "projects/acme-example/topics/gmail-push";
+
+// in fetch
+if (routingSlug === "gmail-push") {
+  using itx = this.getItx();
+  return await receiveGmailPush(request, itx, {
+    tokenSha256: await itx.kv.get("gmail-push/token-sha256"),
+    streamOf: (address) => (address === "ada@example.com" ? GMAIL.path : null),
+  });
+}
+
+// in processEvent
+switch (event.type) {
+  case "events.iterate.com/project/worker-updated":
+    await watchGmail(itx, { ...GMAIL, topicName: TOPIC });
+    await itx.schedules.set({
+      key: "gmail-watch",
+      when: { everyMs: 24 * 60 * 60_000 },
+      events: [{ type: "gmail/watch-requested", payload: {} }],
+    });
+    return;
+  case "gmail/watch-requested":
+    // the daily renewal, and a sync for any notification Pub/Sub dropped
+    await watchGmail(itx, { ...GMAIL, topicName: TOPIC });
+    await pullGmail(itx, GMAIL);
+    return;
+  case "gmail/push-received":
+    await pullGmail(itx, GMAIL);
+    return;
+}
+```
+
+To stop, take these cases out, cancel the `gmail-watch` schedule, delete the subscription and the
+topic, and delete kv `gmail-sync:<path>`.
+
+### The events
+
+- `gmail/push-received` on the account's stream, keyed `gmail-push:<Pub/Sub message id>`:
+  `{ emailAddress, historyId, messageId, publishTime }`, where `messageId` is Pub/Sub's. It says
+  that the mailbox changed, and nothing about the mail: answer it with `pullGmail`.
+- `gmail/watch-registered` on `path`: `{ topicName, historyId, expiresAt }`.
+- `gmail/message-added` on `path`, keyed `gmail:<message id>`, once per message. Its payload: `id`,
+  `threadId`, `receivedAt`, `labelIds`, `from`, `to`, `cc`, `subject`, `date`, `messageId`,
+  `snippet`, `text`, `html` and `attachments`. `messageId` is the `Message-ID` header, and a header
+  the message does not have is null. `text` and `html` are the body, `{ path, chars }` for a body
+  kept as a file, or null. Each attachment is `{ filename, contentType, size, path }`.
 
 ## Good to know
 

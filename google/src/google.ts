@@ -4,6 +4,8 @@ import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry
 
 export { APP_PIN, APP_SECRET, SCOPES, URLS, placeholder, secretOf } from "./app.js";
 export type { Account, App, GoogleItx, OAuthOptions } from "./app.js";
+// Gmail as a stream, pushed: helpers the project's own code calls (gmail.ts)
+export { pullGmail, receiveGmailPush, watchGmail } from "./gmail.js";
 
 /** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
  *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
