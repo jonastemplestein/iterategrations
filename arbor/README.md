@@ -798,6 +798,27 @@ Show the person `arborBasket()`'s rows and total, and pass the total they agree 
 
 The account we read had no second factor. An account that has one is not covered.
 
+### Tokens over time
+
+We watched one account's tokens for five hours (live, 9 and 10 October 2026, read-only calls):
+
+- An access token works for exactly 60 minutes, its JWT's `exp`. Then the site answers 401
+  `{ code: "API-AUTHENTICATION-REQUIRED", message: "Authentication required.", details: ["Expired token."] }`.
+  Nothing ends it sooner: a refresh or a new login leaves the old access token working until `exp`.
+- A refresh token is good for one refresh. Each refresh answers a new refresh token; the old one
+  then answers 400 `invalid_grant` ("Invalid refresh token"). That refusal ends nothing else: the
+  chain that the used token started keeps working.
+- A refresh token does not wait for its access token. It worked after 75 minutes, after two newer
+  password logins, and after five hours unused. We found no limit: it may end after days.
+- Each login is its own session. Logins and refreshes here do not end the person's session in the
+  app.
+- The app refreshes only on a 401 (code). Requests that fail together share one refresh, and each
+  request tries again at most three times. When the refresh fails, the app shows its logout popup:
+  it keeps no password.
+
+So the exchange needs no timer. Egress calls it on a 401; two calls at once with the same refresh
+token are safe, because the second gets `invalid_grant` and logs in with the password.
+
 ## Notes
 
 - This is the API of Arbor's Android parent app, `com.arboreducation.parentapp` version 51.0.0
