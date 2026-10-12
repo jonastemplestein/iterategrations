@@ -221,6 +221,11 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
     lent.__describe().instructions,
     /It may ring anyone; it answers only \+447700900001/,
   );
+  // the line's own number comes from the bridge's `ready` (PHONE_SIP_NUMBER), not from calls.ts
+  assert.match(
+    lent.__describe().instructions,
+    /^Phone calls on the agents' own number \(\+447700900000\),/,
+  );
   const placed = await lent.call({
     to: "+44 7700 900002",
     opening: "Good evening, ma'am.",

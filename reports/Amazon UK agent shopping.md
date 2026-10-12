@@ -12,16 +12,17 @@ added it to the basket, changed its quantity and selection, chose a stored deliv
 and reached the final order review. That initial probe did not submit an order.
 
 A later, explicitly approved purchase used the self-hosted Iterate MCP server. Every shopping
-call ran through `itx.amazon`, lent by the local HTTP bridge. It ordered one product for the reviewed total. An exact order-number search
-in Amazon's order history confirmed a new order, the total and the delivery status.
-The receipt and account details remain in the private project. The original basket was restored.
+call ran through `itx.amazon`, lent by the local HTTP bridge. It ordered one product for the
+reviewed total. An exact order-number search in Amazon's order history confirmed a new order, the
+total and the delivery status. The receipt and account details remain in the private project. The
+original basket was restored.
 
 On 7 October, a native project agent completed another explicitly approved purchase on a dedicated
-consumer account. The agent searched for a product, selected a variant,
-confirmed a saved card, preserved the fresh review and submitted once. Amazon's consumer order
-history confirmed the order number, item, exact total and delivery window. The basket was empty
-afterward. This bridge ran on a Linux host with the session established in Chrome on the Mac. The
-temporary purchase cap was removed and the bridge restarted after verification.
+consumer account. The agent searched for a product, selected a variant, confirmed a saved card,
+preserved the fresh review and submitted once. Amazon's consumer order history confirmed the order
+number, item, exact total and delivery window. The basket was empty afterward. This bridge ran on a
+Linux host with the session established in Chrome on a Mac. The temporary purchase cap was removed
+and the bridge restarted after verification.
 
 The website uses a mix of JSON resources, HTML pages and form submissions. The captured routes
 include:

@@ -42,8 +42,8 @@ import qrcode from "qrcode-terminal";
 const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
 
 /** Whose account this is, in the words an agent reads in its capability tree: WHATSAPP_ACCOUNT
- *  ("The agents' own WhatsApp account, +44 7700 900000", "Jonas's own personal WhatsApp account,
- *  +44 7700 900123: writing from it is writing as Jonas"). Two accounts lent from one file are
+ *  ("The agents' own WhatsApp account, +44 7700 900000", "Sam's own personal WhatsApp account,
+ *  +44 7700 900123: writing from it is writing as Sam"). Two accounts lent from one file are
  *  otherwise told apart by nothing but their name. */
 const ACCOUNT = process.env.WHATSAPP_ACCOUNT || "A WhatsApp account";
 

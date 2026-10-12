@@ -55,6 +55,9 @@ own, to a project. A folder without a package is just a recipe.
 
 ## Working on this repo
 
+This repository is public: [`AGENTS.md`](AGENTS.md) says what must never go into it (no personal
+information).
+
 pnpm and [Vite+](https://viteplus.dev) (oxfmt, oxlint with type checking, Vitest, tsdown):
 
 ```sh
