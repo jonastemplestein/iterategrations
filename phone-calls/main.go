@@ -15,7 +15,7 @@
 //
 // serve reads its account from the environment:
 //
-//	PHONE_SIP_NUMBER         the number in E.164, the registration's username (+447441138737)
+//	PHONE_SIP_NUMBER         the number in E.164, the registration's username (+447700900000)
 //	PHONE_SIP_PASSWORD_FILE  a file holding the number's SIP password (never the password itself)
 //	PHONE_SIP_DOMAIN         the registrar, voiceless.aa.net.uk unless set
 //	PHONE_SIP_PORT           the local UDP port for SIP, 5062 unless set

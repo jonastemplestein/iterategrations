@@ -5,7 +5,7 @@ The local bridge then uses Node HTTP requests for search, products, basket chang
 It is available as `itx.amazon` through `iterate provide`.
 
 The adapter came from requests captured in real Chrome with Playwriter on 6–7 October 2026.
-The observed accounts include Amazon Business and a consumer account with shared Prime benefits.
+The observed accounts include Amazon Business and a consumer account.
 It uses stored addresses and payment methods.
 The website protocol is experimental. It is distinct from the officially documented
 [Amazon Business Search, Cart and Ordering APIs](https://docs.business.amazon.com/docs/cart-api-overview),
@@ -159,10 +159,10 @@ On 6 October 2026, one explicitly approved order completed through a self-hosted
 server and this local HTTP bridge. Amazon's order history confirmed the product, exact total
 and delivery status. The original basket was restored. The proof used a stored address and card
 on an Amazon Business account. On 7 October 2026, a native project agent completed a second
-explicitly approved purchase on a dedicated consumer account with shared Prime benefits. It
-confirmed the saved card, preserved a fresh review, submitted once and verified the order number,
-item, total and delivery window in Amazon's order history. The bridge ran on a Linux host; Chrome
-on the Mac had established the session. Purchases were disabled again after verification.
+explicitly approved purchase on a dedicated consumer account. It confirmed the saved card,
+preserved a fresh review, submitted once and verified the order number, item, total and delivery
+window in Amazon's order history. The bridge ran on a Linux host; Chrome
+on a Mac had established the session. Purchases were disabled again after verification.
 Payment-choice changes, new address forms and other checkout variants remain untested.
 Website changes or renewed authentication can stop calls.
 The adapter returns `human_login_required` when it sees an authentication challenge.

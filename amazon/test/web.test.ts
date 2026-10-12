@@ -71,14 +71,14 @@ test("Business order history loads the read-only panel with a private page token
     assert.equal(request.headers.get("anti-csrftoken-a2z"), "private-history-csrf");
     const params = new URLSearchParams(await request.text());
     const query = JSON.parse(params.get("orderHistoryRequestString")!);
-    assert.equal(query.searchKeyword, "Huel");
+    assert.equal(query.searchKeyword, "Notebook");
     assert.equal(query.customerId, "private-customer");
     return new Response(
-      '<section>Order 123-1234567-1234567: Huel arriving Thursday<input type="hidden" value="private-token"></section>',
+      '<section>Order 123-1234567-1234567: Notebook arriving Thursday<input type="hidden" value="private-token"></section>',
     );
   });
-  const orders = await api.getOrders({ search: "Huel" });
-  assert.equal(orders.summary, "Order 123-1234567-1234567: Huel arriving Thursday");
+  const orders = await api.getOrders({ search: "Notebook" });
+  assert.equal(orders.summary, "Order 123-1234567-1234567: Notebook arriving Thursday");
   assert.equal(calls.length, 2);
   assert(!JSON.stringify(orders).includes("private-"));
 });

@@ -198,19 +198,19 @@ func TestCallerNumber(t *testing.T) {
 		number  string
 		trusted bool
 	}{
-		{"07477472160", "447477472160", true},
-		{"+447477472160", "447477472160", true},
-		{"00447852559254", "447852559254", true},
-		{"447477472160", "447477472160", true},
-		{"?+447477472160", "", false}, // an untrusted caller ID never counts as the number it claims
+		{"07700900123", "447700900123", true},
+		{"+447700900123", "447700900123", true},
+		{"00447700900456", "447700900456", true},
+		{"447700900123", "447700900123", true},
+		{"?+447700900123", "", false}, // an untrusted caller ID never counts as the number it claims
 		{"?phonetest", "", false},
 		{"%3fphonetest", "", false}, // as the line sends it
-		{"%3f+447477472160", "", false},
-		{"%2b447477472160", "447477472160", true},
+		{"%3f+447700900123", "", false},
+		{"%2b447700900123", "447700900123", true},
 		{"anonymous", "", false},
 		{"", "", false},
 		{"jonas", "", false},
-		{"0747747216x", "", false},
+		{"0770090012x", "", false},
 		{"123", "", false},
 	}
 	for _, c := range cases {

@@ -51,7 +51,7 @@ func newHarness(t *testing.T, onCall func(d *diago.DialogServerSession)) *harnes
 	h := &harness{t: t, ctx: ctx, events: make(chan map[string]any, 4096),
 		serverAddr: fmt.Sprintf("127.0.0.1:%d", serverPort), peerAddr: fmt.Sprintf("127.0.0.1:%d", peerPort)}
 	conf := lineConfig{
-		Number: "+447441138737", Domain: "127.0.0.1", Proxy: h.peerAddr,
+		Number: "+447700900000", Domain: "127.0.0.1", Proxy: h.peerAddr,
 		BindIP: "127.0.0.1", Port: serverPort,
 		RingLimit: 10 * time.Second, AudioAfterAnswer: 1500 * time.Millisecond, SilentLine: 3 * time.Second,
 	}
@@ -72,7 +72,7 @@ func newHarness(t *testing.T, onCall func(d *diago.DialogServerSession)) *harnes
 	}
 	h.server = s
 	h.expect("ready")
-	ua, _ := sipgo.NewUA(sipgo.WithUserAgent("07477472160"), sipgo.WithUserAgentHostname("127.0.0.1"))
+	ua, _ := sipgo.NewUA(sipgo.WithUserAgent("07700900123"), sipgo.WithUserAgentHostname("127.0.0.1"))
 	h.peer = diago.NewDiago(ua,
 		diago.WithLogger(diagoLogger()),
 		diago.WithTransport(diago.Transport{Transport: "udp", BindHost: "127.0.0.1", BindPort: peerPort}),
@@ -111,7 +111,7 @@ func (h *harness) micHeard() []int16 {
 // dial is the peer ringing the bridge; it answers once the call is up (or refused).
 func (h *harness) dial(ctx context.Context) (*diago.DialogClientSession, *diago.DialogMedia, error) {
 	// the address in the URI, not as a destination: a CANCEL goes where the URI says
-	d, err := h.peer.NewDialog(sip.Uri{Scheme: "sip", User: "+447441138737", Host: "127.0.0.1", Port: h.server.conf.Port}, diago.NewDialogOptions{})
+	d, err := h.peer.NewDialog(sip.Uri{Scheme: "sip", User: "+447700900000", Host: "127.0.0.1", Port: h.server.conf.Port}, diago.NewDialogOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -208,7 +208,7 @@ func TestIncomingCallCarriesAudioBothWays(t *testing.T) {
 		answered <- dialled{d, med, err}
 	}()
 	incoming := h.expect("incoming")
-	if incoming["number"] != "447477472160" || incoming["untrusted"] != false || incoming["from"] != "07477472160" {
+	if incoming["number"] != "447700900123" || incoming["untrusted"] != false || incoming["from"] != "07700900123" {
 		t.Fatalf("incoming %v", incoming)
 	}
 	callID := incoming["callId"].(string)
@@ -316,7 +316,7 @@ func TestPlacedCallRingsIsAnsweredAndHungUp(t *testing.T) {
 	h.server.handle(serveInput{Call: "+447700900001", Ring: 10})
 	ringing := h.expect("ringing")
 	d := <-gotCall
-	if d.ToUser() != "+447700900001" || d.FromUser() != "+447441138737" {
+	if d.ToUser() != "+447700900001" || d.FromUser() != "+447700900000" {
 		t.Fatalf("the call went to %q from %q", d.ToUser(), d.FromUser())
 	}
 	if up := h.expect("answered"); up["callId"] != ringing["callId"] {

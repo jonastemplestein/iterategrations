@@ -37,7 +37,7 @@ type Message = {
 const FILES = ["photo", "document", "voice", "audio", "video", "video_note", "sticker"];
 
 /** What people call the bot: its display name, and the first word of its username
- *  (`jeeves_templestein_bot` is Jeeves). */
+ *  (`jeeves_example_bot` is Jeeves). */
 const callNames = (bot: BotInfo): string[] =>
   [bot.name, bot.username.split(/[_-]/)[0]].flatMap((name) =>
     name && name.length >= 3 ? [name.toLowerCase()] : [],

@@ -70,7 +70,7 @@ type Project = Parameters<typeof startVoiceCall>[0] & {
 };
 
 type CallInput = {
-  /** The person's number, with country code: "+44 7477 472160". */
+  /** The person's number, with country code: "+44 7700 900123". */
   to: string;
   /** The first thing the voice says when they answer. */
   opening?: string;

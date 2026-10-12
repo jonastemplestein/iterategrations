@@ -1,8 +1,8 @@
 // stun.go — the address the internet sees this computer at. Behind a NAT the line must be told
 // the public address, in Contact and in SDP: Andrews & Arnold send a call's ACK to the Contact
 // of the answer and its audio to the SDP's address, and a private address in either loses them
-// (seen 2026-10-06: an answer with Contact 192.168.0.63 was never acknowledged; a test caller
-// whose SDP said 192.168.0.63 heard nothing). The STUN server is theirs, stun.aa.net.uk.
+// (seen 2026-10-06: an answer whose Contact was the computer's LAN address was never acknowledged;
+// a test caller whose SDP gave that address heard nothing). The STUN server is theirs, stun.aa.net.uk.
 package main
 
 import (

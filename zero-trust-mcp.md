@@ -22,9 +22,9 @@ client id and secret are typed into the Worker's setup page, never into iterate 
 - **The person's own deployment** (recommended): `bunx wrangler deploy` in a checkout of
   github.com/iterate/zero-trust-mcp, after `openssl rand -base64 32 | bunx wrangler secret put SEAL_KEY`.
   Its README has the details.
-- **Jonas's**, `https://zero-trust-mcp.templestein.workers.dev`, if the person says to use it. Say
-  what that means first: a running Worker necessarily sees the tokens of each request it serves
-  (its README says so), so its operator has to be someone the person trusts.
+- **Someone else's**, if the person gives its URL and says to use it. Say what that means first: a
+  running Worker necessarily sees the tokens of each request it serves (its README says so), so its
+  operator has to be someone the person trusts.
 
 Check it serves the integration (`<integration>` is `monzo` or `yoto`), and that it speaks OAuth
 with open client registration:

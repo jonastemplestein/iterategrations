@@ -70,7 +70,7 @@ var lineCodecs = []media.Codec{media.CodecAudioAlaw, media.CodecTelephoneEvent80
 
 // lineConfig is the account and how this process reaches it.
 type lineConfig struct {
-	// Number is the account's number in E.164 (+447441138737): the registration's username, and
+	// Number is the account's number in E.164 (+447700900000): the registration's username, and
 	// who a placed call is from.
 	Number   string
 	Password string

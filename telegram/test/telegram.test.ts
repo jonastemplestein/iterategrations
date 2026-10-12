@@ -565,7 +565,7 @@ test("in a group saying the bot's name, as a word, is addressing it: its display
   await project.connected({ 42: ME });
   project.kv[K("bot")] = JSON.stringify({
     id: 1001,
-    username: "jeeves_templestein_bot",
+    username: "jeeves_example_bot",
     name: "Butler",
   });
   const say = async (id: number, text: string) =>

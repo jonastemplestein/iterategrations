@@ -11,7 +11,7 @@ const say = (event) => console.log(JSON.stringify(event));
 let said = 0;
 let placed = 0;
 let callId = "";
-say({ event: "ready", self: "+447441138737" });
+say({ event: "ready", self: "+447700900000" });
 
 setInterval(() => {
   if (!existsSync(process.env.FAKE_BRIDGE_CONTROL)) return;

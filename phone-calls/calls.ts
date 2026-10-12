@@ -88,7 +88,7 @@ type Project = Parameters<typeof startVoiceCall>[0] & {
 };
 
 type CallInput = {
-  /** The person's number, with country code: "+44 7477 472160". */
+  /** The person's number, with country code: "+44 7700 900123". */
   to: string;
   /** The first thing the voice says when they answer. */
   opening?: string;
@@ -160,6 +160,8 @@ type BridgeEvent = {
   number?: string;
   from?: string;
   untrusted?: boolean;
+  /** `ready`: the line's own number (PHONE_SIP_NUMBER) */
+  self?: string;
   video?: boolean;
   group?: boolean;
 };
@@ -175,6 +177,8 @@ let bridge: ChildProcessWithoutNullStreams | null = null;
 let bridgeStarted = false;
 /** The number is registered: calls can be placed and come in. */
 let bridgeReady = false;
+/** The line's own number, as the bridge said once registered. */
+let ownNumber: string | undefined;
 let bridgeWaiters: (() => void)[] = [];
 
 /** The voice ended the call itself (its agent hung up, or nobody spoke for a minute): the phone
@@ -704,6 +708,7 @@ function onBridgeEvent(event: BridgeEvent): void {
   }
   if (event.event === "ready") {
     bridgeReady = true;
+    ownNumber = event.self ?? ownNumber;
     console.error("phone-calls: the number is registered");
     for (const connected of bridgeWaiters.splice(0)) connected();
     return;
@@ -818,7 +823,7 @@ export default async function provide(connection: { itx: Project }) {
         : null;
     },
     __describe: () => ({
-      instructions: `Phone calls on the agents' own number (+44 7441 138737), over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, in a context of its own (streamPath, under /agents/voice/phone-<their digits>/): it says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
+      instructions: `Phone calls on the agents' own number${ownNumber ? ` (${ownNumber})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, in a context of its own (streamPath, under /agents/voice/phone-<their digits>/): it says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
       functions: ["call", "hangup", "status"],
     }),
   };
