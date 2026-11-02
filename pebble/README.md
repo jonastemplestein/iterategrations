@@ -10,6 +10,10 @@ the webhook URL to paste in the Pebble app. The project's Integrations page in t
 Pebble card ("Set up by your coding agent" until the signing secret exists), with an **Open** button
 to the page and a **Recipe** button to this recipe.
 
+A project with more than one ring hosts one receiver per ring, each with its own names: see
+[Several rings](#several-rings-a-receiver-each). The steps below set up the default receiver,
+`pebble()`.
+
 ## 0. Before you start: the ring and the app
 
 Ask the person which of these is not done yet, and walk them through it:
@@ -134,6 +138,52 @@ async (itx) => {
 };
 ```
 
+## Several rings: a receiver each
+
+Each ring (or each person) gets a receiver of its own: another element of the `integrations` array,
+with its own routing slug. Every other name follows from the slug unless you give it:
+
+| Option          | Default                                                           | What it is                                          |
+| --------------- | ----------------------------------------------------------------- | --------------------------------------------------- |
+| `slug`          | `pebble`                                                          | The routing slug: the host the app posts to.        |
+| `signingSecret` | `/secrets/<slug>-webhook`                                         | The secret the receiver checks signatures with.     |
+| `stream`        | `/<slug>`                                                         | The stream its `pebble/recording-created` lands on. |
+| `audioDir`      | the `stream` path                                                 | The project-file folder its audio goes in.          |
+| `integration`   | the slug                                                          | Its card's key on the Dash's Integrations page.     |
+| `title`         | `Pebble Index 01`, or `Pebble Index 01 (<integration>)` otherwise | Its card's and its page's title.                    |
+
+```ts
+const integrations: Integration[] = [
+  pebble({ slug: "pebble-ada" }), // /secrets/pebble-ada-webhook, /pebble-ada, its own card
+  pebble({ slug: "pebble-sam" }), // /secrets/pebble-sam-webhook, /pebble-sam, its own card
+];
+```
+
+Each receiver checks only its own secret, writes only to its own stream and folder, keys its events
+by its own `integration` (`<integration>:<deliveryId>`), and registers its own card. Its names come
+from `worker.ts` alone: no request (its host, its headers) can make one receiver act as another.
+Give every receiver its own slug, secret, stream and integration; two that share one also share
+what it holds. `pebble()` throws on a name it cannot use, so the probe in
+[add-to-a-project.md](../add-to-a-project.md) refuses the commit.
+
+The recipe is the same for each receiver, with its names: step 1 collects its `signingSecret`, step 3
+asks `itx.url` for its `slug`, and step 5 waits on its `stream`. Its page shows its own webhook URL.
+In step 2, `ELEMENT` may list several receivers (`'pebble({ slug: "pebble-ada" }), pebble({ slug:
+"pebble-sam" })'`). If `worker.ts` already lists `pebble(…)`, the script only pins the newer package
+(the options need it) and leaves the array alone: add the new element by hand next to the first, as
+[add-to-a-project.md](../add-to-a-project.md#by-hand) says, and commit it with the tip you read as
+`parent`.
+
+**Audio files.** A receiver with options names each file by its bytes:
+`<audioDir>/<sha256 of the audio>.m4a`. A path then only ever holds the bytes it was named for, so
+neither a redelivery with other audio nor another recording with the same name replaces a file it
+accepted. A delivery id that landed before with another recording is answered `409`, and the first
+recording stands; the other audio may stay behind as a file that no event names. `pebble()` with no
+options keeps the name the app gives the part, `/pebble/<recordingId>.m4a`, as it always has: there a
+later delivery with the same name replaces the file. A project that wants the byte names for its one
+receiver can write `pebble({ slug: "pebble" })`: the same host, secret, stream and card, with new
+files named by their bytes.
+
 ## The event
 
 `{ deliveryId, trigger, recordedAt, transcript, audioPath }`, idempotent per delivery.
@@ -141,12 +191,22 @@ async (itx) => {
 Pebble's; iterate transcribes nothing. Requests are verified with the app's signature
 (`itx.secrets.verifyHmac`, 5-minute window); the contract is Pebble's
 [INDEX_WEBHOOK_API.md](https://github.com/coredevices/mobileapp/blob/main/experimental/src/commonMain/kotlin/coredevices/ring/external/indexwebhook/INDEX_WEBHOOK_API.md).
-The whole request is held in memory to verify it: fine for spoken notes.
+The whole request is held in memory to verify it: fine for spoken notes. A body that is not the
+app's multipart form (another content type or boundary, or no `recordedAt`) is `400`; a click
+gesture's JSON button event is one of those.
+
+**`trigger` is the app's own string, verbatim.** The signature covers it, so nobody without the
+secret can change a recording's gesture. The app's recordings carry `single-click-hold` (_Hold &
+talk_) or `double-click-hold` (_Double click & hold_). A consumer that acts on the gesture compares
+`trigger` with exact strings it knows and treats every other value as unknown: no substring match,
+no prefix, no default branch that maps an unknown gesture to an action. A future gesture then does
+nothing until the consumer adds it.
 
 ## Removing it
 
 Delete the webhook in the Pebble app (Index 01 Settings, Webhook), take `pebble()` and its import out
-of `worker.ts`, and delete `/secrets/pebble-webhook`. The Dash takes nothing away itself, so once
+of `worker.ts`, and delete `/secrets/pebble-webhook` (a receiver with options: its own element, its
+`signingSecret`, and its card by its `integration`). The Dash takes nothing away itself, so once
 that commit is live, take the card off with its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "pebble", card: null } })`. The recordings stay on `/pebble`
 and in the project's files.
