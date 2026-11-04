@@ -453,8 +453,8 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
       );
 }
 
-/** Ring `input.to`. The voice is connected FIRST (a voice call of the project's, its own context,
- *  the live model on the line), and only then does the phone ring: the person who answers is
+/** Ring `input.to`. The voice is connected FIRST (a press on the person's voice device, the live
+ *  model on the line), and only then does the phone ring: the person who answers is
  *  spoken to at once. Answers once the phone is ringing; everything after (the answer, the end)
  *  is recorded on LOG_PATH and, with `reportTo`, told to that agent at the end. */
 async function call(input: CallInput): Promise<Placed> {
