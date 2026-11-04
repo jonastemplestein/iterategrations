@@ -5,12 +5,14 @@
 // OUT: the project calls `itx.whatsappCalls.call({ to, opening, brief, reportTo })` and the
 // person's phone rings on WhatsApp. IN: a person this lend answers (WHATSAPP_CALLS_ALLOWED) rings
 // the account and the call is picked up. Either way the call is a voice call like any other the
-// project has: this file is its client (voice-call-client.ts, the voice app's own), so the call
-// gets a fresh agent at `/agents/voice/whatsapp-<the other person's digits>/<time>-<id>` with the
-// voice relay beside it (the number in the path: a project can tell whose phone a call's agent is
-// on), the person's words go up as microphone frames and the voice's answer comes back as speaker
-// frames. The voice is on the line BEFORE the phone rings or the call is picked up, so the person
-// is spoken to at once.
+// project has: this file is its client (@iterate-com/voice's call client, the voice app's own). Each
+// person is a voice device of the project's, `whatsapp-<the other person's digits>`, provisioned
+// once and kept: its relay at `/voice/whatsapp-<digits>` and its agent at
+// `/agents/voice/whatsapp-<digits>`, which keeps every call with that person (the number in the
+// path: a project can tell whose phone a call's agent is on). A call is one press on the device; the
+// person's words go up as microphone frames and the voice's answer comes back as speaker frames. The
+// voice is on the line BEFORE the phone rings or the call is picked up, so the person is spoken to
+// at once.
 //
 // The WhatsApp side is `jeeves-call serve` (serve.go: meowcaller, WhatsApp's call stack, on a
 // linked device of its own beside the Baileys one), one process kept running with the calls'
@@ -25,12 +27,12 @@
 // seconds, and the person is rung again, once, by a fresh one.
 //
 // Each call's facts land on /integrations/whatsapp-calls: `whatsapp-calls/call-placed` or
-// `call-received`, `call-answered` (with the voice call's path) and `call-ended` (with what was
+// `call-received`, `call-answered` (with the caller's agent path) and `call-ended` (with what was
 // said).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { startVoiceCall, type VoiceCall } from "./voice-call-client.ts";
+import { connectVoiceDevice, type VoiceCall, type VoiceDevice } from "@iterate-com/voice/call";
 
 export const description =
   "WhatsApp voice calls from the agents' own number: call({ to, opening, brief, reportTo }) rings the person on WhatsApp and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(). Call __describe() first.";
@@ -61,10 +63,7 @@ const ANSWER_WITH: Record<string, string> = (() => {
 })();
 
 /** The project, as `iterate provide` hands it over: the parts this file uses. */
-type Project = Parameters<typeof startVoiceCall>[0] & {
-  cd(path: string): {
-    append(event: { type: string; payload: Record<string, unknown> }): Promise<unknown>;
-  };
+type Project = Parameters<typeof connectVoiceDevice>[0] & {
   agents: { get(path: string): { message(text: string): Promise<unknown> } };
   kv: { get(key: string): Promise<string | null> };
 };
@@ -99,6 +98,10 @@ type CallMetrics = {
   bridge: Record<string, number> | null;
 };
 
+/** A context of the project's, as much of it as a voice device uses. */
+type VoiceContext = ReturnType<Parameters<typeof connectVoiceDevice>[0]["cd"]>;
+
+/** `streamPath`: the caller's agent, `/agents/voice/whatsapp-<digits>`, which keeps the call. */
 type Placed = { callId: string; ringing: true; streamPath: string };
 
 type ActiveCall = {
@@ -113,9 +116,13 @@ type ActiveCall = {
   opening: string | undefined;
   brief: string | undefined;
   reportTo: string | undefined;
-  /** Every voice call the WhatsApp call was carried by: one, unless the voice was reconnected. */
-  streamPaths: string[];
-  voice: VoiceCall<unknown> | null;
+  /** The caller's agent, which keeps this call and every one before it; null until the voice is
+   *  connected. */
+  agentPath: string | null;
+  /** Every voice call the WhatsApp call was carried by, by activation: one, unless the voice was
+   *  reconnected. */
+  activations: string[];
+  voice: VoiceCall | null;
   said: string[];
   metrics: CallMetrics;
   /** The WhatsApp call is over: a voice call that ends now is not reconnected. */
@@ -144,6 +151,23 @@ type BridgeEvent = {
 
 let itx: Project | undefined;
 let active: ActiveCall | null = null;
+
+/** Each caller's voice device, provisioned once (`itx.voice.ensureVoiceDevice`) and kept: a press
+ *  on it is one append. A refused provisioning is asked again on the next call. */
+const devices = new Map<string, Promise<VoiceDevice<VoiceContext>>>();
+function deviceFor(project: Project, number: string): Promise<VoiceDevice<VoiceContext>> {
+  const client = `whatsapp-${number}`;
+  let device = devices.get(client);
+  if (!device) {
+    const connected = connectVoiceDevice(project, { client });
+    device = connected;
+    devices.set(client, connected);
+    connected.catch(() => {
+      if (devices.get(client) === connected) devices.delete(client);
+    });
+  }
+  return device;
+}
 /** serve.go's reason for ending an accepted call that carried no audio. */
 const NO_AUDIO = "answered, but no audio flowed";
 /** How long a call waits for the device to be connected before it is given up. */
@@ -222,7 +246,8 @@ const newCall = (direction: "out" | "in", number: string): ActiveCall => ({
   opening: undefined,
   brief: undefined,
   reportTo: undefined,
-  streamPaths: [],
+  agentPath: null,
+  activations: [],
   voice: null,
   said: [],
   metrics: {
@@ -258,7 +283,7 @@ async function takeNote(project: Project, current: ActiveCall): Promise<void> {
   }
 }
 
-const addStats = (current: ActiveCall, ended: VoiceCall<unknown>) => {
+const addStats = (current: ActiveCall, ended: VoiceCall) => {
   current.metrics.micFramesSent += ended.stats.micFramesSent;
   current.metrics.micFramesDropped += ended.stats.micFramesDropped;
   current.metrics.micFramesFailed += ended.stats.micFramesFailed;
@@ -274,10 +299,23 @@ async function connectVoice(
   resumed: boolean,
 ): Promise<void> {
   const pressedAt = Date.now();
+  const device = await deviceFor(project, current.number);
+  current.agentPath = device.agentPath;
+  await current.noted;
+  // the brief goes before the press: the agent reads it before the call's first hand-over. Over
+  // the newest link: the device may have waited for a move to it
+  await (itx ?? project).cd(device.agentPath).append({
+    type: "events.iterate.com/agent/context-added",
+    payload: {
+      role: "user",
+      actor: { type: "user" },
+      content: briefFor(current, resumed),
+      llmRequestPolicy: { behaviour: "dont-trigger-request" },
+    },
+  });
   const accepted = Promise.withResolvers<void>();
-  let mine: VoiceCall<unknown> | null = null;
-  mine = await startVoiceCall(project, {
-    client: `whatsapp-${current.number}`,
+  let mine: VoiceCall | null = null;
+  mine = device.call({
     onSpeakerFrame: (frame) => {
       if (current.voice !== mine) return;
       // nobody is listening until the call is answered: what the voice says before is dropped
@@ -308,7 +346,7 @@ async function connectVoice(
       current.metrics.voiceEnds.push(reason);
       addStats(current, mine!);
       current.voice = null;
-      const reconnects = current.streamPaths.length - 1;
+      const reconnects = current.activations.length - 1;
       if (
         VOICE_ENDED_ON_PURPOSE.test(reason) ||
         current.answeredAt === null ||
@@ -325,32 +363,12 @@ async function connectVoice(
       });
     },
   });
-  current.streamPaths.push(mine.streamPath);
-  await current.noted;
-  const callContext = project.cd(mine.streamPath);
-  const brief = [
-    current.direction === "out"
-      ? `[call brief] You are on a WhatsApp voice call to +${current.number}, which you placed yourself${current.reportTo ? ` from your conversation at ${current.reportTo}` : ""}: to the person you are the same assistant they know, not someone calling on its behalf.`
-      : `[call brief] +${current.number} rang you on WhatsApp and you picked up: to the person you are the same assistant they know. You do not know yet why they are calling.`,
-    current.brief ?? "",
-    resumed
-      ? `The voice connection failed during this call and you are its replacement: the person is still on the line. What was said so far:\n${current.said.join("\n") || "(nothing yet)"}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  await callContext.append({
-    type: "events.iterate.com/agent/context-added",
-    payload: {
-      role: "user",
-      actor: { type: "user" },
-      content: brief,
-      llmRequestPolicy: { behaviour: "dont-trigger-request" },
-    },
-  });
+  current.activations.push(mine.activation);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const ready = await Promise.race([
     accepted.promise.then(() => true),
+    // a refused press is a voice that cannot come on the line
+    mine.pressed.then(() => new Promise<never>(() => undefined)),
     new Promise<boolean>(
       (resolve) => (timer = setTimeout(() => resolve(false), VOICE_READY_TIMEOUT_MS)),
     ),
@@ -372,11 +390,29 @@ async function connectVoice(
   }
   current.metrics.voiceReadyMs.push(Date.now() - pressedAt);
   current.voice = mine;
+  // the call is up: a failed apology is logged, not a reason to hang up
   if (resumed)
-    await callContext.append({
-      type: "events.iterate.com/agent/web-message-sent",
-      payload: { message: "I do apologise, the line dropped for a moment. Where were we?" },
-    });
+    void mine
+      .speak("I do apologise, the line dropped for a moment. Where were we?")
+      .catch((error: unknown) =>
+        console.error(`whatsapp-calls: the apology was not said: ${String(error)}`),
+      );
+}
+
+/** What the caller's agent is told before a call's press. Its history holds the earlier calls
+ *  with the same person, so the brief says it is for the call that starts now. */
+function briefFor(current: ActiveCall, resumed: boolean): string {
+  return [
+    current.direction === "out"
+      ? `[call brief, for the call that starts now] You are on a WhatsApp voice call to +${current.number}, which you placed yourself${current.reportTo ? ` from your conversation at ${current.reportTo}` : ""}: to the person you are the same assistant they know, not someone calling on its behalf.`
+      : `[call brief, for the call that starts now] +${current.number} rang you on WhatsApp and you picked up: to the person you are the same assistant they know. You do not know yet why they are calling.`,
+    current.brief ?? "",
+    resumed
+      ? `The voice connection failed during this call and you are its replacement: the person is still on the line. What was said so far:\n${current.said.join("\n") || "(nothing yet)"}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** The WhatsApp call is over: its voice call ends, its end is recorded, and whoever asked for the
@@ -402,8 +438,8 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
     answered,
     reason,
     seconds,
-    streamPath: current.streamPaths.at(-1) ?? null,
-    streamPaths: current.streamPaths,
+    streamPath: current.agentPath,
+    activations: current.activations,
     reportTo: current.reportTo ?? null,
     ...(current.redialled && { redialled: true }),
     transcript,
@@ -414,7 +450,7 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
       .get(current.reportTo)
       .message(
         answered
-          ? `[whatsapp call to ${number} ended after ${String(seconds)} s: ${reason}] What was said:\n${transcript || "(nothing was transcribed)"}\n(the call's own agent, with everything it did: ${current.streamPaths.join(", ")})`
+          ? `[whatsapp call to ${number} ended after ${String(seconds)} s: ${reason}] What was said:\n${transcript || "(nothing was transcribed)"}\n(the caller's agent, with everything it did: ${current.agentPath ?? "none"})`
           : `[whatsapp call to ${number} was not answered: ${reason}]`,
       )
       .catch((error: unknown) =>
@@ -424,8 +460,8 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
       );
 }
 
-/** Ring `input.to`. The voice is connected FIRST (a voice call of the project's, its own context,
- *  the live model on the line), and only then does the phone ring: the person who answers is
+/** Ring `input.to`. The voice is connected FIRST (a press on the person's voice device, the live
+ *  model on the line), and only then does the phone ring: the person who answers is
  *  spoken to at once. Answers once the phone is ringing; everything after (the answer, the end)
  *  is recorded on LOG_PATH and, with `reportTo`, told to that agent at the end. */
 async function call(input: CallInput): Promise<Placed> {
@@ -490,10 +526,10 @@ async function redial(current: ActiveCall): Promise<void> {
   if (current.direction === "in") {
     current.direction = "out";
     current.opening = `I do apologise, the line failed just now. ${current.opening ?? ""}`.trim();
-    const streamPath = current.streamPaths.at(-1);
-    if (streamPath && itx)
+    const agentPath = current.agentPath;
+    if (agentPath && itx)
       void itx
-        .cd(streamPath)
+        .cd(agentPath)
         .append({
           type: "events.iterate.com/agent/context-added",
           payload: {
@@ -580,7 +616,7 @@ function onBridgeEvent(event: BridgeEvent): void {
   if (event.event === "ringing") {
     current.callId = event.callId ?? "";
     current.ringingAt = Date.now();
-    const streamPath = current.streamPaths[0]!;
+    const streamPath = current.agentPath!;
     void record("call-placed", {
       callId: current.callId,
       to: `+${current.number}`,
@@ -607,16 +643,12 @@ function onBridgeEvent(event: BridgeEvent): void {
       ...(current.direction === "out"
         ? { to: `+${current.number}` }
         : { from: `+${current.number}` }),
-      streamPath: current.streamPaths[0],
+      streamPath: current.agentPath,
     });
     // the voice is already on the line: it speaks first
-    if (current.opening && current.voice && itx)
-      void itx
-        .cd(current.voice.streamPath)
-        .append({
-          type: "events.iterate.com/agent/web-message-sent",
-          payload: { message: current.opening },
-        })
+    if (current.opening && current.voice)
+      void current.voice
+        .speak(current.opening)
         .catch((error: unknown) =>
           console.error(`whatsapp-calls: the opening was not said: ${String(error)}`),
         );
@@ -665,7 +697,23 @@ function startBridge(): void {
 }
 
 export default async function provide(connection: { itx: Project }) {
+  const reconnected = itx !== undefined;
   itx = connection.itx;
+  // each caller's device moves to the new link, a call in progress with it; a call placed
+  // meanwhile waits for the move
+  if (reconnected)
+    for (const [client, device] of devices) {
+      const moved = device.then(async (ready) => {
+        await ready.moveTo(connection.itx);
+        return ready;
+      });
+      devices.set(client, moved);
+      moved.catch((error: unknown) => {
+        console.error(`whatsapp-calls: ${client} could not move to the new link: ${String(error)}`);
+        if (devices.get(client) === moved) devices.delete(client);
+        if (active?.voice && `whatsapp-${active.number}` === client) tell({ hangup: true });
+      });
+    }
   // `iterate provide` calls this again on each reconnection: the device stays as it is
   if (!bridgeStarted) startBridge();
   bridgeStarted = true;
@@ -686,12 +734,12 @@ export default async function provide(connection: { itx: Project }) {
             direction: active.direction,
             with: `+${active.number}`,
             answered: active.answeredAt !== null,
-            streamPath: active.streamPaths.at(-1) ?? null,
+            streamPath: active.agentPath,
           }
         : null;
     },
     __describe: () => ({
-      instructions: `WhatsApp voice calls from the agents' own number. call({ to, opening, brief, reportTo }) rings a person on WhatsApp: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, as in the voice app, in a context of its own (streamPath, under /agents/voice/whatsapp-<their digits>/): it says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers to the agents' number is picked up the same way, once the voice is on the line; to say something particular when a person next rings, leave a note first: await itx.kv.put('whatsapp-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (opening: what the voice says on picking up; brief: what the call's agent should know; until: an ISO time after which the note is ignored). One call at a time. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (whatsapp-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It rings and answers only: ${numbers}.`,
+      instructions: `WhatsApp voice calls from the agents' own number. call({ to, opening, brief, reportTo }) rings a person on WhatsApp: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project, as in the voice app: the person's own agent (streamPath, /agents/voice/whatsapp-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers to the agents' number is picked up the same way, once the voice is on the line; to say something particular when a person next rings, leave a note first: await itx.kv.put('whatsapp-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (opening: what the voice says on picking up; brief: what the call's agent should know; until: an ISO time after which the note is ignored). One call at a time. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (whatsapp-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It rings and answers only: ${numbers}.`,
       functions: ["call", "hangup", "status"],
     }),
   };

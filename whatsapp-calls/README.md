@@ -7,9 +7,11 @@ the project's own WhatsApp account:
   person's phone rings on WhatsApp.
 - **In**: a person the lend answers rings the account, and the call is picked up.
 
-Either way the call is one of the project's voice calls, the same as its voice app's: a context of
-its own at `/agents/voice/whatsapp-<the other person's digits>/<time>-<id>` with a fresh agent and
-the voice relay beside it. **The voice is on the line first**: a placed call only rings once the
+Either way the call is one of the project's voice calls, the same as its voice app's: a press on
+the person's own voice device, `whatsapp-<the other person's digits>`, which the lend provisions once
+(`itx.voice.ensureVoiceDevice`) and keeps. Its relay is at `/voice/whatsapp-<digits>` and its agent
+at `/agents/voice/whatsapp-<digits>`, which keeps every call with that person (`streamPath` in what
+the lend answers and records). **The voice is on the line first**: a placed call only rings once the
 live model has answered, and an incoming call is only picked up then, so the person is spoken to
 at once.
 
@@ -26,7 +28,8 @@ restricted: lend it for the few people it was set up for.
 ## Run it
 
 You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a project with the
-voice app installed (`itx.voice.setupVoiceAgent`), and this repository.
+voice app installed on a build with `itx.voice.ensureVoiceDevice`, and this
+repository.
 
 ```sh
 pnpm install
@@ -85,7 +88,7 @@ One call at a time. Every call leaves its facts on `/integrations/whatsapp-calls
 | `whatsapp-calls/call-placed`   | A call the project placed is ringing: `callId`, `to`, `reportTo`, `streamPath`.                                                                                                                   |
 | `whatsapp-calls/call-received` | Someone rang the account: `callId`, `from`, `answering`, and the `reason` when it is left alone (not a number the lend answers, a group or video call, another call in progress).                 |
 | `whatsapp-calls/call-answered` | Audio flows: `callId`, `direction`, `to` or `from`, `streamPath`.                                                                                                                                 |
-| `whatsapp-calls/call-ended`    | `callId`, `direction` (`"out"` or `"in"`), `to` or `from`, `answered`, `reason`, `seconds`, `transcript` (every `Person:` and `Voice:` line), `streamPath`, `streamPaths`, `reportTo`, `metrics`. |
+| `whatsapp-calls/call-ended`    | `callId`, `direction` (`"out"` or `"in"`), `to` or `from`, `answered`, `reason`, `seconds`, `transcript` (every `Person:` and `Voice:` line), `streamPath`, `activations`, `reportTo`, `metrics`. |
 
 `metrics` is where a call that sounded wrong went wrong: how long the voice took to come on the
 line, the ring, microphone frames sent and dropped, and the bridge's own count of frames played,
