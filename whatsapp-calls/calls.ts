@@ -302,8 +302,9 @@ async function connectVoice(
   const device = await deviceFor(project, current.number);
   current.agentPath = device.agentPath;
   await current.noted;
-  // the brief goes before the press: the agent reads it before the call's first hand-over
-  await project.cd(device.agentPath).append({
+  // the brief goes before the press: the agent reads it before the call's first hand-over. Over
+  // the newest link: the device may have waited for a move to it
+  await (itx ?? project).cd(device.agentPath).append({
     type: "events.iterate.com/agent/context-added",
     payload: {
       role: "user",
@@ -389,7 +390,13 @@ async function connectVoice(
   }
   current.metrics.voiceReadyMs.push(Date.now() - pressedAt);
   current.voice = mine;
-  if (resumed) await mine.speak("I do apologise, the line dropped for a moment. Where were we?");
+  // the call is up: a failed apology is logged, not a reason to hang up
+  if (resumed)
+    void mine
+      .speak("I do apologise, the line dropped for a moment. Where were we?")
+      .catch((error: unknown) =>
+        console.error(`whatsapp-calls: the apology was not said: ${String(error)}`),
+      );
 }
 
 /** What the caller's agent is told before a call's press. Its history holds the earlier calls

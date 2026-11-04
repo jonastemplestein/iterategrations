@@ -56,7 +56,9 @@ function pretendProject() {
   const project = {
     /** Deliver events to the subscription on `path`, as the platform would. */
     say: (path: string, events: unknown[]) => listeners.get(path)?.(events),
-    subscribed: [] as { path: string; name?: string; afterOffset?: number }[],
+    subscribed: [] as { path: string; name?: string }[],
+    /** Each `readEvents(afterOffset)` on a path: what a moved device reads of the gap. */
+    reads: [] as { path: string; afterOffset?: number }[],
     events: [] as Appended[],
     provisioned: [] as string[],
     messages: [] as { to: string; text: string }[],
@@ -105,16 +107,18 @@ function pretendProject() {
           project.events.push({ path, type: event.type, payload: event.payload });
           return [0];
         },
+        readEvents: async (afterOffset?: number) => {
+          project.reads.push({ path, afterOffset });
+          return { events: [], scannedThroughOffset: afterOffset ?? 0, atHead: true };
+        },
         subscribe: async ({
           target,
           name,
-          afterOffset,
         }: {
           target: (events: unknown[]) => void;
           name?: string;
-          afterOffset?: number;
         }) => {
-          project.subscribed.push({ path, name, afterOffset });
+          project.subscribed.push({ path, name });
           listeners.set(path, target);
           return { [Symbol.dispose]() {} };
         },
@@ -307,10 +311,13 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   // the link is lost: \`iterate provide\` reconnects, and the call carries over to the new link
   const second = pretendProject();
   await provide({ itx: second.itx as never });
-  const moved = await until("the call's subscription on the new link", () =>
+  await until("the call's subscription on the new link", () =>
     second.subscribed.find((row) => row.path === path),
   );
-  assert.equal(moved.afterOffset, 40, "it resumes after the last fact the old link delivered");
+  const read = await until("the gap read on the new link", () =>
+    second.reads.find((row) => row.path === path),
+  );
+  assert.equal(read.afterOffset, 40, "it reads the log after the last fact the old link delivered");
   lineSays({ event: "mic", pcm: Buffer.alloc(32).toString("base64") });
   await until("a microphone frame over the new link", () =>
     second.events.find((event) => event.type === "events.iterate.com/voice-agent/mic-frame"),
