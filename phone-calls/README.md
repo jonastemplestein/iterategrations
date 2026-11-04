@@ -11,9 +11,10 @@ a SIP phone from your computer.
 
 It is [WhatsApp calls](../whatsapp-calls) with a phone line in place of WhatsApp: `calls.ts` is a
 copy of that lend (the same calls, voice, notes and records, under `phone-calls/*`), and
-`jeeves-phone serve` speaks that bridge's protocol on stdin and stdout. Each call is a context of
-its own at `/agents/voice/phone-<the other person's digits>/<time>-<id>`, and the voice is on the
-line before the phone rings or the call is picked up.
+`jeeves-phone serve` speaks that bridge's protocol on stdin and stdout. Each call is a press on the
+person's own voice device, `phone-<the other person's digits>`, provisioned once and kept: its agent
+at `/agents/voice/phone-<digits>` keeps every call with that person. The voice is on the line before
+the phone rings or the call is picked up.
 
 `jeeves-phone` is Go, on [sipgo](https://github.com/emiago/sipgo) and
 [diago](https://github.com/emiago/diago): it registers the number with `voiceless.aa.net.uk`
@@ -30,7 +31,8 @@ as any number.
 ## Run it
 
 You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a project with the
-voice app installed (`itx.voice.setupVoiceAgent`), and this repository.
+voice app installed on a build with `itx.voice.ensureVoiceDevice`, and this
+repository.
 
 ```sh
 pnpm install

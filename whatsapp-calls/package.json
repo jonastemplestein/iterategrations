@@ -9,6 +9,7 @@
     "test": "vp test"
   },
   "dependencies": {
+    "@iterate-com/voice": "https://pkg.pr.new/iterate/private/@iterate-com/voice@e6535c687ed25b98ff35e17d81b2f6ae8077622b",
     "zod": "^4.0.0"
   },
   "devDependencies": {
