@@ -326,24 +326,24 @@ test("a member's stray path is a 404 that reads nothing", async () => {
 
 // ------------------------------------------------- a receiver per ring (options)
 
-const ADA = "a-made-up-secret-for-ada";
+const KIM = "a-made-up-secret-for-kim";
 const SAM = "a-made-up-secret-for-sam";
 const AUDIO = new Uint8Array([1, 2, 3]);
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-/** A project with two rings, each its own receiver: Ada's and Sam's, each with its own secret. */
+/** A project with two rings, each its own receiver: Kim's and Sam's, each with its own secret. */
 function twoRings(secrets: Record<string, string> = {}, member = false) {
   const project = fakeProject(
     {
-      "/secrets/pebble-ada-webhook": ADA,
+      "/secrets/pebble-kim-webhook": KIM,
       "/secrets/pebble-sam-webhook": SAM,
       ...secrets,
     },
-    { member, pebble: { slug: "pebble-ada" } },
+    { member, pebble: { slug: "pebble-kim" } },
   );
-  const ada = { serve: project.serve, page: project.page, publish: project.publish };
+  const kim = { serve: project.serve, page: project.page, publish: project.publish };
   const sam = project.receiver({ slug: "pebble-sam" });
-  return { project, ada, sam };
+  return { project, kim, sam };
 }
 
 const effects = (project: ReturnType<typeof fakeProject>) => ({
@@ -363,7 +363,7 @@ test("pebble() and pebble({}) are the receiver the package always was", async ()
 
 test("each option names one part of a receiver, and pebble({ slug }) derives the rest from the slug", async () => {
   const project = fakeProject(
-    { "/secrets/ring-two": ADA },
+    { "/secrets/ring-two": KIM },
     {
       member: true,
       pebble: {
@@ -377,7 +377,7 @@ test("each option names one part of a receiver, and pebble({ slug }) derives the
     },
   );
   assert.equal(project.integration.routingSlug, "ring-two");
-  assert.equal((await project.serve(await signed({ secret: ADA }))).status, 200);
+  assert.equal((await project.serve(await signed({ secret: KIM }))).status, 200);
   const audioPath = `/rings/two/audio/${sha256(AUDIO)}.m4a`;
   assert.deepEqual(Object.keys(project.files), [audioPath]);
   assert.deepEqual(project.stream("/rings/two"), [
@@ -420,23 +420,23 @@ test("each option names one part of a receiver, and pebble({ slug }) derives the
 
   // only the slug: every other name follows it
   const derived = fakeProject(
-    { "/secrets/pebble-ada-webhook": ADA },
-    { pebble: { slug: "pebble-ada" } },
+    { "/secrets/pebble-kim-webhook": KIM },
+    { pebble: { slug: "pebble-kim" } },
   );
-  assert.equal((await derived.serve(await signed({ secret: ADA }))).status, 200);
-  assert.deepEqual(Object.keys(derived.files), [`/pebble-ada/${sha256(AUDIO)}.m4a`]);
-  assert.equal(derived.stream("/pebble-ada")[0].idempotencyKey, "pebble-ada:d-1");
+  assert.equal((await derived.serve(await signed({ secret: KIM }))).status, 200);
+  assert.deepEqual(Object.keys(derived.files), [`/pebble-kim/${sha256(AUDIO)}.m4a`]);
+  assert.equal(derived.stream("/pebble-kim")[0].idempotencyKey, "pebble-kim:d-1");
   await derived.publish(3);
-  assert.equal(derived.registry()[0].payload.integration, "pebble-ada");
-  assert.equal(derived.registry()[0].payload.card.title, "Pebble Index 01 (pebble-ada)");
+  assert.equal(derived.registry()[0].payload.integration, "pebble-kim");
+  assert.equal(derived.registry()[0].payload.card.title, "Pebble Index 01 (pebble-kim)");
 });
 
 test("each receiver checks its own secret: the other's signature is 401 both ways, and nothing is stored", async () => {
-  const { project, ada, sam } = twoRings({ "/secrets/pebble-webhook": SECRET });
+  const { project, kim, sam } = twoRings({ "/secrets/pebble-webhook": SECRET });
   for (const [serve, secret] of [
-    [ada.serve, SAM],
-    [ada.serve, SECRET],
-    [sam.serve, ADA],
+    [kim.serve, SAM],
+    [kim.serve, SECRET],
+    [sam.serve, KIM],
     [sam.serve, SECRET],
   ] as const) {
     assert.equal((await serve(await signed({ secret }))).status, 401, secret);
@@ -444,7 +444,7 @@ test("each receiver checks its own secret: the other's signature is 401 both way
   }
   // the legacy receiver beside them refuses theirs too
   const legacy = project.receiver();
-  for (const secret of [ADA, SAM])
+  for (const secret of [KIM, SAM])
     assert.equal((await legacy.serve(await signed({ secret }))).status, 401, secret);
   assert.deepEqual(effects(project), { appended: [], files: {} });
   assert.deepEqual(project.scopes, { opened: 10, disposed: 10 });
@@ -453,17 +453,17 @@ test("each receiver checks its own secret: the other's signature is 401 both way
 test("a receiver without its secret yet refuses every delivery, even one signed with another receiver's", async () => {
   const project = fakeProject(
     { "/secrets/pebble-webhook": SECRET },
-    { pebble: { slug: "pebble-ada" } },
+    { pebble: { slug: "pebble-kim" } },
   );
-  for (const secret of [SECRET, ADA])
+  for (const secret of [SECRET, KIM])
     assert.equal((await project.serve(await signed({ secret }))).status, 401, secret);
   assert.deepEqual(effects(project), { appended: [], files: {} });
 });
 
 test("a receiver's test event is verified with its own secret and stores nothing", async () => {
-  const { project, ada, sam } = twoRings();
+  const { project, kim, sam } = twoRings();
   for (const [serve, secret] of [
-    [ada.serve, ADA],
+    [kim.serve, KIM],
     [sam.serve, SAM],
   ] as const) {
     const res = await serve(await signed({ secret, test: true, trigger: "test-event" }));
@@ -473,19 +473,19 @@ test("a receiver's test event is verified with its own secret and stores nothing
 });
 
 test("the same delivery and recording ids at two receivers land twice, apart: each on its stream, in its folder, under its key", async () => {
-  const { project, ada, sam } = twoRings({ "/secrets/pebble-webhook": SECRET });
+  const { project, kim, sam } = twoRings({ "/secrets/pebble-webhook": SECRET });
   const legacy = project.receiver();
-  assert.equal((await ada.serve(await signed({ secret: ADA }))).status, 200);
+  assert.equal((await kim.serve(await signed({ secret: KIM }))).status, 200);
   assert.equal((await sam.serve(await signed({ secret: SAM }))).status, 200);
   assert.equal((await legacy.serve(await signed())).status, 200);
   const file = `${sha256(AUDIO)}.m4a`;
   assert.deepEqual(Object.keys(project.files).sort(), [
-    `/pebble-ada/${file}`,
+    `/pebble-kim/${file}`,
     `/pebble-sam/${file}`,
     "/pebble/rec-42.m4a",
   ]);
   for (const [stream, key, audioPath] of [
-    ["/pebble-ada", "pebble-ada:d-1", `/pebble-ada/${file}`],
+    ["/pebble-kim", "pebble-kim:d-1", `/pebble-kim/${file}`],
     ["/pebble-sam", "pebble-sam:d-1", `/pebble-sam/${file}`],
     ["/pebble", "pebble:d-1", "/pebble/rec-42.m4a"],
   ]) {
@@ -499,58 +499,58 @@ test("the same delivery and recording ids at two receivers land twice, apart: ea
 });
 
 test("a retried delivery is idempotent: the same answer, one event, one file, though the app built its body again", async () => {
-  const { project, ada } = twoRings();
+  const { project, kim } = twoRings();
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await ada.serve(await signed({ secret: ADA, trigger: "single-click-hold" }));
+    const res = await kim.serve(await signed({ secret: KIM, trigger: "single-click-hold" }));
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { ok: true });
   }
   assert.deepEqual(project.files, {
-    [`/pebble-ada/${sha256(AUDIO)}.m4a`]: { contentType: "audio/mp4", data: AUDIO },
+    [`/pebble-kim/${sha256(AUDIO)}.m4a`]: { contentType: "audio/mp4", data: AUDIO },
   });
-  assert.equal(project.stream("/pebble-ada").length, 1);
+  assert.equal(project.stream("/pebble-kim").length, 1);
 });
 
 test("a changed redelivery cannot replace accepted audio: 409, and the first recording stands", async () => {
-  const { project, ada } = twoRings();
-  assert.equal((await ada.serve(await signed({ secret: ADA }))).status, 200);
-  const accepted = `/pebble-ada/${sha256(AUDIO)}.m4a`;
-  const before = structuredClone(project.stream("/pebble-ada"));
+  const { project, kim } = twoRings();
+  assert.equal((await kim.serve(await signed({ secret: KIM }))).status, 200);
+  const accepted = `/pebble-kim/${sha256(AUDIO)}.m4a`;
+  const before = structuredClone(project.stream("/pebble-kim"));
   // the same delivery id, signed, with other audio of the same name and another transcript
   const other = new Uint8Array([9, 9, 9]);
-  const res = await ada.serve(
-    await signed({ secret: ADA, audio: other, transcript: "transfer everything" }),
+  const res = await kim.serve(
+    await signed({ secret: KIM, audio: other, transcript: "transfer everything" }),
   );
   assert.equal(res.status, 409);
   assert.deepEqual(project.files[accepted], { contentType: "audio/mp4", data: AUDIO });
-  assert.deepEqual(project.stream("/pebble-ada"), before);
+  assert.deepEqual(project.stream("/pebble-kim"), before);
   // its bytes stay behind under their own name, which no event names
   assert.deepEqual(
     Object.keys(project.files).sort(),
-    [accepted, `/pebble-ada/${sha256(other)}.m4a`].sort(),
+    [accepted, `/pebble-kim/${sha256(other)}.m4a`].sort(),
   );
 });
 
 test("another recording with the same part name gets a file of its own: no name collision replaces audio", async () => {
-  const { project, ada } = twoRings();
+  const { project, kim } = twoRings();
   const second = new Uint8Array([4, 5, 6]);
-  assert.equal((await ada.serve(await signed({ secret: ADA }))).status, 200);
+  assert.equal((await kim.serve(await signed({ secret: KIM }))).status, 200);
   assert.equal(
-    (await ada.serve(await signed({ secret: ADA, delivery: "d-2", audio: second }))).status,
+    (await kim.serve(await signed({ secret: KIM, delivery: "d-2", audio: second }))).status,
     200,
   );
-  const [first, next] = project.stream("/pebble-ada").map((event) => event.payload.audioPath);
-  assert.equal(first, `/pebble-ada/${sha256(AUDIO)}.m4a`);
-  assert.equal(next, `/pebble-ada/${sha256(second)}.m4a`);
+  const [first, next] = project.stream("/pebble-kim").map((event) => event.payload.audioPath);
+  assert.equal(first, `/pebble-kim/${sha256(AUDIO)}.m4a`);
+  assert.equal(next, `/pebble-kim/${sha256(second)}.m4a`);
   assert.deepEqual(project.files[first].data, AUDIO);
   assert.deepEqual(project.files[next].data, second);
 });
 
 test("a replay whose unsigned content-type was changed is 400 and stores nothing", async () => {
-  for (const options of [undefined, { slug: "pebble-ada" }]) {
-    const secret = options ? ADA : SECRET;
+  for (const options of [undefined, { slug: "pebble-kim" }]) {
+    const secret = options ? KIM : SECRET;
     const project = fakeProject(
-      { "/secrets/pebble-webhook": SECRET, "/secrets/pebble-ada-webhook": ADA },
+      { "/secrets/pebble-webhook": SECRET, "/secrets/pebble-kim-webhook": KIM },
       { pebble: options },
     );
     const original = await signed({ secret });
@@ -568,35 +568,35 @@ test("a replay whose unsigned content-type was changed is 400 and stores nothing
 });
 
 test("a trigger changed after signing is 401: no gesture can pass for another", async () => {
-  const { project, ada } = twoRings();
-  const original = await signed({ secret: ADA, trigger: "single-click-hold" });
+  const { project, kim } = twoRings();
+  const original = await signed({ secret: KIM, trigger: "single-click-hold" });
   for (const trigger of ["double-click-hold", "click", "triple-click", "unknown", ""])
     assert.equal(
-      (await ada.serve(await altered(original.clone(), { "x-index-trigger": trigger }))).status,
+      (await kim.serve(await altered(original.clone(), { "x-index-trigger": trigger }))).status,
       401,
       trigger,
     );
   assert.deepEqual(effects(project), { appended: [], files: {} });
   // the trigger the app signed is the event's, verbatim: a consumer allowlists the ones it knows
-  assert.equal((await ada.serve(original)).status, 200);
-  assert.equal(project.stream("/pebble-ada")[0].payload.trigger, "single-click-hold");
+  assert.equal((await kim.serve(original)).status, 200);
+  assert.equal(project.stream("/pebble-kim")[0].payload.trigger, "single-click-hold");
 });
 
 test("a receiver's names come from the worker's code: the host and routing slug a request names change nothing", async () => {
-  const { project, ada, sam } = twoRings();
-  // Ada's delivery, addressed to Ada's host and slug, handed to Sam's receiver
-  const toAda = {
-    url: "https://pebble-ada--iterate.example/webhook?receiver=pebble-ada",
-    headers: { "x-iterate-routing-slug": "pebble-ada" },
+  const { project, kim, sam } = twoRings();
+  // Kim's delivery, addressed to Kim's host and slug, handed to Sam's receiver
+  const toKim = {
+    url: "https://pebble-kim--iterate.example/webhook?receiver=pebble-kim",
+    headers: { "x-iterate-routing-slug": "pebble-kim" },
   };
-  assert.equal((await sam.serve(await signed({ secret: ADA, ...toAda }))).status, 401);
+  assert.equal((await sam.serve(await signed({ secret: KIM, ...toKim }))).status, 401);
   assert.deepEqual(effects(project), { appended: [], files: {} });
-  // Sam's delivery, addressed to Ada, lands on Sam's stream, in Sam's folder
-  assert.equal((await sam.serve(await signed({ secret: SAM, ...toAda }))).status, 200);
+  // Sam's delivery, addressed to Kim, lands on Sam's stream, in Sam's folder
+  assert.equal((await sam.serve(await signed({ secret: SAM, ...toKim }))).status, 200);
   assert.deepEqual(Object.keys(project.files), [`/pebble-sam/${sha256(AUDIO)}.m4a`]);
   assert.equal(project.stream("/pebble-sam").length, 1);
-  assert.equal(project.stream("/pebble-ada").length, 0);
-  assert.equal((await ada.serve(await signed({ secret: SAM }))).status, 401);
+  assert.equal(project.stream("/pebble-kim").length, 0);
+  assert.equal((await kim.serve(await signed({ secret: SAM }))).status, 401);
 });
 
 /** The registry's limits (iterate/integrations), as the google package's tests check them. */
@@ -617,8 +617,8 @@ function assertFits(event: any) {
 
 test("one publish lands every receiver's card, each under its own key, with its own title, stream, button and status", async () => {
   const project = fakeProject(
-    { "/secrets/pebble-ada-webhook": ADA },
-    { pebble: { slug: "pebble-ada" } },
+    { "/secrets/pebble-kim-webhook": KIM },
+    { pebble: { slug: "pebble-kim" } },
   );
   const sam = project.receiver({ slug: "pebble-sam" });
   const legacy = project.receiver();
@@ -636,12 +636,12 @@ test("one publish lands every receiver's card, each under its own key, with its 
     ]),
     [
       [
-        "pebble-ada:registry:/@7",
-        "pebble-ada",
-        "Pebble Index 01 (pebble-ada)",
+        "pebble-kim:registry:/@7",
+        "pebble-kim",
+        "Pebble Index 01 (pebble-kim)",
         "ok",
-        "pebble-ada",
-        "/pebble-ada",
+        "pebble-kim",
+        "/pebble-kim",
       ],
       [
         "pebble-sam:registry:/@7",
@@ -658,16 +658,16 @@ test("one publish lands every receiver's card, each under its own key, with its 
 });
 
 test("each receiver's page shows its own title, status and webhook URL, for members only", async () => {
-  const { project, ada, sam } = twoRings({}, true);
+  const { project, kim, sam } = twoRings({}, true);
   delete project.secrets["/secrets/pebble-sam-webhook"];
-  const adaPage = await (await ada.page("/")).text();
-  assert.match(adaPage, /<h1>Pebble Index 01 \(pebble-ada\)<\/h1>/);
+  const kimPage = await (await kim.page("/")).text();
+  assert.match(kimPage, /<h1>Pebble Index 01 \(pebble-kim\)<\/h1>/);
   assert.match(
-    adaPage,
-    /Set up\. The project has the signing secret <code>\/secrets\/pebble-ada-webhook<\/code>/,
+    kimPage,
+    /Set up\. The project has the signing secret <code>\/secrets\/pebble-kim-webhook<\/code>/,
   );
-  assert.ok(adaPage.includes(`data-copy="https://pebble-ada--iterate.example/webhook"`));
-  assert.match(adaPage, /event on \/pebble-ada,/);
+  assert.ok(kimPage.includes(`data-copy="https://pebble-kim--iterate.example/webhook"`));
+  assert.match(kimPage, /event on \/pebble-kim,/);
 
   const samPage = await (await sam.page("/", "/projects/iterate/pebble-sam")).text();
   assert.match(samPage, /<h1>Pebble Index 01 \(pebble-sam\)<\/h1>/);
@@ -677,13 +677,13 @@ test("each receiver's page shows its own title, status and webhook URL, for memb
   assert.ok(
     samPage.includes(`data-copy="https://os.iterate.example/projects/iterate/pebble-sam/webhook"`),
   );
-  for (const html of [adaPage, samPage]) {
-    assert.ok(!html.includes(ADA) && !html.includes(SAM));
+  for (const html of [kimPage, samPage]) {
+    assert.ok(!html.includes(KIM) && !html.includes(SAM));
   }
-  assert.ok(!samPage.includes("pebble-ada"));
-  assert.ok(!adaPage.includes("pebble-sam"));
+  assert.ok(!samPage.includes("pebble-kim"));
+  assert.ok(!kimPage.includes("pebble-sam"));
 
-  const outsider = fakeProject({}, { pebble: { slug: "pebble-ada" } });
+  const outsider = fakeProject({}, { pebble: { slug: "pebble-kim" } });
   const res = await outsider.page("/");
   assert.equal(res.status, 401);
   assert.equal(await res.text(), "Sign in\n");
@@ -693,32 +693,32 @@ test("each receiver's page shows its own title, status and webhook URL, for memb
 test("an option it cannot use throws when the worker is built", () => {
   const refused: unknown[] = [
     { slug: "Pebble" },
-    { slug: "pebble--ada" },
-    { slug: "pebble_ada" },
+    { slug: "pebble--kim" },
+    { slug: "pebble_kim" },
     { slug: "1pebble" },
     { slug: "" },
     { slug: "files" },
     { slug: "a".repeat(41) },
-    { signingSecret: "secrets/pebble-ada" },
+    { signingSecret: "secrets/pebble-kim" },
     { signingSecret: "/secrets/.." },
     { signingSecret: "/secrets/a/b" },
-    { signingSecret: "/other/pebble-ada" },
+    { signingSecret: "/other/pebble-kim" },
     { stream: "/" },
-    { stream: "pebble-ada" },
+    { stream: "pebble-kim" },
     { stream: "/a/../b" },
-    { stream: "/pebble-ada/" },
-    { stream: "/secrets/pebble-ada" },
+    { stream: "/pebble-kim/" },
+    { stream: "/secrets/pebble-kim" },
     { stream: "/integrations" },
     { audioDir: "/a/./b" },
     { audioDir: "" },
-    { integration: "Ada" },
+    { integration: "Kim" },
     { title: "" },
     { title: "   " },
     { title: "x".repeat(81) },
     { title: "line\nbreak" },
     { slug: 7 },
-    { secret: "/secrets/pebble-ada-webhook" },
-    "pebble-ada",
+    { secret: "/secrets/pebble-kim-webhook" },
+    "pebble-kim",
     null,
   ];
   for (const options of refused)
@@ -752,10 +752,10 @@ function signedBody(body: Uint8Array, contentType: string, secret: string, trigg
 test("a signed body that is no recording is 400 and stores nothing: a click's JSON button event, a form with no recordedAt", async () => {
   for (const [options, secret] of [
     [undefined, SECRET],
-    [{ slug: "pebble-ada" }, ADA],
+    [{ slug: "pebble-kim" }, KIM],
   ] as const) {
     const project = fakeProject(
-      { "/secrets/pebble-webhook": SECRET, "/secrets/pebble-ada-webhook": ADA },
+      { "/secrets/pebble-webhook": SECRET, "/secrets/pebble-kim-webhook": KIM },
       { pebble: options },
     );
     const click = new TextEncoder().encode(JSON.stringify({ gesture: "click" }));

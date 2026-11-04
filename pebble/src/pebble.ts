@@ -44,7 +44,7 @@ export type Integration = {
 };
 
 /** What `pebble(options)` takes: one receiver's names, for a project with a receiver per ring.
- *  Each is optional, and each default comes from `slug`, so `pebble({ slug: "pebble-ada" })` is a
+ *  Each is optional, and each default comes from `slug`, so `pebble({ slug: "pebble-kim" })` is a
  *  receiver of its own: its own host, signing secret, stream, audio folder and card. With no
  *  options at all, `pebble()` is the receiver this package always was. */
 export type PebbleOptions = {
@@ -119,16 +119,16 @@ function receiverOf(options: PebbleOptions): Receiver {
     if (!OPTIONS.has(key))
       throw new TypeError(`pebble(): no option ${key}; the options are ${[...OPTIONS].join(", ")}`);
   const legacy = Object.values(options).every((value) => value === undefined);
-  const slug = check("slug", options.slug ?? SLUG, NAME, "a routing slug like pebble-ada", 40);
+  const slug = check("slug", options.slug ?? SLUG, NAME, "a routing slug like pebble-kim", 40);
   if (slug === "files") refuse("slug", slug, "another slug than the platform's files");
-  const stream = check("stream", options.stream ?? `/${slug}`, PATH, "a path like /pebble-ada");
+  const stream = check("stream", options.stream ?? `/${slug}`, PATH, "a path like /pebble-kim");
   if (stream === "/integrations" || stream === "/secrets" || stream.startsWith("/secrets/"))
     refuse("stream", stream, "a stream outside /secrets and other than /integrations");
   const integration = check(
     "integration",
     options.integration ?? slug,
     NAME,
-    "a key like pebble-ada",
+    "a key like pebble-kim",
     40,
   );
   return {
@@ -137,10 +137,10 @@ function receiverOf(options: PebbleOptions): Receiver {
       "signingSecret",
       options.signingSecret ?? `/secrets/${slug}-webhook`,
       SECRET_PATH,
-      "a secret's path like /secrets/pebble-ada-webhook",
+      "a secret's path like /secrets/pebble-kim-webhook",
     ),
     stream,
-    audioDir: check("audioDir", options.audioDir ?? stream, PATH, "a path like /pebble-ada"),
+    audioDir: check("audioDir", options.audioDir ?? stream, PATH, "a path like /pebble-kim"),
     integration,
     title: check(
       "title",
@@ -278,7 +278,7 @@ async function receive(request: Request, itx: PebbleItx, receiver: Receiver): Pr
  *  (`project/worker-updated`) lists it on the Dash's Integrations page.
  *
  *  A project with two rings hosts a receiver for each, every name its own (`PebbleOptions`):
- *  `[pebble({ slug: "pebble-ada" }), pebble({ slug: "pebble-sam" })]`. It throws on an option it
+ *  `[pebble({ slug: "pebble-kim" }), pebble({ slug: "pebble-sam" })]`. It throws on an option it
  *  cannot use. */
 export function pebble(options: PebbleOptions = {}): Integration {
   const receiver = receiverOf(options);

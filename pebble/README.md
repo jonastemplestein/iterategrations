@@ -154,7 +154,7 @@ with its own routing slug. Every other name follows from the slug unless you giv
 
 ```ts
 const integrations: Integration[] = [
-  pebble({ slug: "pebble-ada" }), // /secrets/pebble-ada-webhook, /pebble-ada, its own card
+  pebble({ slug: "pebble-kim" }), // /secrets/pebble-kim-webhook, /pebble-kim, its own card
   pebble({ slug: "pebble-sam" }), // /secrets/pebble-sam-webhook, /pebble-sam, its own card
 ];
 ```
@@ -168,7 +168,7 @@ what it holds. `pebble()` throws on a name it cannot use, so the probe in
 
 The recipe is the same for each receiver, with its names: step 1 collects its `signingSecret`, step 3
 asks `itx.url` for its `slug`, and step 5 waits on its `stream`. Its page shows its own webhook URL.
-In step 2, `ELEMENT` may list several receivers (`'pebble({ slug: "pebble-ada" }), pebble({ slug:
+In step 2, `ELEMENT` may list several receivers (`'pebble({ slug: "pebble-kim" }), pebble({ slug:
 "pebble-sam" })'`). If `worker.ts` already lists `pebble(…)`, the script only pins the newer package
 (the options need it) and leaves the array alone: add the new element by hand next to the first, as
 [add-to-a-project.md](../add-to-a-project.md#by-hand) says, and commit it with the tip you read as
