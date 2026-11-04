@@ -160,8 +160,8 @@ importers:
   phone-calls:
     dependencies:
       '@iterate-com/voice':
-        specifier: https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe
-        version: https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)
+        specifier: https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c
+        version: https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)
       zod:
         specifier: ^4.0.0
         version: 4.6.5
@@ -225,8 +225,8 @@ importers:
   whatsapp-calls:
     dependencies:
       '@iterate-com/voice':
-        specifier: https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe
-        version: https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)
+        specifier: https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c
+        version: https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)
       zod:
         specifier: ^4.0.0
         version: 4.6.5
@@ -444,8 +444,8 @@ packages:
   '@iterate-com/capnweb@0.12.3':
     resolution: {integrity: sha512-puzZnzPziu7bh3ysr4/rRWeH4oMQD5iacoMdDReJoUxxbkSiFMcTIpbLvUXeWwrG4kupVMv7n1bsokREyNLlxA==}
 
-  '@iterate-com/voice@https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe':
-    resolution: {tarball: https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe}
+  '@iterate-com/voice@https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c':
+    resolution: {tarball: https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c}
     version: 0.1.0
     peerDependencies:
       iterate: '*'
@@ -2020,7 +2020,7 @@ snapshots:
 
   '@iterate-com/capnweb@0.12.3': {}
 
-  '@iterate-com/voice@https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)':
+  '@iterate-com/voice@https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c(iterate@https://pkg.pr.new/iterate/iterate/iterate@d285b9c)(zod@4.6.5)':
     dependencies:
       iterate: https://pkg.pr.new/iterate/iterate/iterate@d285b9c
       pako: 3.0.3

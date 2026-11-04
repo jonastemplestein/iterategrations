@@ -10,7 +10,7 @@
     "test:go": "go test ./..."
   },
   "dependencies": {
-    "@iterate-com/voice": "https://pkg.pr.new/iterate/private/@iterate-com/voice@40a1f5774d6a9090b7d7ccfa88e3021c887378fe",
+    "@iterate-com/voice": "https://pkg.pr.new/iterate/private/@iterate-com/voice@371f50212fb273bf2683b467e38b7002bc31440c",
     "zod": "^4.0.0"
   },
   "devDependencies": {
