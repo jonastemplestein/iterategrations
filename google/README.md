@@ -13,8 +13,10 @@ worker, which hands it the requests on the project's `google` routing slug, and 
   into the OAuth client at Google, a link that collects the client (its ID and its secret, on one
   form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
   Disconnect buttons.
-- **The callback** (the same address, `/oauth2/callback`, members only): Google sends the person
-  back here from its consent screen, and the page connects the account.
+- **The landing** (the same address, `/connected`, members only): Google sends the person back to
+  iterate's own callback, which stores the account's tokens in the browser that opened the Connect
+  link and then sends them here; the page reads what Google granted (`itx.secrets.oauthResult`)
+  and lists the account.
 - **The Dash:** the project's Integrations page shows a Google card ("Create an OAuth client and
   paste its secret" until the client is saved, then "Connect an account") and a row per account:
   its address, its scopes, and buttons to the page and to the account's third-party access at
@@ -58,12 +60,12 @@ may go to `oauth2.googleapis.com`, `www.googleapis.com` (Calendar, Drive) and
 `google({ scopes: ["https://www.googleapis.com/auth/spreadsheets"], urls: ["https://sheets.googleapis.com"] })`.
 `google({ slug: "gmail" })` answers another routing slug.
 
-Check that it is live. The callback is for members only, so a `GET` from a script, which signs no
-one in, is answered with the sign-in, `401`, and that is the proof:
+Check that it is live. The page is for members only, so a `GET` from a script, which signs no one
+in, is answered with the sign-in, `401`, and that is the proof:
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "google", path: "/oauth2/callback" });
+  const url = await itx.url({ routingSlug: "google", path: "/" });
   const res = await fetch(url);
   return { url, status: res.status }; // 401 = the package is there. 404: not published yet
 };
@@ -79,8 +81,9 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
 
 1. **Create the OAuth client** at <https://console.cloud.google.com/apis/credentials>, in a Google
    Cloud project of their own: **Create credentials**, **OAuth client ID**, type **Web
-   application**, with `<address>/oauth2/callback` under **Authorized redirect URIs** (`<address>`
-   is the project's `google` address; the page shows the URI with a Copy button). Google asks for
+   application**, with iterate's callback, `<platform origin>/.secrets/oauth/callback`, under
+   **Authorized redirect URIs** (`itx.secrets.oauthCallbackUrl()` answers it; the page shows it
+   with a Copy button). Google asks for
    the **OAuth consent screen** before the first client. While its publishing status is
    **Testing**, only its test users can connect: add each account as a test user, or publish the
    app. Then enable each API the scopes need (the Gmail API, …) under **APIs & Services**,
@@ -91,8 +94,9 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    client ID is a public field of that secret: the form shows it as plain text and checks its shape
    (it ends in `.apps.googleusercontent.com`), and the project reads it from its list of secrets.
    The client secret never passes through the project's code.
-3. **Connect an account**: Google asks which account, and for its consent, then sends them back to
-   the page, which shows the account. Connect again for each other account.
+3. **Connect an account**: the button opens iterate's start link, then Google asks which account,
+   and for its consent; iterate stores the tokens and sends them back to the page, which shows the
+   account. Connect again for each other account.
 
 Then write the accounts, their secrets and where the page is into the project's `AGENTS.md`.
 
@@ -248,14 +252,12 @@ topic, and delete kv `gmail-sync:<path>`.
 
 ## Good to know
 
-- **The platform composes the redirect URI** and sends it to Google with each Connect: on the
-  hostname the deployment's config pins to the project when it has one (then it is the page's own
-  address), else the project's address under iterate's ingress, `google--<project>.<…>`; never a
-  hostname the project claimed on the Dash. A rename of the project moves the ingress form, and the
-  client at Google must follow. Google refuses a redirect URI that is not registered exactly
-  (`redirect_uri_mismatch`). A project that claimed a primary hostname serves the page there, under
-  another address: after its first Connect, the page also shows the URI the platform sent, to add to
-  the client.
+- **The redirect URI is iterate's own callback**, `<platform origin>/.secrets/oauth/callback`,
+  the same for every project on the deployment, so a rename or a claimed hostname changes nothing at
+  Google. Google refuses a redirect URI that is not registered exactly (`redirect_uri_mismatch`).
+  iterate completes a sign-in only in the browser that opened the Connect link, and only for a
+  member; the page never receives a code. A client registered with an older version of this
+  package's own `/oauth2/callback` needs iterate's callback added.
 - **One client serves every account.** The client is one secret, `/secrets/own-google-app`: its
   `clientId`, a public field that the catalog (`itx.secrets.list()`) answers, and its
   `clientSecret`. The package keeps no copy of the ID. A secret there without the public `clientId`

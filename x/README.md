@@ -9,12 +9,14 @@ token in.
 It is project code: one element, `x()`, in the `integrations` array of the project's config worker,
 which hands it the requests on the project's `x` routing slug, and every event.
 
-- **The page** (members only, at the project's `x` address, `/`): the callback and website URLs to
-  paste into the app's settings at X, a link that collects the client (its ID and its secret, on one
+- **The page** (members only, at the project's `x` address, `/`): the callback URL (iterate's own)
+  and the website URL to paste into the app's settings at X, a link that collects the client (its ID and its secret, on one
   form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
   Disconnect buttons.
-- **The callback** (the same address, `/oauth2/callback`, members only): X sends the person back
-  here from its authorization page, and the page connects the account.
+- **The landing** (the same address, `/connected`, members only): X sends the person back to
+  iterate's own callback, which stores the tokens in the browser that opened the Connect link and
+  then sends them here; the page reads what X granted (`itx.secrets.oauthResult`) and lists the
+  account.
 - **The Dash:** the project's Integrations page shows an X card ("Create an OAuth client and paste
   its secret" until the client is saved, then "Connect an account") and a row per account: its
   @username, its scopes, and buttons to the page and to the account on X. The card changes when the
@@ -57,12 +59,12 @@ name the scopes for it, from X's
 `x({ scopes: ["tweet.write"] })` asks for more. The tokens may go to `api.x.com`; an API on another
 origin goes in `urls`. `x({ slug: "twitter" })` answers another routing slug.
 
-Check that it is live. The callback is for members only, so a `GET` from a script, which signs no
-one in, is answered with the sign-in, `401`, and that is the proof:
+Check that it is live. The page is for members only, so a `GET` from a script, which signs no one
+in, is answered with the sign-in, `401`, and that is the proof:
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "x", path: "/oauth2/callback" });
+  const url = await itx.url({ routingSlug: "x", path: "/" });
   const res = await fetch(url);
   return { url, status: res.status }; // 401 = the package is there. 404: not published yet
 };
@@ -82,7 +84,8 @@ project's `x` address; the page shows each URL with a Copy button):
    - **App permissions:** **Read**, or **Read and write** to post.
    - **Type of App:** **Web App, Automated App or Bot**: a confidential client, which has a Client
      Secret.
-   - **Callback URI / Redirect URL:** `<address>/oauth2/callback`.
+   - **Callback URI / Redirect URL:** iterate's own callback, `<platform origin>/.secrets/oauth/callback`
+     (`itx.secrets.oauthCallbackUrl()` answers it).
    - **Website URL:** the page's own address, `<address>/`.
 
    Then, under the app's **Keys and tokens**, **OAuth 2.0 Client ID and Client Secret**: both are
@@ -142,13 +145,12 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 
 ## Good to know
 
-- **The platform composes the callback URI** and sends it to X with each Connect: on the hostname
-  the deployment's config pins to the project when it has one (then it is the page's own address),
-  else the project's address under iterate's ingress, `x--<project>.<…>`; never a hostname the
-  project claimed on the Dash. A rename of the project moves the ingress form, and the app's settings
-  at X must follow. X refuses a callback that is not registered exactly, to the trailing slash. A
-  project that claimed a primary hostname serves the page there, under another address: after its
-  first Connect, the page also shows the URI the platform sent, to add to the app.
+- **The callback URI is iterate's own**, `<platform origin>/.secrets/oauth/callback`, the same for
+  every project on the deployment, so a rename or a claimed hostname changes nothing at X. X refuses
+  a callback that is not registered exactly, to the trailing slash. iterate completes a sign-in only
+  in the browser that opened the Connect link, and only for a member; the page never receives a
+  code. An app registered with an older version of this package's own `/oauth2/callback` needs
+  iterate's callback added.
 - **The app must be a confidential client.** Only a Web App, Automated App or Bot has a Client
   Secret, which the platform sends to X's token endpoint in a Basic header at the exchange and at
   every refresh. A Native App or a Single Page App is a public client, which this page does not

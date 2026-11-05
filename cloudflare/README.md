@@ -13,8 +13,10 @@ worker, which hands it the requests on the project's `cloudflare` routing slug, 
   request that registers an OAuth client with it, a link that collects the client (its ID and its
   secret, on one form of iterate's Dash), a **Connect** button, and the connections with Reconnect
   and Disconnect buttons, each with the Cloudflare account its token reaches.
-- **The callback** (the same address, `/oauth2/callback`, members only): Cloudflare sends the
-  person back here from its consent screen, and the page connects them.
+- **The landing** (the same address, `/connected`, members only): Cloudflare sends the person back
+  to iterate's own callback, which stores the tokens in the browser that opened the Connect link
+  and then sends them here; the page reads what Cloudflare granted (`itx.secrets.oauthResult`) and
+  lists the connection.
 - **The Dash:** the project's Integrations page shows a Cloudflare card ("Create an OAuth client
   and paste its secret" until the client is saved, then "Connect an account") and a row per
   connection: the person's address, the account their token reaches, the scopes, and buttons to the
@@ -59,12 +61,12 @@ state store in the Secrets Store): `cloudflare({ scopes: DEPLOY_SCOPES })`. The 
 `dash.cloudflare.com` and `api.cloudflare.com`; an origin beyond those goes in `urls`.
 `cloudflare({ slug: "cf" })` answers another routing slug.
 
-Check that it is live. The callback is for members only, so a `GET` from a script, which signs no
-one in, is answered with the sign-in, `401`, and that is the proof:
+Check that it is live. The page is for members only, so a `GET` from a script, which signs no one
+in, is answered with the sign-in, `401`, and that is the proof:
 
 ```js
 async (itx) => {
-  const url = await itx.url({ routingSlug: "cloudflare", path: "/oauth2/callback" });
+  const url = await itx.url({ routingSlug: "cloudflare", path: "/" });
   const res = await fetch(url);
   return { url, status: res.status }; // 401 = the package is there. 404: not published yet
 };
@@ -73,7 +75,8 @@ async (itx) => {
 ### 2. The client, the connection
 
 Open the page (the Dash's Integrations page, the Cloudflare card's button) and follow its three
-steps: register an OAuth client on your Cloudflare account with the redirect URI the page shows (the
+steps: register an OAuth client on your Cloudflare account with the redirect URI the page shows,
+iterate's own callback, `<platform origin>/.secrets/oauth/callback` (the
 page gives the request, for an API token with **OAuth Clients Write**; the answer carries the
 client's id and its secret once), save both on the Dash's form, and press Connect. Cloudflare asks
 which account the person grants access to, and sends them back.
@@ -107,6 +110,7 @@ client, which owns `/secrets/cloudflare-<connection>`:
 - `/secrets/own-cloudflare-<connection>`: a connection's tokens, pinned to `dash.cloudflare.com`
   and `api.cloudflare.com`, refreshed by the platform with the client.
 - The kv: `own-cloudflare/accounts/<connection>` (the person, their id, the scopes, the accounts,
-  when), `own-cloudflare/pending/<digest>` (a sign-in in flight, for an hour),
-  `own-cloudflare/removed/<connection>` (a removal whose row has yet to leave the Dash), and
-  `own-cloudflare/redirect-uri` (the one the platform last sent).
+  when), `own-cloudflare/pending/<connection>` (a sign-in in flight and the platform's nonce for it,
+  for an hour), and `own-cloudflare/removed/<connection>` (a removal whose row has yet to leave the
+  Dash). A client registered with an older version of this package's own `/oauth2/callback` needs
+  iterate's callback added.

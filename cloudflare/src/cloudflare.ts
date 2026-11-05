@@ -1,5 +1,5 @@
-import { SCOPES, URLS, type CloudflareItx, type Settings } from "./app.js";
-import { servePage, serveCallback } from "./page.js";
+import { LANDING, SCOPES, URLS, type CloudflareItx, type Settings } from "./app.js";
+import { serveLanding, servePage } from "./page.js";
 import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
 
 export {
@@ -42,8 +42,10 @@ const unique = (list: string[]): string[] => [
 /** A project's own Cloudflare OAuth client, as an integration its worker hosts:
  *  `const integrations: Integration[] = [cloudflare()];`
  *
- *  On its routing slug it answers, for members only, the Connect Cloudflare page at `/` and
- *  Cloudflare's return at `/oauth2/callback`; any other path is a 404. Its install hook
+ *  On its routing slug it answers, for members only, the Connect Cloudflare page at `/` and the
+ *  landing iterate's callback sends the person to once it stored a person's tokens, `/connected`;
+ *  any other path is a 404. Cloudflare comes back to iterate's own callback, the redirect URI the
+ *  page shows. Its install hook
  *  (`project/worker-updated`) lists it on the Dash's Integrations page: the card, and a row per
  *  connected person with the account their token reaches. The client's secret set or deleted on
  *  the Dash registers the card again.
@@ -67,8 +69,8 @@ export function cloudflare(
       const denied = host.auth.require(request);
       if (denied) return denied;
       using itx = host.getItx();
-      return new URL(request.url).pathname === "/oauth2/callback"
-        ? await serveCallback(request, itx, settings)
+      return new URL(request.url).pathname === LANDING
+        ? await serveLanding(request, itx, settings)
         : await servePage(request, itx, settings);
     },
     async processEvent({ event, itx }) {

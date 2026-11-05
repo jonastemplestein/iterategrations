@@ -12,7 +12,6 @@
 // connection's placeholder, and records every call. `faults` makes a secret's delete or an append
 // on /integrations fail. `host` is the worker hosting the package: a scope per `getItx`, counted.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "vite-plus/test";
 import { DEPLOY_SCOPES, cloudflare } from "../dist/cloudflare.js";
 
@@ -44,7 +43,7 @@ type Person = { id: string; email: string; company: string };
 const ADA: Person = { id: "1001", email: "ada@example.com", company: "Ada Co" };
 const GRACE: Person = { id: "1002", email: "grace@example.com", company: "Grace Co" };
 type Call = { url: string; headers: Record<string, string> };
-/** The account `completeOAuth` answers: its id, and its name when the endpoint has one. */
+/** The account `oauthResult` answers: its id, and its name when the endpoint has one. */
 type Named = { id: string; name: string | null };
 
 /** The account a JSON answer names at a lookup's dotted paths, as the platform reads it: a
@@ -58,9 +57,11 @@ function accountAt(json: unknown, lookup: { id: string; name?: string }): Named 
   return { id, name: typeof name === "string" && name ? name : null };
 }
 
-/** The kv key the package keeps an attempt under: the SHA-256 of its state. */
-const pendingKey = (state: string) =>
-  `own-cloudflare/pending/${createHash("sha256").update(state).digest("hex")}`;
+/** The kv key the package keeps an attempt under: its connection. */
+const pendingKey = (connection: string) => `own-cloudflare/pending/${connection}`;
+/** iterate's one callback, the redirect URI to register at Cloudflare. */
+const PLATFORM = "https://os.example";
+const CALLBACK = `${PLATFORM}/.secrets/oauth/callback`;
 
 function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
@@ -71,12 +72,10 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   const begun: { path: string; options: any }[] = [];
   const completed: { path: string; input: { code: string; state: string } }[] = [];
   const scopes = { opened: 0, disposed: 0 };
-  // the platform: each secret's attempt in flight, each completed attempt's answer, and the origin
-  // it composes the redirect URI under (the deployment's ingress, never a primary hostname)
+  // the platform: each secret's attempt in flight, and each completed attempt's result by nonce
   const platform = {
-    attempts: {} as Record<string, { options: any; state: string }>,
-    answers: {} as Record<string, { path: string; scopes: string[]; account?: Named }>,
-    redirectOrigin: ORIGIN,
+    attempts: {} as Record<string, { options: any; state: string; nonce: string }>,
+    results: {} as Record<string, { scopes: string[]; account?: Named }>,
     states: 0,
     /** Whether it calls `account`'s endpoint: a platform older than the option ignores it, and
      *  names no account. */
@@ -130,69 +129,21 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
         // signed claims, as long as the platform's
         const claims = { kind: "secret-oauth", path, n: ++platform.states, pad: "x".repeat(150) };
         const state = `${Buffer.from(JSON.stringify(claims)).toString("base64url")}.a-made-up-signature`;
-        platform.attempts[path] = { options: structuredClone(given), state };
-        const url = new URL(given.authorizationEndpoint);
-        const params = {
-          ...given.extra,
-          response_type: "code",
-          client_id: given.clientId,
-          redirect_uri: `${platform.redirectOrigin}${given.redirect.path}`,
-          state,
-          code_challenge: "a-made-up-challenge",
-          code_challenge_method: "S256",
-          scope: given.scope,
+        const nonce = `nonce-${platform.states}`;
+        platform.attempts[path] = { options: structuredClone(given), state, nonce };
+        return {
+          authorizationUrl: `${PLATFORM}/.secrets/oauth/start/id-${platform.states}`,
+          nonce,
         };
-        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-        return { authorizationUrl: url.href, nonce: `nonce-${platform.states}` };
       },
-      completeOAuth: async (path: string, input: { code: string; state: string }) => {
-        completed.push({ path, input });
-        // the same callback again answers the same, and exchanges nothing twice
-        const answered = platform.answers[input.state];
-        if (answered) return answered;
-        const attempt = platform.attempts[path];
-        if (!attempt || attempt.state !== input.state)
-          throw new Error("no pending attempt matches this callback — begin again");
-        const person = cloudflare_.codes[input.code];
-        if (!person) throw new Error("the token endpoint answered 400 (invalid_grant)");
-        const accessToken = `a-made-up-token-${++cloudflare_.mints}`;
-        cloudflare_.tokens[accessToken] = person;
-        // the account endpoint, called with the new token before anything is stored
-        const lookup = platform.lookups ? attempt.options.account : undefined;
-        const account = lookup && namedAt(lookup, accessToken);
-        const expected = attempt.options.expectAccount;
-        if (expected && account?.id !== expected)
-          throw Object.assign(
-            new Error(
-              `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
-            ),
-            { code: "IDENTITY_CONFLICT" },
-          );
-        secrets[path] = {
-          material: {
-            clientId: attempt.options.clientId,
-            clientSecret: attempt.options.clientSecret,
-            accessToken,
-            refreshToken: `a-made-up-refresh-token-${cloudflare_.mints}`,
-          },
-          options: {
-            urls: attempt.options.urls,
-            refresh: {
-              kind: "oauth-refresh-token",
-              tokenEndpoint: attempt.options.tokenEndpoint,
-              clientAuth: attempt.options.clientAuth ?? "client_secret_basic",
-            },
-          },
-        };
-        delete platform.attempts[path];
-        const answer = {
-          path,
-          scopes: attempt.options.scope.split(" "),
-          ...(account && { account }),
-        };
-        platform.answers[input.state] = answer;
-        return answer;
+      oauthResult: async (path: string, input: { nonce: string }) => {
+        const result = platform.results[input.nonce];
+        if (result) return { status: "complete", ...result };
+        return platform.attempts[path]?.nonce === input.nonce
+          ? { status: "pending" }
+          : { status: "unavailable" };
       },
+      oauthCallbackUrl: async () => CALLBACK,
     },
     kv: {
       get: async (key: string) => kv[key] ?? null,
@@ -229,6 +180,61 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
     if (lookup.url !== USER) throw new Error("the account lookup answered 404");
     const person = cloudflare_.tokens[token]!;
     return accountAt({ result: { id: person.id, email: person.email } }, lookup);
+  };
+  /** Iterate's callback, as the platform answers the provider's redirect: the attempt its state
+   *  names, completed (or its error page), then a redirect to the attempt's `next`, the page's own
+   *  landing, which this follows. */
+  const platformCallback = async (query: Record<string, string>): Promise<Response> => {
+    const found = Object.entries(platform.attempts).find(([, a]) => a.state === query.state);
+    if (!found) return new Response("This link is not one the platform issued\n", { status: 400 });
+    const [path, attempt] = found;
+    if (query.error)
+      return new Response(`The provider declined: ${query.error}\n`, { status: 400 });
+    const input = { code: query.code ?? "", state: query.state! };
+    completed.push({ path, input });
+    try {
+      const person = cloudflare_.codes[input.code];
+      if (!person) throw new Error("the token endpoint answered 400 (invalid_grant)");
+      const accessToken = `a-made-up-token-${++cloudflare_.mints}`;
+      cloudflare_.tokens[accessToken] = person;
+      // the account endpoint, called with the new token before anything is stored
+      const lookup = platform.lookups ? attempt.options.account : undefined;
+      const account = lookup && namedAt(lookup, accessToken);
+      const expected = attempt.options.expectAccount;
+      if (expected && account?.id !== expected)
+        throw Object.assign(
+          new Error(
+            `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
+          ),
+          { code: "IDENTITY_CONFLICT" },
+        );
+      secrets[path] = {
+        material: {
+          clientId: attempt.options.clientId,
+          clientSecret: attempt.options.clientSecret,
+          accessToken,
+          refreshToken: `a-made-up-refresh-token-${cloudflare_.mints}`,
+        },
+        options: {
+          urls: attempt.options.urls,
+          refresh: {
+            kind: "oauth-refresh-token",
+            tokenEndpoint: attempt.options.tokenEndpoint,
+            clientAuth: attempt.options.clientAuth ?? "client_secret_basic",
+          },
+        },
+      };
+      delete platform.attempts[path];
+      platform.results[attempt.nonce] = {
+        scopes: attempt.options.scope.split(" "),
+        ...(account && { account }),
+      };
+    } catch (error) {
+      return new Response(`Storing the tokens for ${path} failed: ${(error as Error).message}\n`, {
+        status: 400,
+      });
+    }
+    return page(attempt.options.next.path);
   };
   /** The project's egress, a loaded worker's global `fetch`: it swaps a connection's placeholder
    *  for its token and answers Cloudflare's /accounts with the one account the person picked;
@@ -276,14 +282,18 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   const setUp = async () => {
     secrets["/secrets/own-cloudflare-app"] = structuredClone(APP_SECRET);
   };
-  /** Press Connect, or Reconnect on `connection`: the state in the link to Cloudflare. */
+  /** Press Connect, or Reconnect on `connection`: the state the platform's start link leads
+   *  Cloudflare to carry. */
   const start = async (connection?: string) => {
     const res = await page("/connect", { form: connection ? { id: connection } : {} });
-    return new URL(res.headers.get("location")!).searchParams.get("state")!;
+    assert.match(
+      res.headers.get("location") ?? "",
+      /^https:\/\/os\.example\/\.secrets\/oauth\/start\//,
+    );
+    return platform.attempts[begun.at(-1)!.path]!.state;
   };
-  /** Cloudflare's redirect to the callback. */
-  const callback = (query: Record<string, string>) =>
-    page(`/oauth2/callback?${new URLSearchParams(query).toString()}`);
+  /** Cloudflare's redirect to iterate's callback, which sends the person on to the page. */
+  const callback = (query: Record<string, string>) => platformCallback(query);
   /** Connect (or Reconnect `connection`), and come back from Cloudflare as `person`. */
   let codes = 0;
   const connect = async (person: Person = ADA, connection?: string) => {
@@ -435,27 +445,27 @@ test("every name the package keeps is its own: no secret or kv key the platform'
   for (const { path } of project.appended) assert.equal(path, "/integrations");
 });
 
-test("it answers its own routing slug, cloudflare unless another is given; anything but its page and callback is a 404", async () => {
+test("it answers its own routing slug, cloudflare unless another is given; anything but its page and its landing is a 404", async () => {
   assert.equal(cloudflare().routingSlug, "cloudflare");
   assert.equal(cloudflare({ slug: "cf" }).routingSlug, "cf");
   const project = fakeProject();
-  for (const path of ["/nope", "/oauth2/callbacks", "/webhook", "/oauth2"])
+  for (const path of ["/nope", "/oauth2/callback", "/connectedx", "/webhook", "/oauth2"])
     assert.equal((await project.page(path)).status, 404, path);
   assert.equal((await project.page("/nope", { form: {} })).status, 404);
-  assert.equal((await project.page("/oauth2/callback", { form: {} })).status, 405);
+  assert.equal((await project.page("/connected", { form: {} })).status, 405);
   // a member's stray path opens the project's scope and releases it, and writes nothing
   assert.equal(project.scopes.opened, project.scopes.disposed);
   assert.deepEqual(project.kv, {});
 });
 
-test("the page and the callback are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
+test("the page and the landing are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
   const project = fakeProject();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
     ["/connect", {}],
     ["/disconnect", { id: "0a1b2c3d" }],
-    ["/oauth2/callback?code=x&state=y", undefined],
+    ["/connected?id=0a1b2c3d", undefined],
   ] as const)
     assert.equal((await project.page(path, { form }, refused)).status, 401, path);
   assert.deepEqual(project.kv, {});
@@ -467,19 +477,20 @@ test("the page and the callback are for members: whatever auth.require answers i
 
 // ------------------------------------------------------------------- the page
 
-test("the page shows the redirect URI to register at Cloudflare and the request that registers a client with it, from the request's origin and the base path a paths ingress strips; a form may lead only here and to Cloudflare", async () => {
+test("the page shows the redirect URI to register at Cloudflare, iterate's own callback whatever address serves the page, and the request that registers a client with it; a form may lead only here, to iterate's start link and to Cloudflare", async () => {
   const project = fakeProject();
   const res = await project.page("/", {
     headers: { "x-iterate-base-path": "/projects/iterate/cloudflare" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
-  assert.ok(html.includes(`data-copy="${ORIGIN}/projects/iterate/cloudflare/oauth2/callback"`));
+  assert.ok(html.includes(`data-copy="${CALLBACK}"`));
+  assert.doesNotMatch(html, /oauth2\/callback/);
   assert.match(html, /\/oauth_clients/);
   assert.match(html, /OAuth Clients Write/);
   assert.match(html, /client_secret_post/);
   const csp = res.headers.get("content-security-policy")!;
-  assert.match(csp, /form-action 'self' https:\/\/dash\.cloudflare\.com;/);
+  assert.match(csp, /form-action 'self' https:\/\/os\.example https:\/\/dash\.cloudflare\.com;/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.equal(res.headers.get("x-frame-options"), "DENY");
   const nonce = /script-src 'nonce-([^']+)'/.exec(csp)![1];
@@ -538,13 +549,14 @@ test("a secret without the public field is not set up: the page asks to save the
 
 // ------------------------------------------------------------------ connect
 
-test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes, the client secret's placeholder in the token request's body, and /user naming the person; it keeps the attempt by its state", async () => {
+test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes, the client secret's placeholder in the token request's body, and /user naming the person; it sends the person to iterate's start link, and keeps the attempt by its connection", async () => {
   const project = fakeProject();
   await project.setUp();
   const res = await project.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
-  assert.equal(to.origin + to.pathname, "https://dash.cloudflare.com/oauth2/auth");
+  assert.equal(to.origin, PLATFORM);
+  assert.match(to.pathname, /^\/\.secrets\/oauth\/start\//);
   const connection = project.lastConnection();
   assert.match(connection, /^[0-9a-f]{8}$/);
   assert.deepEqual(project.begun, [
@@ -555,7 +567,7 @@ test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes
         tokenEndpoint: "https://dash.cloudflare.com/oauth2/token",
         clientId: CLIENT_ID,
         clientSecret: PLACEHOLDER,
-        redirect: { routingSlug: "cloudflare", path: "/oauth2/callback" },
+        next: { routingSlug: "cloudflare", path: `/connected?id=${connection}` },
         clientAuth: "client_secret_post",
         scope: "user-details.read offline_access",
         urls: URLS,
@@ -563,8 +575,12 @@ test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes
       },
     },
   ]);
-  const attempt = JSON.parse(project.kv[pendingKey(to.searchParams.get("state")!)]!);
+  const attempt = JSON.parse(project.kv[pendingKey(connection)]!);
   assert.equal(attempt.connection, connection);
+  assert.equal(
+    attempt.nonce,
+    project.platform.attempts[`/secrets/own-cloudflare-${connection}`]!.nonce,
+  );
   assert.ok(Math.abs(Date.now() - attempt.at) < 5000);
   assert.equal(
     Object.keys(project.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
@@ -584,19 +600,7 @@ test("scopes and urls ask for more, beside the package's own: DEPLOY_SCOPES is w
   assert.match(await (await project.page("/")).text(), /<code>workers-scripts\.write<\/code>/);
 });
 
-test("after a Connect whose redirect URI is not the page's own address (a primary hostname), the page shows the one the platform sent Cloudflare too", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.platform.redirectOrigin = "https://cloudflare--iterate.ingress.example";
-  await project.start();
-  const html = await (await project.page("/")).text();
-  assert.match(html, /the platform sent Cloudflare this one/);
-  assert.ok(
-    html.includes('data-copy="https://cloudflare--iterate.ingress.example/oauth2/callback"'),
-  );
-});
-
-// --------------------------------------------------------------- the callback
+// --------------------------------------------------------------- the landing
 
 test("the callback completes the attempt, keeps the person the platform named and the account their token reaches (one call to /accounts with the placeholder), registers the card then the row, and sends the person back", async () => {
   const project = fakeProject();
@@ -608,7 +612,7 @@ test("the callback completes the attempt, keeps the person the platform named an
   const before = project.registry().length;
   const res = await project.callback({ code: "a-made-up-code", state });
   assert.equal(res.status, 303);
-  assert.equal(res.headers.get("location"), "../?connected=ada%40example.com");
+  assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
   assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   assert.deepEqual(project.secrets[path]!.options.urls, URLS);
   assert.deepEqual(project.calls, [
@@ -654,43 +658,41 @@ test("a connection whose /accounts does not answer still stands, with no account
   assert.match(await (await project.page("/")).text(), /on none listed/);
 });
 
-test("a callback with an unknown, missing or hour-old state is refused and writes nothing", async () => {
+test("a landing with an unknown, missing or hour-old attempt is refused and writes nothing", async () => {
   const project = fakeProject();
   await project.setUp();
-  const old = await project.start();
+  await project.start();
+  const old = project.lastConnection();
   project.kv[pendingKey(old)] = JSON.stringify({
-    connection: project.lastConnection(),
+    connection: old,
+    nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
   const kv = structuredClone(project.kv);
   const before = project.registry().length;
-  for (const query of [
-    { code: "a-made-up-code", state: "not-a-state" },
-    { code: "a-made-up-code" },
-    { code: "a-made-up-code", state: old },
-  ] as Record<string, string>[]) {
-    const res = await project.callback(query);
+  for (const query of ["?id=ffffffff", "", `?id=${old}`]) {
+    const res = await project.page(`/connected${query}`);
     assert.match(
       location(res),
-      /error=Cloudflare came back from a sign-in this page did not start, or that is over an hour old/,
-      JSON.stringify(query),
+      /error=iterate came back from a sign-in this page did not start, or that is over an hour old/,
+      query,
     );
   }
   assert.deepEqual(project.kv, kv);
-  assert.deepEqual(project.completed, []);
   assert.equal(project.registry().length, before);
 });
 
-test("a callback with Cloudflare's error forgets the attempt and ends it, and an exchange that fails deletes the pending secret", async () => {
+test("Cloudflare's no, and an exchange that fails, are iterate's callback's to show: the landing is never reached, and nothing is stored", async () => {
   const project = fakeProject();
   await project.setUp();
   const refused = await project.start();
   const res = await project.callback({ error: "access_denied", state: refused });
-  assert.match(location(res), /error=Cloudflare answered access_denied: nothing changed\./);
-  assert.deepEqual(project.platform.attempts, {});
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /The provider declined: access_denied/);
   const failed = await project.start();
   const again = await project.callback({ code: "a-code-cloudflare-never-issued", state: failed });
-  assert.match(location(again), /error=the token endpoint answered 400 \(invalid_grant\)/);
+  assert.equal(again.status, 400);
+  assert.match(await again.text(), /the token endpoint answered 400 \(invalid_grant\)/);
   assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-cloudflare-app"]);
   assert.equal(
     Object.keys(project.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
@@ -705,7 +707,7 @@ test("the same person connected twice keeps one row: the older connection's secr
   const res = await project.connect(ADA);
   const newer = project.lastConnection();
   assert.notEqual(newer, older);
-  assert.equal(res.headers.get("location"), "../?connected=ada%40example.com");
+  assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
   assert.equal(project.secrets[`/secrets/own-cloudflare-${older}`], undefined);
   assert.equal(project.kv[`own-cloudflare/accounts/${older}`], undefined);
   assert.ok(project.secrets[`/secrets/own-cloudflare-${newer}`]);
@@ -722,7 +724,7 @@ test("Reconnect begins OAuth again on the same connection, held to its person (e
   const path = `/secrets/own-cloudflare-${connection}`;
   const token = project.secrets[path]!.material.accessToken;
   const res = await project.connect(ADA, connection);
-  assert.equal(res.headers.get("location"), "../?connected=ada%40example.com");
+  assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
   assert.equal(project.lastConnection(), connection);
   assert.equal(project.begun.at(-1)!.options.expectAccount, "1001");
   assert.notEqual(project.secrets[path]!.material.accessToken, token, "new tokens");
@@ -733,14 +735,13 @@ test("Reconnect begins OAuth again on the same connection, held to its person (e
       id,
     );
   const secrets = structuredClone(project.secrets);
-  const kv = structuredClone(project.kv);
   const conflict = await project.connect(GRACE, connection);
+  assert.equal(conflict.status, 400);
   assert.match(
-    location(conflict),
-    /error=the provider authorized a different account \(1002\) than this connection's \(1001\)/,
+    await conflict.text(),
+    /the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
   assert.deepEqual(project.secrets, secrets);
-  assert.deepEqual(project.kv, kv);
 });
 
 // --------------------------------------------------------------- disconnect

@@ -3,11 +3,9 @@ import {
   APP_PIN,
   APP_SECRET,
   CONNECTION,
-  REDIRECT_URI,
   REMOVED,
   attemptOf,
   connectAccount,
-  dropAttempt,
   forget,
   hasAppSecret,
   listAccounts,
@@ -73,7 +71,7 @@ const post = (action: string, fields: Record<string, string>, label: string, qui
 
 /** No other site may show these pages in a frame: a framed form posts from this origin, so the
  *  member gate passes (clickjacking). `default-src` does not cover `frame-ancestors`. Every answer
- *  carries both, the page's and the callback's alike. */
+ *  carries both, the page's and the landing's alike. */
 const NO_FRAMES = {
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
@@ -141,6 +139,7 @@ async function render(
   itx: CloudflareItx,
   settings: Settings,
   here: string,
+  callback: string,
   flash: string,
 ): Promise<string> {
   const app = await readApp(itx);
@@ -150,15 +149,9 @@ async function render(
     failed: messageOf(error),
   }));
   const accounts = await listAccounts(itx);
-  const callback = `${here}/oauth2/callback`;
-  const redirectUri = await itx.kv.get(REDIRECT_URI);
-  const sent =
-    redirectUri && redirectUri !== callback
-      ? `<p class="warn">With the last Connect, the platform sent Cloudflare this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Register it too:</p>${copyRow(redirectUri)}`
-      : "";
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>
-    <p>An OAuth client belongs to a Cloudflare account; the people who connect here may be on any account. Register one on yours with the API (the <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/">API token</a> needs <b>OAuth Clients Write</b>), with this redirect URI, exactly:${copyRow(callback)}${sent}</p>
+    <p>An OAuth client belongs to a Cloudflare account; the people who connect here may be on any account. Register one on yours with the API (the <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/">API token</a> needs <b>OAuth Clients Write</b>), with this redirect URI, exactly:${copyRow(callback)}</p>
     <pre>${esc(registration(callback, settings.scopes))}</pre>
     <p>The answer carries the client's <b>id</b> and its <b>secret</b>, once: keep them for step 2. Cloudflare's dashboard shows the client afterwards under the account's OAuth clients, where its redirect URIs and scopes can be changed.</p>
   </section>`;
@@ -216,7 +209,7 @@ export async function servePage(
   const path = url.pathname.replace(/^\//, "");
 
   if (request.method === "GET" && path === "") {
-    // the redirect URI keeps the base path a paths ingress strips
+    // the page's own address keeps the base path a paths ingress strips
     const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
     const error = url.searchParams.get("error");
     const connected = url.searchParams.get("connected");
@@ -225,7 +218,10 @@ export async function servePage(
       : connected
         ? `<p class="ok">Connected ${esc(connected)}. The project's code and agents can now call Cloudflare's API as this person, on the account they picked.</p>`
         : "";
-    const body = await render(itx, settings, here, flash);
+    // iterate's one callback: what Cloudflare is told to come back to, on the platform's origin, where
+    // Connect's start link leads first
+    const callback = await itx.secrets.oauthCallbackUrl();
+    const body = await render(itx, settings, here, callback, flash);
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
     return new Response(
       `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Cloudflare</title><style>${STYLE}</style></head><body><h1>Cloudflare</h1>${body}<script nonce="${nonce}">${COPY_SCRIPT}</script></body></html>`,
@@ -234,8 +230,9 @@ export async function servePage(
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
           "x-frame-options": NO_FRAMES["x-frame-options"],
-          // Connect posts here and is sent on to Cloudflare, so a form may lead there too
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' https://dash.cloudflare.com; base-uri 'none'; frame-ancestors 'none'`,
+          // Connect posts here and is sent on to iterate's start link, then to Cloudflare, so a form
+          // may lead to both
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' ${new URL(callback).origin} https://dash.cloudflare.com; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );
@@ -280,44 +277,32 @@ export async function servePage(
   }
 }
 
-/** Cloudflare's return, `/oauth2/callback`, members only: the person comes back from the consent
- *  screen with `code` and `state`, or with `error` when they said no. Anyone can open this URL with
- *  any query, so a state this page kept, under an hour old, is required before anything is
- *  written. The platform checks the state itself and exchanges the code once: the same callback
- *  again answers the same. The card goes before the row: a row stands under its card alone. */
-export async function serveCallback(
+/** Where iterate's callback sends the person once it stored an account's tokens, `/connected?id=`,
+ *  members only. Anyone can open this URL with any query, so an attempt this page started for that
+ *  connection, under an hour old, is required before anything is written; what Cloudflare granted is
+ *  the platform's answer (`oauthResult`), never the query's. The card goes before the row: a row
+ *  stands under its card alone. */
+export async function serveLanding(
   request: Request,
   itx: CloudflareItx,
   settings: Settings,
 ): Promise<Response> {
   if (request.method !== "GET")
     return new Response("GET only\n", { status: 405, headers: NO_FRAMES });
-  const query = new URL(request.url).searchParams;
-  const state = query.get("state") ?? "";
-  const code = query.get("code") ?? "";
+  const connection = new URL(request.url).searchParams.get("id") ?? "";
   const back = (flash: string): Response =>
-    new Response(null, { status: 303, headers: { location: `../${flash}`, ...NO_FRAMES } });
-  const attempt = await attemptOf(itx, state);
+    new Response(null, { status: 303, headers: { location: `./${flash}`, ...NO_FRAMES } });
+  const attempt = await attemptOf(itx, connection);
   if (!attempt)
     return back(
       flashOf(
         "error",
-        "Cloudflare came back from a sign-in this page did not start, or that is over an hour old. Press Connect again.",
+        "iterate came back from a sign-in this page did not start, or that is over an hour old. Press Connect again.",
       ),
     );
   try {
-    if (!code) {
-      await dropAttempt(itx, state, attempt);
-      return back(
-        flashOf(
-          "error",
-          `Cloudflare answered ${query.get("error") || "with no code"}: nothing changed.`,
-        ),
-      );
-    }
-    const outcome = await connectAccount(itx, state, code, attempt);
-    for (const connection of outcome.replaced)
-      await registerRemoval(itx, settings.slug, connection);
+    const outcome = await connectAccount(itx, attempt);
+    for (const replaced of outcome.replaced) await registerRemoval(itx, settings.slug, replaced);
     await registerCard(itx, settings.slug);
     await registerRow(itx, settings.slug, attempt.connection);
     return back(flashOf("connected", outcome.connected));
