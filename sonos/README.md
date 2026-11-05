@@ -31,8 +31,7 @@ The person's link goes to a Sonos consent page, then the Sonos sign-in.
 async (itx) => {
   const mcp = await itx.connectToMcp("https://mcp.ws.sonos.com/mcp", {
     headers: {
-      authorization:
-        'Bearer getSecret("/secrets/sonos", { field: "accessToken" })',
+      authorization: 'Bearer getSecret("/secrets/sonos", { field: "accessToken" })',
     },
   });
   const tools = (await mcp.listTools()).map((tool) => tool.name);
