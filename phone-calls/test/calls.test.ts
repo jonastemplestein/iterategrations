@@ -137,6 +137,9 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   const project = pretendProject();
   const { default: provide } = await import("../calls.ts");
   const lent = await provide({ itx: project.itx as never });
+  // the device of each person the lend answers is provisioned when it starts, before any call
+  await until("the answered people's devices", () => project.provisioned.length === 2);
+  assert.deepEqual(project.provisioned, ["phone-447700900001", "phone-447700900002"]);
   const recorded = (type: string) =>
     project.events.filter((event) => event.type === `phone-calls/${type}`);
   // what the lend gave the voice to say, on the caller's relay

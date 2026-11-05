@@ -7,7 +7,7 @@
 // the account and the call is picked up. Either way the call is a voice call like any other the
 // project has: this file is its client (@iterate-com/voice's call client, the voice app's own). Each
 // person is a voice device of the project's, `whatsapp-<the other person's digits>`, provisioned
-// once and kept: its relay at `/voice/whatsapp-<digits>` and its agent at
+// once (for a person it answers, when the lend starts) and kept: its relay at `/voice/whatsapp-<digits>` and its agent at
 // `/agents/voice/whatsapp-<digits>`, which keeps every call with that person (the number in the
 // path: a project can tell whose phone a call's agent is on). A call is one press on the device; the
 // person's words go up as microphone frames and the voice's answer comes back as speaker frames. The
@@ -153,7 +153,8 @@ let itx: Project | undefined;
 let active: ActiveCall | null = null;
 
 /** Each caller's voice device, provisioned once (`itx.voice.ensureVoiceDevice`) and kept: a press
- *  on it is one append. A refused provisioning is asked again on the next call. */
+ *  on it is one append. A refused provisioning is asked again on the next call, or on the next
+ *  reconnection for a person this lend answers. */
 const devices = new Map<string, Promise<VoiceDevice<VoiceContext>>>();
 function deviceFor(project: Project, number: string): Promise<VoiceDevice<VoiceContext>> {
   const client = `whatsapp-${number}`;
@@ -714,6 +715,15 @@ export default async function provide(connection: { itx: Project }) {
         if (active?.voice && `whatsapp-${active.number}` === client) tell({ hangup: true });
       });
     }
+  // the device of each person this lend answers is provisioned now, not on that person's first
+  // call: provisioning took about 4 s, which the person heard as ringing
+  for (const number of ALLOWED)
+    if (!devices.has(`whatsapp-${number}`))
+      deviceFor(connection.itx, number).catch((error: unknown) =>
+        console.error(
+          `whatsapp-calls: whatsapp-${number} could not be provisioned: ${String(error)}`,
+        ),
+      );
   // `iterate provide` calls this again on each reconnection: the device stays as it is
   if (!bridgeStarted) startBridge();
   bridgeStarted = true;

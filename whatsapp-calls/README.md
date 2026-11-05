@@ -9,7 +9,8 @@ the project's own WhatsApp account:
 
 Either way the call is one of the project's voice calls, the same as its voice app's: a press on
 the person's own voice device, `whatsapp-<the other person's digits>`, which the lend provisions once
-(`itx.voice.ensureVoiceDevice`) and keeps. Its relay is at `/voice/whatsapp-<digits>` and its agent
+(`itx.voice.ensureVoiceDevice`) and keeps. For a person the lend answers, it does so when it starts,
+so their first call does not wait for it. Its relay is at `/voice/whatsapp-<digits>` and its agent
 at `/agents/voice/whatsapp-<digits>`, which keeps every call with that person (`streamPath` in what
 the lend answers and records). **The voice is on the line first**: a placed call only rings once the
 live model has answered, and an incoming call is only picked up then, so the person is spoken to

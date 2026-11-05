@@ -114,6 +114,9 @@ test("calls in and out: an unknown caller is left ringing, a known one is picked
   const project = pretendProject();
   const { default: provide } = await import("../calls.ts");
   const lent = await provide({ itx: project.itx as never });
+  // the device of each person the lend answers is provisioned when it starts, before any call
+  await until("the answered people's devices", () => project.provisioned.length === 2);
+  assert.deepEqual(project.provisioned, ["whatsapp-447700900001", "whatsapp-447700900002"]);
   const recorded = (type: string) =>
     project.events.filter((event) => event.type === `whatsapp-calls/${type}`);
   // what the bridge gave the voice to say, on the caller's relay

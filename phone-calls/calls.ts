@@ -8,10 +8,10 @@
 // rings, from the project's number. IN: a person this lend answers (PHONE_CALLS_ALLOWED) rings the
 // number and the call is picked up; anyone else is turned away, to the number's own fallback
 // (voicemail, or nothing). Either way the call is a voice call like any other the project has, a
-// press on the person's own voice device, `phone-<the other person's digits>`, provisioned once and
-// kept: its relay at `/voice/phone-<digits>` and its agent at `/agents/voice/phone-<digits>`, which
-// keeps every call with that person. The person's words go up as microphone frames and the voice's
-// answer comes back as speaker frames. The voice is on the line BEFORE the phone rings or the call
+// press on the person's own voice device, `phone-<the other person's digits>`, provisioned once
+// (for a person it answers, when the lend starts) and kept: its relay at `/voice/phone-<digits>`
+// and its agent at `/agents/voice/phone-<digits>`, which keeps every call with that person. The
+// person's words go up as microphone frames and the voice's answer comes back as speaker frames. The voice is on the line BEFORE the phone rings or the call
 // is picked up.
 //
 // The line is `jeeves-phone serve` (serve.go: the number registered as a SIP phone with Andrews &
@@ -178,7 +178,8 @@ let itx: Project | undefined;
 let active: ActiveCall | null = null;
 
 /** Each caller's voice device, provisioned once (`itx.voice.ensureVoiceDevice`) and kept: a press
- *  on it is one append. A refused provisioning is asked again on the next call. */
+ *  on it is one append. A refused provisioning is asked again on the next call, or on the next
+ *  reconnection for a caller this lend answers (provisionAnswered). */
 const devices = new Map<string, Promise<VoiceDevice<VoiceContext>>>();
 function deviceFor(project: Project, client: string): Promise<VoiceDevice<VoiceContext>> {
   let device = devices.get(client);
@@ -193,6 +194,17 @@ function deviceFor(project: Project, client: string): Promise<VoiceDevice<VoiceC
   return device;
 }
 const clientFor = (current: ActiveCall) => `phone-${current.number || "test"}`;
+/** The device of each caller this lend answers is provisioned when the lend starts, not on that
+ *  caller's first call: provisioning took about 4 s, which the caller heard as ringing. */
+function provisionAnswered(project: Project): void {
+  for (const number of ALLOWED) {
+    const client = `phone-${number}`;
+    if (devices.has(client)) continue;
+    deviceFor(project, client).catch((error: unknown) =>
+      console.error(`phone-calls: ${client} could not be provisioned: ${String(error)}`),
+    );
+  }
+}
 /** serve.go's reason for ending a call that is up and carries nothing from the line. */
 const NO_AUDIO = "answered, but no audio flowed";
 /** How long a call waits for the line to be registered before it is given up. */
@@ -842,6 +854,7 @@ export default async function provide(connection: { itx: Project }) {
   const reconnected = itx !== undefined;
   itx = connection.itx;
   if (reconnected) carryOver(connection.itx);
+  provisionAnswered(connection.itx);
   // `iterate provide` calls this again on each reconnection: the line stays as it is
   if (!bridgeStarted) startBridge();
   bridgeStarted = true;
