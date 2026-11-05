@@ -1,5 +1,5 @@
-import { SCOPES, URLS, type XItx, type Settings } from "./app.js";
-import { servePage, serveCallback } from "./page.js";
+import { LANDING, SCOPES, URLS, type XItx, type Settings } from "./app.js";
+import { serveLanding, servePage } from "./page.js";
 import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
 
 export { APP_PIN, APP_SECRET, SCOPES, URLS, placeholder, secretOf } from "./app.js";
@@ -31,8 +31,9 @@ const unique = (list: string[]): string[] => [
 /** A project's own X app, as an integration its worker hosts:
  *  `const integrations: Integration[] = [x()];`
  *
- *  On its routing slug it answers, for members only, the Connect X page at `/` and X's return at
- *  `/oauth2/callback`; any other path is a 404. Its install hook (`project/worker-updated`) lists it
+ *  On its routing slug it answers, for members only, the Connect X page at `/` and the landing
+ *  iterate's callback sends the person to once it stored an account's tokens, `/connected`; any
+ *  other path is a 404. X comes back to iterate's own callback, the redirect URI the page shows. Its install hook (`project/worker-updated`) lists it
  *  on the Dash's Integrations page: the card, and a row per connected account. The client's secret
  *  set or deleted on the Dash registers the card again.
  *
@@ -54,8 +55,8 @@ export function x(
       const denied = host.auth.require(request);
       if (denied) return denied;
       using itx = host.getItx();
-      return new URL(request.url).pathname === "/oauth2/callback"
-        ? await serveCallback(request, itx, settings)
+      return new URL(request.url).pathname === LANDING
+        ? await serveLanding(request, itx, settings)
         : await servePage(request, itx, settings);
     },
     async processEvent({ event, itx }) {
