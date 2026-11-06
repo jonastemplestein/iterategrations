@@ -17,7 +17,9 @@ the project as `itx.whatsapp`. Nothing runs on iterate that is not already there
   `/integrations/whatsapp/chats/<jid>` (a person by their phone number's jid, a group by its
   `…@g.us`), so a conversation is read from one place.
 - **A second account** is the same file run again with its own `WHATSAPP_AUTH_FOLDER`,
-  `WHATSAPP_LOG_PATH=/integrations/whatsapp-personal` and `--name whatsappPersonal`.
+  `WHATSAPP_LOG_PATH=/integrations/whatsapp-personal` and `--name whatsappPersonal`. On that path
+  the link never marks the account online by itself, so the person does not look online and their
+  phone keeps its notifications; any other path keeps Baileys' defaults.
 - **Baileys' own socket API** is `itx.whatsapp`: `sendMessage(jid, content, options)`,
   `groupMetadata(jid)`, `onWhatsApp(...phones)`, `readMessages(keys)` and the rest, as documented at
   [baileys.wiki](https://baileys.wiki), plus `downloadMedia(message)` for a received message's
