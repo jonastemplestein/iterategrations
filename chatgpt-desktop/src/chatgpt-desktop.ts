@@ -72,6 +72,8 @@ export type Options = {
   logPath?: string;
   /** How often the tasks' rollout files are read for new events. */
   pollMs?: number;
+  /** How long a task stays quiet before its rollout is no longer read every poll. */
+  quietMs?: number;
 };
 
 type State = {
@@ -511,6 +513,10 @@ export function createLend(options: Options = {}) {
     string,
     { file?: string; offset: number; rest: string; quietSince: number }
   >();
+  /** Where a task that went quiet stopped being read. Following it again goes on from there: its
+   *  rollout's lines are already events, and a repeat would land them all a second time. */
+  const readTo = new Map<string, number>();
+
   /** Follow a thread's rollout from `offset` bytes: 0 for a new task, else from its end as it is now,
    *  so a follow-up sent next is read from its first line. */
   const follow = (thread: string, offset?: number) => {
@@ -570,7 +576,10 @@ export function createLend(options: Options = {}) {
       }
       const size = statSync(entry.file).size;
       if (size <= entry.offset) {
-        if (Date.now() - entry.quietSince > 6 * 3_600_000) followed.delete(thread);
+        if (Date.now() - entry.quietSince > (options.quietMs ?? 6 * 3_600_000)) {
+          readTo.set(thread, entry.offset);
+          followed.delete(thread);
+        }
         continue;
       }
       const fd = openSync(entry.file, "r");
@@ -597,11 +606,12 @@ export function createLend(options: Options = {}) {
   let timer: NodeJS.Timeout | undefined;
   const watch = () => {
     // tasks from the last two days that this lend or the command line started, from where they are now
-    const since = Date.now() - 48 * 3_600_000;
-    for (const entry of loadState().threads ?? []) if (entry.at > since) follow(entry.id);
+    const recent = () => Date.now() - 48 * 3_600_000;
+    for (const entry of loadState().threads ?? []) if (entry.at > recent()) follow(entry.id);
     timer ??= setInterval(() => {
       for (const entry of loadState().threads ?? [])
-        if (entry.at > since && !followed.has(entry.id)) follow(entry.id, 0);
+        if (entry.at > recent() && !followed.has(entry.id))
+          follow(entry.id, readTo.get(entry.id) ?? 0);
       try {
         readNew();
       } catch (error) {

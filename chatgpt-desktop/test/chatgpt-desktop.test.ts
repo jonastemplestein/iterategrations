@@ -34,7 +34,7 @@ function frame(message: unknown) {
 }
 
 /** An app with one bridge, one older thread, and the task it makes. */
-function pretendApp(options: { failFork?: boolean } = {}) {
+function pretendApp(options: { failFork?: boolean; pollMs?: number; quietMs?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "chatgpt-desktop-test-"));
   const socketDir = join(root, "sockets");
   const codexHome = join(root, "codex");
@@ -141,7 +141,8 @@ function pretendApp(options: { failFork?: boolean } = {}) {
     stateDir: join(root, "state"),
     codexHome,
     logPath: "/test/log",
-    pollMs: 60_000,
+    pollMs: options.pollMs ?? 60_000,
+    quietMs: options.quietMs,
   });
   cleanups.push(lend.stop);
   /** Name a thread the template, the way `name("agent-template", id)` does. */
@@ -296,6 +297,36 @@ test("a task's rollout lines land as events; the app's developer messages never 
   assert.ok(
     !JSON.stringify(events).includes("developer text") &&
       !JSON.stringify(events).includes("secret instructions"),
+  );
+});
+
+test("a task that went quiet is not read from its start again", async () => {
+  const { lend, day } = pretendApp({ pollMs: 2, quietMs: 10 });
+  const events: DesktopEvent[] = [];
+  await lend.provide({
+    itx: {
+      cd: (path) => ({
+        append: async (...more) => void (path === "/test/log" && events.push(...more)),
+      }),
+    },
+  });
+  const file = join(day, `rollout-2026-10-09T10-01-00-${TASK}.jsonl`);
+  writeFileSync(file, "");
+  await lend.lent.start("Open example.org.", { name: "quiet" });
+  const turn = (id: string) =>
+    JSON.stringify({ type: "event_msg", payload: { type: "task_started", turn_id: id } }) + "\n";
+  appendFileSync(file, turn("t1"));
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(
+    events.map((event) => event.payload.turn),
+    ["t1"],
+  );
+  // a follow-up after the quiet is read, and only it
+  appendFileSync(file, turn("t2"));
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(
+    events.map((event) => event.payload.turn),
+    ["t1", "t2"],
   );
 });
 
