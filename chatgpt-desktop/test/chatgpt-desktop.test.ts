@@ -73,6 +73,8 @@ function pretendApp(options: { failFork?: boolean; pollMs?: number; quietMs?: nu
       calls.push({ tool, args, threadId });
       if (tool === "list_threads")
         return socket.end(reply(id, { threads: [{ id: BRIDGE, title: "Agent bridge" }] }));
+      if (tool === "navigate_to_codex_page" || tool === "open_in_codex")
+        return socket.end(reply(id, {}));
       if (tool === "create_thread")
         return socket.end(reply(id, { threadId: TASK, hostId: "local" }));
       if (tool === "fork_thread" && !options.failFork)
@@ -170,6 +172,16 @@ test("ask makes a named task with the browser mention, from the bridge, and answ
   );
   assert.equal(create.args.title, "example");
   assert.equal(create.threadId, BRIDGE);
+  // the in-app browser exists only for the chat the window shows
+  assert.deepEqual(
+    calls
+      .filter((call) => /navigate_to|open_in/.test(call.tool))
+      .map((call) => [call.tool, call.args.threadId]),
+    [
+      ["navigate_to_codex_page", TASK],
+      ["open_in_codex", TASK],
+    ],
+  );
   assert.deepEqual(await lend.lent.names(), { example: TASK });
 });
 
