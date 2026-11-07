@@ -31,6 +31,9 @@
 // `itx.whatsappCalls.status()` says one is in progress there, and this lend's own call is kept in
 // kv `calls/busy` while it lasts, for the WhatsApp lend to read (it does not yet).
 //
+// The person's first words reach the agent at once, so a call keeps its agent ready from the moment
+// the voice is on the line, before the phone rings, until it ends (`keepAgentReady`).
+//
 // Each call's facts land on /integrations/phone-calls: `phone-calls/call-placed` or
 // `call-received`, `call-answered` (with the caller's agent path) and `call-ended` (with what was
 // said), the WhatsApp lend's payloads.
@@ -46,6 +49,17 @@ const LOG_PATH = "/integrations/phone-calls";
 const BRIDGE = process.env.PHONE_CALLS_BIN || join(import.meta.dirname, "jeeves-phone");
 /** How long the phone rings before the call is given up. */
 const RING_SECONDS = 45;
+/** How long a call lets its agent's model stay quiet before it asks the agent to get ready again:
+ *  under the 60 s the agent's socket to the model stays open after a last answer. */
+const AGENT_READY_EVERY_MS = 50_000;
+/** The least time between two asks when a wait ends early, as it does on a lost link. */
+const AGENT_RETRY_MS = 1_000;
+const AGENT_WARM_UP = "events.iterate.com/agent/warm-up-requested";
+/** The agent's model answering, for a request or a warm-up: its socket's 60 s start again. */
+const AGENT_ANSWERED = [
+  "events.iterate.com/agent/llm-request-settled",
+  "events.iterate.com/agent/cache-kept-warm",
+];
 /** The numbers a call may be placed to, and whose calls are answered (digits with country code,
  *  comma-separated). */
 const ALLOWED = new Set(
@@ -115,6 +129,11 @@ type CallMetrics = {
 
 /** A context of the project's, as much of it as a voice device uses. */
 type VoiceContext = ReturnType<Parameters<typeof connectVoiceDevice>[0]["cd"]>;
+/** The call's agent, as `keepAgentReady` uses it. */
+type AgentContext = {
+  append(event: { type: string; payload: Record<string, never> }): Promise<unknown>;
+  waitForEvent(filter: { type: string[]; timeoutMs: number }): Promise<unknown>;
+};
 
 /** `streamPath`: the caller's agent, `/agents/voice/phone-<digits>`, which keeps the call. */
 type Placed = { callId: string; ringing: true; streamPath: string };
@@ -566,6 +585,8 @@ async function connectVoice(
   }
   current.metrics.voiceReadyMs.push(Date.now() - pressedAt);
   current.voice = mine;
+  // before the phone rings or the call is picked up, and once however often the voice reconnects
+  if (!resumed) void keepAgentReady(current);
   // the call is up: a failed apology is logged, not a reason to hang up
   if (resumed)
     void mine
@@ -639,6 +660,52 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
           `phone-calls: could not report to ${String(current.reportTo)}: ${String(error)}`,
         ),
       );
+}
+
+/** The call's agent, on the newest link: the one the call started on may have been replaced. */
+function agentOf(current: ActiveCall): AgentContext | undefined {
+  return itx?.cd(current.agentPath!) as AgentContext | undefined;
+}
+
+/** Ask the call's agent for a warm-up: one ping, which leaves its context awake, its socket to the
+ *  model open and its prompt cached. Failing costs a hand-over a second or two, never the call. */
+async function askAgentToGetReady(current: ActiveCall): Promise<void> {
+  await agentOf(current)
+    ?.append({ type: AGENT_WARM_UP, payload: {} })
+    .catch((error: unknown) =>
+      console.error(`phone-calls: the agent was not asked to get ready: ${String(error)}`),
+    );
+}
+
+/** Whether the agent's model answered within AGENT_READY_EVERY_MS. Its context sleeps about 10 s
+ *  after its last call, so this wait, which stays open on the context, is what holds it awake. */
+async function agentAnswers(current: ActiveCall): Promise<boolean> {
+  const agent = agentOf(current);
+  if (!agent) return false;
+  try {
+    await agent.waitForEvent({ type: AGENT_ANSWERED, timeoutMs: AGENT_READY_EVERY_MS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** KEEP THE AGENT READY for as long as the call lasts. The voice hands the person's words over at
+ *  once, and an agent that has gone quiet takes up to 2 s longer to start on them. A warm-up at the
+ *  press is not enough: on real calls the first hand-over came 23 to 118 s after it. So one wait
+ *  stays open on the agent, and each time 50 s pass with no answer from its model the agent is
+ *  asked again, which also keeps its socket past the 60 s it would stay open. The agent does
+ *  nothing with an ask while a request runs. */
+async function keepAgentReady(current: ActiveCall): Promise<void> {
+  await askAgentToGetReady(current);
+  while (!current.over) {
+    const waitedFrom = Date.now();
+    if (await agentAnswers(current)) continue;
+    if (current.over) return;
+    const early = waitedFrom + AGENT_RETRY_MS - Date.now();
+    if (early > 0) await new Promise((resolve) => setTimeout(resolve, early));
+    await askAgentToGetReady(current);
+  }
 }
 
 /** Ring `input.to`. The voice is connected FIRST, and only then does the phone ring. Answers once
@@ -809,6 +876,8 @@ function onBridgeEvent(event: BridgeEvent): void {
       ...(current.test && { test: true }),
       streamPath: current.agentPath,
     });
+    // ready by the time the opening ends, and the person answers it
+    void askAgentToGetReady(current);
     // the voice is already on the line: it speaks first
     if (current.opening && current.voice)
       void current.voice
