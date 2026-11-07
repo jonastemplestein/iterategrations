@@ -121,4 +121,10 @@ pnpm test:go     # the codec, the playout queue, and the bridge against a SIP pe
 - **A recorded line says so.** With `PHONE_CALLS_RECORDING_NOTICE` set (for example "Please note
   that this call is recorded."), a placed call to a number the lend does not answer opens with it,
   and the call's agent is told. Household numbers (`PHONE_CALLS_ALLOWED`) hear no notice.
+- **The agent is kept ready for the whole call.** The voice hands the person's words over at once,
+  and the first hand-over can come a minute or two after the press. From the moment the voice is on
+  the line, before the phone rings, one `waitForEvent` stays open on the agent, which holds its
+  context awake. The agent is asked for a warm-up then, at the pick-up, and whenever 50 s pass with
+  no answer from its model, which keeps its socket open. A failure here never touches the call:
+  a hand-over only takes a second or two longer.
 - DTMF (keys pressed) arrives and is logged, nothing more.

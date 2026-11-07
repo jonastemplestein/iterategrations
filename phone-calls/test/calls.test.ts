@@ -6,7 +6,8 @@
 // the greeting; nothing is picked up or placed while a WhatsApp call is in progress; a placed call
 // rings once its voice is on the line and reports to the agent that asked; the test caller is
 // picked up and marked as a test. A call carries over to a new link when the old one is lost, and
-// is hung up once both sides have said goodbye. A real call needs the line: the README's walkthrough.
+// is hung up once both sides have said goodbye. A call keeps its agent ready from before the phone
+// rings until it ends. A real call needs the line: the README's walkthrough.
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,6 +60,13 @@ function pretendProject() {
     subscribed: [] as { path: string; name?: string }[],
     /** Each `readEvents(afterOffset)` on a path: what a moved device reads of the gap. */
     reads: [] as { path: string; afterOffset?: number }[],
+    /** Each `waitForEvent` on a path, open until a test answers it or lets it time out. */
+    waits: [] as {
+      path: string;
+      filter: Record<string, unknown>;
+      answer(): void;
+      timeOut(): void;
+    }[],
     events: [] as Appended[],
     provisioned: [] as string[],
     messages: [] as { to: string; text: string }[],
@@ -107,6 +115,15 @@ function pretendProject() {
           project.events.push({ path, type: event.type, payload: event.payload });
           return [0];
         },
+        waitForEvent: (filter: Record<string, unknown>) =>
+          new Promise((resolve, reject) =>
+            project.waits.push({
+              path,
+              filter,
+              answer: () => resolve({}),
+              timeOut: () => reject(new Error("WAIT_TIMEOUT")),
+            }),
+          ),
         readEvents: async (afterOffset?: number) => {
           project.reads.push({ path, afterOffset });
           return { events: [], scannedThroughOffset: afterOffset ?? 0, atHead: true };
@@ -378,3 +395,96 @@ test("a call to someone outside the household opens with the recording notice", 
     project.events.find((event) => event.type === "phone-calls/call-ended"),
   );
 });
+
+test("a call keeps its agent ready from before the phone rings until it ends", async () => {
+  const project = pretendProject();
+  const { default: provide } = await import("../calls.ts");
+  const lent = await provide({ itx: project.itx as never });
+  const agent = "/agents/voice/phone-447700900021";
+  const warmUp = "events.iterate.com/agent/warm-up-requested";
+  const asks = () =>
+    project.events.filter((event) => event.type === warmUp && event.path === agent).length;
+  const waits = () => project.waits.filter((wait) => wait.path === agent);
+  const rang = () => bridgeHeard().filter((line) => line.call === "+447700900021").length;
+  // the line rings and answers at once here, so note what it had heard at the first ask
+  let rangAtFirstAsk: number | undefined;
+  const { cd } = project.itx;
+  project.itx.cd = (path: string) => {
+    const context = cd(path);
+    if (path !== agent) return context;
+    return {
+      ...context,
+      append: (event: { type: string; payload: Record<string, any> }) => {
+        if (event.type === warmUp) rangAtFirstAsk ??= rang();
+        return context.append(event);
+      },
+    };
+  };
+
+  const { callId } = await lent.call({ to: "+44 7700 900021", opening: "Good evening, sir." });
+  // one ask once the voice is on the line, before the ring, and one at the pick-up
+  await until("the ask at the pick-up", () => asks() === 2);
+  assert.equal(rangAtFirstAsk, 0, "the agent is asked before the phone rings");
+  // one wait on the agent, which holds it awake, for its model's next answer
+  await until("the wait", () => waits().length === 1);
+  assert.deepEqual(waits()[0]!.filter, {
+    type: [
+      "events.iterate.com/agent/llm-request-settled",
+      "events.iterate.com/agent/cache-kept-warm",
+    ],
+    timeoutMs: 50_000,
+  });
+
+  // the model answers: its socket's 60 s start again, so nothing is asked
+  waits()[0]!.answer();
+  await until("another wait", () => waits().length === 2);
+  assert.equal(asks(), 2);
+  // 50 s of quiet: the agent is asked again
+  waits()[1]!.timeOut();
+  await until("the ask after the quiet", () => asks() === 3);
+  await until("a wait after it", () => waits().length === 3);
+
+  // the call ends: the open wait lapses, and nothing more is asked
+  lent.hangup();
+  await until("the end", () =>
+    project.events.find(
+      (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
+    ),
+  );
+  waits()[2]!.timeOut();
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.deepEqual({ asks: asks(), waits: waits().length }, { asks: 3, waits: 3 });
+}, 15_000);
+
+test("a lost link never spins: an ask that cannot be sent waits its turn, and the call goes on", async () => {
+  const project = pretendProject();
+  const { default: provide } = await import("../calls.ts");
+  const lent = await provide({ itx: project.itx as never });
+  const agent = "/agents/voice/phone-447700900022";
+  const { cd } = project.itx;
+  const asked: number[] = [];
+  project.itx.cd = (path: string) => {
+    const context = cd(path);
+    if (path !== agent) return context;
+    return {
+      ...context,
+      append: (event: { type: string; payload: Record<string, any> }) => {
+        if (event.type !== "events.iterate.com/agent/warm-up-requested")
+          return context.append(event);
+        asked.push(Date.now());
+        return Promise.reject(new Error("the link is gone"));
+      },
+      waitForEvent: () => Promise.reject(new Error("the link is gone")),
+    };
+  };
+  const { callId } = await lent.call({ to: "+44 7700 900022" });
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  // the ask before the ring, the one at the pick-up, and about one a second after them
+  assert.ok(asked.length >= 3 && asked.length <= 5, `asked ${String(asked.length)} times in 2.5 s`);
+  assert.deepEqual(lent.hangup(), { hungUp: true, callId });
+  await until("the end", () =>
+    project.events.find(
+      (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
+    ),
+  );
+}, 15_000);
