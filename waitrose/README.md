@@ -9,8 +9,9 @@ The project never holds the password or the token: they live in a secret, and it
 swaps the token into each request and logs in again when Waitrose answers 401.
 
 It is the package `iterate-waitrose`. `waitroseFetch` and `graphql` add what every call needs,
-`OPERATIONS` holds the app's GraphQL operations, and `placeOrder` is the one call that spends money,
-with its guards. The login is the secret's refresh. `waitrose()` is one element in the
+`OPERATIONS` holds the app's GraphQL operations, `reviewCheckout` reports what blocks a checkout and
+spends nothing, and `placeOrder` is the one call that spends money, with its guards. The login is
+the secret's refresh. `waitrose()` is one element in the
 `integrations` array of the project's config worker, with a page of its own for the project's
 members: the status. The project's Integrations page in the Dash shows a Waitrose card ("Set up by
 your coding agent" until the account's secret exists), with an **Open** button to the page and a
@@ -164,7 +165,7 @@ egress, so a run script, the project's code and an agent all call Waitrose the s
 The project's code imports them:
 
 ```ts
-import { graphql, OPERATIONS, placeOrder, waitroseFetch } from "iterate-waitrose";
+import { graphql, OPERATIONS, placeOrder, reviewCheckout, waitroseFetch } from "iterate-waitrose";
 ```
 
 `waitroseFetch(input, init?)` is `fetch` with those headers merged in. Headers you pass win. This is
@@ -193,7 +194,9 @@ return getTrolley.trolley.trolleyTotals.totalEstimatedCost; // { amount, currenc
 
 `OPERATIONS` holds the app's 17 GraphQL operations by name, verbatim. Their text is in
 [`src/operations.ts`](src/operations.ts); [GraphQL operations](#graphql-operations) says what each
-one takes and returns. `placeOrder` places the current order: [Placing an order](#placing-an-order).
+one takes and returns. `reviewCheckout` reports what blocks the current order:
+[Reviewing a checkout](#reviewing-a-checkout). `placeOrder` places it:
+[Placing an order](#placing-an-order).
 
 ### The helpers in a script
 
@@ -427,6 +430,57 @@ if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.tex
 return (await response.json()).products ?? [];
 ```
 
+### Reviewing a checkout
+
+`reviewCheckout()` reports what stands between the current order and an instant checkout. It sends
+three GraphQL queries (`GetShoppingContext`, `GetTrolley` and `CurrentSlot`). It changes nothing and
+never sends the place request. `placeOrder` applies the same review, so both report the same
+blockers.
+
+```js
+const review = await reviewCheckout();
+// {
+//   orderId: "<the current order, or null>",
+//   ready: false,
+//   blockers: [{ code: "TROLLEY_EMPTY", message: "The trolley is empty" }],
+//   instantCheckout: "NOT_ALLOWED",
+//   slotTypeValid: false,
+//   slot: null, // or { slotType, startDateTime, endDateTime, expiryDateTime }
+//   itemCount: 0,
+//   minimumSpendThresholdMet: false,
+//   hardConflicts: 0,
+//   estimatedTotal: { amount: 0, currencyCode: "GBP" },
+//   trolleyFailures: [], // Waitrose's own { type, message } list
+// }
+```
+
+Each blocker has a `code` and the `message` that `placeOrder` refuses with:
+
+| `code`                         | What it means                                                      |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `NO_CURRENT_ORDER`             | The shopping context has no current order.                         |
+| `TROLLEY_ORDER_MISMATCH`       | The trolley is not the current order, or Waitrose sent no trolley. |
+| `TROLLEY_FAILURES`             | Waitrose reported failures. See `trolleyFailures`.                 |
+| `INSTANT_CHECKOUT_NOT_ALLOWED` | `instantCheckout` is not `ALLOWED`.                                |
+| `SLOT_INVALID`                 | There is no valid delivery or collection slot.                     |
+| `SLOT_EXPIRED`                 | The slot's reservation has expired, or its expiry is unreadable.   |
+| `TROLLEY_EMPTY`                | The trolley has no items.                                          |
+| `MINIMUM_SPEND_NOT_MET`        | The minimum spend is not met, or Waitrose did not say.             |
+| `HARD_CONFLICTS`               | There are hard conflicts, or Waitrose did not give the count.      |
+| `TOTAL_UNAVAILABLE`            | Waitrose gave no usable estimated total.                           |
+
+What a review cannot tell you:
+
+- A `null` field is a value that Waitrose did not give.
+- `ready: true` means that the review found no blocker at the time of its reads. It is not a promise.
+  The trolley, the slot or the total can change, and Waitrose can still refuse the place request. No
+  read can test for that refusal.
+- `instantCheckout` is only Waitrose's value. It gives no reason. `NOT_ALLOWED` can stay after every
+  other blocker has gone, and nothing in this package can change it. When it stays, the person checks
+  out on the website.
+- An HTTP or GraphQL error throws, as `graphql` does. Then the review reports nothing about the
+  order.
+
 ### Placing an order
 
 **`placeOrder` spends money.** It places the current order through Waitrose's instant checkout,
@@ -479,8 +533,56 @@ sends a request again only after a 401, when Waitrose refused the token.
 When instant checkout is not allowed, the person checks out on the website instead:
 <https://www.waitrose.com/ecom/checkout>. It is a page, not an API.
 
-A run script cannot import `placeOrder`. To let the project's agents place orders, give the
-worker's class a method that calls it: an agent's script calls it as `itx.config.<method>(…)`.
+### Checkout methods on the worker
+
+`waitrose()` in the `integrations` array gives the project its page and its card. It gives agents no
+checkout method. An import in `worker.ts` gives them none either, and a run script cannot import a
+package. So an agent can reach `reviewCheckout` and `placeOrder` only through a method on the
+worker's class.
+
+Pin a build of this package that exports `reviewCheckout` (step 2). Add `placeOrder` and
+`reviewCheckout` to the worker's import from `iterate-waitrose`, and add these methods to its class.
+Leave out `placeWaitroseOrder` when agents must only review.
+
+```js
+import { placeOrder, reviewCheckout } from "iterate-waitrose";
+
+export default class extends IterateConfigEntrypoint {
+  // Read-only: it never sends the place request.
+  reviewWaitroseCheckout() {
+    return reviewCheckout();
+  }
+
+  // SPENDS MONEY. It takes the order and the total that the person agreed to.
+  placeWaitroseOrder({ orderId, expectedTotal }) {
+    return placeOrder({ orderId, expectedTotal });
+  }
+}
+```
+
+An agent's script calls them through `itx.config`:
+
+```js
+async (itx) => itx.config.reviewWaitroseCheckout();
+```
+
+```js
+// Only after the person agreed to this order and this total
+async (itx) =>
+  itx.config.placeWaitroseOrder({
+    orderId: "<review.orderId>",
+    expectedTotal: { amount: 87.45, currencyCode: "GBP" },
+  });
+```
+
+- Keep both arguments explicit. Never let the method fill them from a fresh review: the guard would
+  then compare the total with itself, and the person's agreement would check nothing.
+- Every script that can reach `itx.config` can call these methods. Add `placeWaitroseOrder` only when
+  the person wants agents to place orders.
+- A run script cannot import `CheckoutOutcomeUnknownError`, so it reads the error's message. A message
+  that starts with `Checkout outcome is unknown` means that the order may have been placed: read
+  `GetPendingOrders` or `GetOrder`, and never call the method again blindly.
+- These methods do not make a blocked order placeable. They report the blockers, and they refuse.
 
 ## Notes
 
