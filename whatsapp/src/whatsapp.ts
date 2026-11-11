@@ -54,6 +54,14 @@ export type Itx = {
   cd(path: string): { append(...events: WhatsAppEvent[]): Promise<unknown> };
 };
 
+/** `append` as `iterate provide --key … --paths /integrations/whatsapp/` hands it to this file: one
+ *  event at `path`, signed by the bridge's own key. With it the mind's `itx` lends and does nothing
+ *  else, so every event goes this way. */
+export type KeyAppend = (
+  path: string,
+  event: { type: string; payload?: Record<string, unknown> },
+) => Promise<void>;
+
 /** An event of Baileys' socket as it lands: `whatsapp/<Baileys' event name>`, Baileys' data under
  *  `data` (a long list in parts). A message's key is the message's, so one WhatsApp delivers twice
  *  (a reconnect, an `append` after a `notify`) is one event; any other event's key is its own, so
@@ -214,6 +222,10 @@ export function provideWhatsApp(input: {
   downloadMedia: (message: WAMessage, socket: WhatsAppSocket) => Promise<Uint8Array>;
 }) {
   let itx: Itx | undefined;
+  let keyAppend: KeyAppend | undefined;
+  /** With a key: the keys of the events this process added. A signed statement carries no key of
+   *  ours, so a message WhatsApp delivers again is left out here; after a restart it lands twice. */
+  const added = new Set<string>();
   let socket: WhatsAppSocket | undefined;
   let connected: Promise<void> | undefined;
   /** What waits to be appended, by the stream it is for, each in its own order. */
@@ -239,6 +251,17 @@ export function provideWhatsApp(input: {
         while (itx && waiting() > 0) {
           for (const [path, events] of pending) {
             const batch = events.slice(0, 50);
+            if (keyAppend) {
+              for (const event of batch) {
+                if (added.has(event.idempotencyKey)) continue;
+                await keyAppend(path, { type: event.type, payload: event.payload });
+                added.add(event.idempotencyKey);
+                if (added.size > 20_000) added.clear();
+              }
+              events.splice(0, batch.length);
+              if (events.length === 0) pending.delete(path);
+              continue;
+            }
             const log = itx.cd(path);
             await log.append(...batch).catch(async (error: unknown) => {
               if (!isIdempotencyConflict(error)) throw error;
@@ -337,8 +360,9 @@ export function provideWhatsApp(input: {
     if (!socket) throw new Error("WhatsApp is not connected yet.");
     return socket as unknown as Record<string, (...args: unknown[]) => unknown>;
   };
-  return async function provide(connection: { itx: Itx }) {
+  return async function provide(connection: { itx: Itx; append?: KeyAppend }) {
     itx = connection.itx;
+    keyAppend = connection.append;
     await (connected ??= input.connect(onSocket));
     void flush();
     const lent: Record<string, (...args: never[]) => unknown> = {};

@@ -368,3 +368,23 @@ function pretendProject() {
   };
   return project;
 }
+
+test("with a bridge key's append, every event goes through it, one at a time, and none through itx", async () => {
+  const project = pretendProject();
+  const viaKey: { path: string; type: string; payload: unknown }[] = [];
+  const lent = (await provideDummy({
+    itx: project.itx,
+    append: async (path, event) => void viaKey.push({ path, ...event, payload: event.payload }),
+  })) as Lent;
+  const sent = await lent.sendMessage("447700900009@s.whatsapp.net", { text: "by key" });
+  await new Promise((resolved) => setTimeout(resolved, 50));
+  const upserts = viaKey.filter((event) => event.type === "whatsapp/messages.upsert");
+  assert.ok(upserts.length >= 1);
+  assert.deepEqual(upserts.at(-1)!.payload, {
+    event: "messages.upsert",
+    data: { type: "append", messages: [sent] },
+  });
+  assert.ok(viaKey.every((event) => event.path.startsWith("/integrations/")));
+  // nothing went through the mind's own log: a key's itx has no such verb
+  assert.equal(project.events.length, 0);
+});
