@@ -131,7 +131,11 @@ test("with a key of its own, news goes through the key's append and focus is not
   await herdr.listening;
   const project = pretendProject();
   const signed: { path: string; event: { type: string; payload?: Record<string, unknown> } }[] = [];
-  const bridge = createBridge({ logPath: "/integrations/herdr/test", socket: herdr.path, retryMs: 10 });
+  const bridge = createBridge({
+    logPath: "/integrations/herdr/test",
+    socket: herdr.path,
+    retryMs: 10,
+  });
   cleanups.push(() => {
     bridge.stop();
     herdr.close();

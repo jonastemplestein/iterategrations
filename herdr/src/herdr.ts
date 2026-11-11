@@ -219,7 +219,9 @@ export function createBridge(input: { logPath: string; socket: string; retryMs?:
     const { type, payload } = event;
     appended = appended
       .then(() =>
-        keyAppend ? keyAppend(input.logPath, { type, payload }) : itx?.cd(input.logPath).append(event),
+        keyAppend
+          ? keyAppend(input.logPath, { type, payload })
+          : itx?.cd(input.logPath).append(event),
       )
       .catch((error: unknown) =>
         log(`${kind} was not appended (${error instanceof Error ? error.message : String(error)})`),

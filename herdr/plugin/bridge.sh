@@ -12,6 +12,9 @@ CONFIG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-$HOME/.config/herdr/plugins/config/iterat
 STATE_DIR="${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/herdr/plugins/iterate-bridge}"
 TARGETS="$CONFIG_DIR/targets"
 mkdir -p "$CONFIG_DIR" "$STATE_DIR"
+# The iterate CLI started inside a checkout of iterate runs that checkout's copy instead of itself:
+# every CLI run here starts in the state dir, which is in none.
+cd "$STATE_DIR" || exit 1
 
 KEYS_DIR="$CONFIG_DIR/keys"
 # Optional settings (NODE, CLI, HERDR_LABEL, HERDR_LOG_PATH), exported for the bridges.
