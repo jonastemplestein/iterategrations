@@ -17,7 +17,7 @@ import {
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 /** What the platform appends when a secret is set or deleted: first on the secret's own path, then
  *  on `/`, where the catalog (`secrets.list()`) folds it. */

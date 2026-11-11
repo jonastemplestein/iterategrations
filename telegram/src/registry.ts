@@ -7,7 +7,7 @@
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: a package's
  *  install hook. */
-export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 export type Status = { kind: "ok" | "attention" | "error"; text?: string };
 /** A button: a page of this project, or an absolute https URL. A card or a row has at most four. */

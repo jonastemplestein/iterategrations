@@ -24,7 +24,7 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
   const integration = jmap();
   assert.equal(integration.routingSlug, "jmap");
   assert.equal(typeof integration.fetch, "function");
-  const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
+  const publish = (offset: number, type = "events.iterate.com/mind/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
   const card = (status: object) => ({
     title: "Mailbox (JMAP)",

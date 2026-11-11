@@ -34,7 +34,7 @@ const TOKEN = "/secrets/fastmail";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const SLUG = "jmap";
 const TITLE = "Mailbox (JMAP)";

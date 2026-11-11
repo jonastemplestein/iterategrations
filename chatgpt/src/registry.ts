@@ -9,7 +9,7 @@ import { isConnected, readAccount, type ChatgptItx } from "./auth.js";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 /** The package's name on the Dash, and its one connection's. */
 const INTEGRATION = "chatgpt";

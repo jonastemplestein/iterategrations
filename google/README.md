@@ -216,7 +216,7 @@ if (routingSlug === "gmail-push") {
 
 // in processEvent
 switch (event.type) {
-  case "events.iterate.com/project/worker-updated":
+  case "events.iterate.com/mind/worker-updated":
     await watchGmail(itx, { ...GMAIL, topicName: TOPIC });
     await itx.schedules.set({
       key: "gmail-watch",

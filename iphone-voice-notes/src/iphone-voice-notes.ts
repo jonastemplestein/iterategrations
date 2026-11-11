@@ -82,7 +82,7 @@ const TRANSCRIBED = "iphone-voice-notes/recording-transcribed";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const TITLE = "iPhone voice notes";
 const DESCRIPTION =

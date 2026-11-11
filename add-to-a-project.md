@@ -207,8 +207,8 @@ async (itx) => {
   });
   const outcome = await itx.waitForEvent({
     type: [
-      "events.iterate.com/project/worker-updated",
-      "events.iterate.com/project/worker-update-failed",
+      "events.iterate.com/mind/worker-updated",
+      "events.iterate.com/mind/worker-update-failed",
     ],
     payload: { commitOid },
     afterOffset: 0,

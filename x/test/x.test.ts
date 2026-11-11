@@ -299,7 +299,7 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   const publish = (offset: number) => {
     globalThis.fetch = egress as typeof fetch;
     return integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   };

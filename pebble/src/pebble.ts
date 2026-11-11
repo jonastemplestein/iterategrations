@@ -83,7 +83,7 @@ const MAX_CLOCK_SKEW_SECONDS = 300;
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const SLUG = "pebble";
 const TITLE = "Pebble Index 01";

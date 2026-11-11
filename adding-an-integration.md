@@ -33,7 +33,7 @@ export function acme(options: { slug?: string } = {}): Integration {
     },
     // every durable event of the project, unordered, at least once
     async processEvent({ event, itx }) {
-      if (event.type === "events.iterate.com/project/worker-updated")
+      if (event.type === "events.iterate.com/mind/worker-updated")
         await register(itx, routingSlug, `${event.path}@${event.offset}`);
     },
   };

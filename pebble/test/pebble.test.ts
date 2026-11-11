@@ -74,7 +74,7 @@ function fakeProject(
     /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
     const publish = (offset: number) =>
       integration.processEvent!({
-        event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+        event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
         itx,
       });
     return { integration, origin, serve, page, publish };

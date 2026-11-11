@@ -764,7 +764,7 @@ test("waitrose() answers the waitrose routing slug; its install hook registers t
   const integration = waitrose();
   assert.equal(integration.routingSlug, "waitrose");
   assert.equal(typeof integration.fetch, "function");
-  const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
+  const publish = (offset: number, type = "events.iterate.com/mind/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
   const card = (status: object) => ({
     title: "Waitrose",
