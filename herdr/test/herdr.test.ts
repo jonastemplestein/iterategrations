@@ -126,6 +126,45 @@ async function started() {
   return { herdr, project, bridge, lent };
 }
 
+test("with a key of its own, news goes through the key's append and focus is not sent", async () => {
+  const herdr = pretendHerdr();
+  await herdr.listening;
+  const project = pretendProject();
+  const signed: { path: string; event: { type: string; payload?: Record<string, unknown> } }[] = [];
+  const bridge = createBridge({
+    logPath: "/integrations/herdr/test",
+    socket: herdr.path,
+    retryMs: 10,
+  });
+  cleanups.push(() => {
+    bridge.stop();
+    herdr.close();
+  });
+  await bridge.provide({
+    itx: project.itx,
+    append: async (path, event) => void signed.push({ path, event }),
+  });
+  await until(() => signed.length === 1, "the snapshot");
+  herdr.pushEvent({
+    event: "workspace_focused",
+    data: { type: "workspace_focused", workspace_id: "w1" },
+  });
+  herdr.pushEvent({
+    event: "pane.agent_status_changed",
+    data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
+  });
+  await until(() => signed.length === 2, "the status");
+  assert.deepEqual(
+    signed.map(({ path, event }) => [path, event.type, Object.keys(event).toSorted()]),
+    [
+      ["/integrations/herdr/test", "herdr/snapshot", ["payload", "type"]],
+      ["/integrations/herdr/test", "herdr/pane_agent_status_changed", ["payload", "type"]],
+    ],
+  );
+  // nothing goes through the key's itx: it lends and does nothing else
+  assert.equal(project.events.length, 0);
+});
+
 test("the real lend imports without connecting: a default export and a description", () => {
   assert.equal(typeof provideHerdr, "function");
   assert.match(description, /call\(method, params\)/);
