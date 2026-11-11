@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Lend this Herdr to iterate projects: one `iterate provide` for each line of the `targets` file in
-# the plugin's config dir, kept running in the background (herdr/README.md). A Herdr startup hook is
-# one-shot, so `start` detaches them and exits; each redials until `stop`.
+# Lend this Herdr to iterate minds: one `iterate provide` for each line of the `targets` file in the
+# plugin's config dir, kept running in the background (herdr/README.md). Each bridge has a key of its
+# own (`--key`): a member of the mind allows it once, and it then connects with no sign-in. A Herdr
+# startup hook is one-shot, so `start` detaches them and exits; each redials until `stop`.
 #
 #   bridge.sh start | stop | restart | status
 set -u
@@ -12,10 +13,12 @@ STATE_DIR="${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/herdr/plugins/iterate-br
 TARGETS="$CONFIG_DIR/targets"
 mkdir -p "$CONFIG_DIR" "$STATE_DIR"
 
+KEYS_DIR="$CONFIG_DIR/keys"
 # Optional settings (NODE, CLI, HERDR_LABEL, HERDR_LOG_PATH), exported for the bridges.
 # shellcheck disable=SC1091
 [ -f "$CONFIG_DIR/config.sh" ] && . "$CONFIG_DIR/config.sh"
 export HERDR_LABEL="${HERDR_LABEL:-Herdr on $(hostname -s)}"
+export HERDR_LOG_PATH="${HERDR_LOG_PATH:-/integrations/herdr/primary}"
 
 log() { printf 'iterate-bridge: %s\n' "$*"; }
 
@@ -38,29 +41,36 @@ pick_node() {
   return 1
 }
 
-# CLI_CMD: how to run the iterate CLI under that Node. An installed copy (CLI, then a global one), or
-# else `npx iterate`, so nothing has to be installed first (the first run downloads it).
+# CLI_CMD: how to run the iterate CLI under that Node. An installed copy (CLI, then a global one)
+# that knows a mind (`provide --mind`; an older copy speaks to the old hosted platform alone), or
+# else `npx iterate@latest`, so nothing has to be installed first (the first run downloads it).
 resolve_cli() {
   local node="$1" candidate npx
   for candidate in "${CLI:-}" \
     "$HOME/Library/pnpm/global/5/node_modules/iterate/bin/iterate.js" \
     "$HOME/.local/share/pnpm/global/5/node_modules/iterate/bin/iterate.js" \
     "$(npm root -g 2>/dev/null)/iterate/bin/iterate.js"; do
-    [ -f "$candidate" ] && { CLI_CMD=("$node" "$candidate"); return 0; }
+    [ -f "$candidate" ] || continue
+    "$node" "$candidate" provide --help 2>/dev/null | grep -q -- '--mind' \
+      && { CLI_CMD=("$node" "$candidate"); return 0; }
   done
   npx="$(dirname "$node")/npx"
   [ -x "$npx" ] || npx="$(command -v npx 2>/dev/null)"
   [ -n "$npx" ] || return 1
-  CLI_CMD=(env "PATH=$(dirname "$node"):$PATH" "$npx" --yes iterate)
+  CLI_CMD=(env "PATH=$(dirname "$node"):$PATH" "$npx" --yes iterate@latest)
 }
 
-# The lines of `targets`: <iterate config> <project> [capability name, default jonas.herdr]
+# The lines of `targets`: <the mind's address> [capability name, default jonas.herdr]
 each_target() {
-  local config project name
+  local mind name
   [ -f "$TARGETS" ] || return 1
-  while read -r config project name _; do
-    case "$config" in '' | '#'*) continue ;; esac
-    "$1" "$config" "$project" "${name:-jonas.herdr}"
+  while read -r mind name _; do
+    case "$mind" in '' | '#'*) continue ;; esac
+    case "$mind" in
+      *.*) ;;
+      *) fail "$TARGETS: \"$mind\" is no mind's address (a line is now: <address> [name], e.g. example.com jonas.herdr)"; continue ;;
+    esac
+    "$1" "$mind" "${name:-jonas.herdr}"
   done <"$TARGETS"
 }
 
@@ -68,7 +78,7 @@ each_target() {
 first_run() {
   [ -f "$TARGETS" ] && return 0
   sed 's/^\([^#[:space:]]\)/# \1/' "$ROOT/plugin/targets.example" >"$TARGETS"
-  fail "first run: set the iterate project to lend this Herdr to in $TARGETS, then run the restart action (README: As a Herdr plugin)"
+  fail "first run: set the mind to lend this Herdr to in $TARGETS, then run the restart action (README: As a Herdr plugin)"
   return 1
 }
 
@@ -78,74 +88,70 @@ alive() { # a pid file whose process runs
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-# After `iterate provide` ends: if what it wrote this run says the sign-in is over (every such error
-# ends in "Run `iterate login` ..."), say so, at most once in 12 hours for a target. $4 is the log's
-# line count before the run, so older lines never count.
-warn_login() {
-  local config="$1" project="$2" logfile="$3" before="$4"
-  tail -n +"$((before + 1))" "$logfile" | grep -q 'iterate login' || return 0
-  local stamp="$STATE_DIR/$config-$project.login-warned"
+# While `iterate provide` waits for a member to allow the bridge's key, it prints the link to the
+# mind's own page. Say so, with the link, at most once in 12 hours for a target. $3 is the log's line
+# count before the run, so an older link never counts.
+warn_allow() {
+  local mind="$1" logfile="$2" before="$3" link
+  link="$(tail -n +"$((before + 1))" "$logfile" | grep -o 'https://[^ ]*/keys/enrol[^ ]*' | head -n 1)"
+  [ -n "$link" ] || return 0
+  local stamp="$STATE_DIR/$mind.allow-warned"
   [ -z "$(find "$stamp" -mmin -720 2>/dev/null)" ] || return 0
   touch "$stamp"
-  fail "$config's sign-in has ended: run  iterate --config $config login  (the lend starts by itself afterwards)"
+  printf '%s\n' "$link" >"$STATE_DIR/$mind.allow-link"
+  fail "$mind: a member allows this Herdr's key once. Open the link in $STATE_DIR/$mind.allow-link and press Allow (the lend starts by itself afterwards)"
 }
 
 start_one() {
-  local config="$1" project="$2" name="$3"
-  local pidfile="$STATE_DIR/$config-$project.pid" logfile="$STATE_DIR/$config-$project.log"
+  local mind="$1" name="$2"
+  local pidfile="$STATE_DIR/$mind.pid" logfile="$STATE_DIR/$mind.log"
   if alive "$pidfile"; then
-    log "$config/$project already runs (pid $(cat "$pidfile"))"
+    log "$mind already runs (pid $(cat "$pidfile"))"
     return 0
   fi
-  local node key=""
+  local node
   node="$(pick_node)" || { fail "needs Node 22.18 or later: install it, or set NODE in $CONFIG_DIR/config.sh"; return 1; }
   resolve_cli "$node" || { fail "needs the iterate CLI: install Node's npm (for npx) or run: npm install -g iterate"; return 1; }
-  # a key of its own (iterate tokens create --never-expires) outlives the 30 days of `iterate login`
-  [ -r "$CONFIG_DIR/$config.key" ] && key="$(cat "$CONFIG_DIR/$config.key")"
-  # an unknown config does not start; not signed in still starts, and connects by itself afterwards
-  local check
-  check="$("${CLI_CMD[@]}" --config "$config" config get 2>&1)"
-  case "$check" in
-    *error:*) fail "iterate config $config: $(printf '%s\n' "$check" | sed -n 's/^error: *//p' | head -n 1 | cut -c1-200)"; return 1 ;;
-  esac
-  if [ -z "$key" ] && ! printf '%s' "$check" | grep -q 'hasToken: true'; then
-    fail "$config is not signed in: run  iterate --config $config login  (the lend starts by itself afterwards)"
-    touch "$STATE_DIR/$config-$project.login-warned"
-  fi
+  mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"
   (
     exec >>"$logfile" 2>&1
-    [ -n "$key" ] && export ITERATE_BEARER_TOKEN="$key"
     while true; do
       before="$(wc -l <"$logfile" | tr -d ' ')"
-      "${CLI_CMD[@]}" --config "$config" provide "$ROOT/src/herdr.ts" --name "$name" --project "$project"
+      # the key may lend the one name, and add events under the stream's folder alone
+      "${CLI_CMD[@]}" provide "$ROOT/src/herdr.ts" --name "$name" --mind "$mind" \
+        --key "$KEYS_DIR/$mind.key" --paths "$(dirname "$HERDR_LOG_PATH")/" &
+      provide=$!
+      # the link is printed at once, and `provide` then waits 15 minutes for the member
+      sleep 20
+      warn_allow "$mind" "$logfile" "$before"
+      wait "$provide"
       echo "$(date -u +%FT%TZ) iterate provide ended (exit $?); again in 30 s"
-      warn_login "$config" "$project" "$logfile" "$before"
       sleep 30
     done
   ) &
   echo $! >"$pidfile"
-  log "started $config/$project as itx.$name (pid $!, log $logfile)"
+  log "started $mind as itx.$name (pid $!, log $logfile)"
 }
 
 stop_one() {
-  local pidfile="$STATE_DIR/$1-$2.pid" pid
+  local pidfile="$STATE_DIR/$1.pid" pid
   if alive "$pidfile"; then
     pid="$(cat "$pidfile")"
     pkill -P "$pid" 2>/dev/null # the `iterate provide` under the loop
     kill "$pid" 2>/dev/null
-    log "stopped $1/$2 (was pid $pid)"
+    log "stopped $1 (was pid $pid)"
   else
-    log "$1/$2 does not run"
+    log "$1 does not run"
   fi
-  rm -f "$pidfile" "$STATE_DIR/$1-$2.login-warned"
+  rm -f "$pidfile" "$STATE_DIR/$1.allow-warned"
 }
 
 status_one() {
-  local pidfile="$STATE_DIR/$1-$2.pid" logfile="$STATE_DIR/$1-$2.log"
+  local pidfile="$STATE_DIR/$1.pid" logfile="$STATE_DIR/$1.log"
   if alive "$pidfile"; then
-    log "$1/$2 runs (pid $(cat "$pidfile")); last log line: $(tail -n 1 "$logfile" 2>/dev/null)"
+    log "$1 runs (pid $(cat "$pidfile")); last log line: $(tail -n 1 "$logfile" 2>/dev/null)"
   else
-    log "$1/$2 does not run; last log line: $(tail -n 1 "$logfile" 2>/dev/null)"
+    log "$1 does not run; last log line: $(tail -n 1 "$logfile" 2>/dev/null)"
   fi
 }
 

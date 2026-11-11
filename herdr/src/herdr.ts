@@ -1,8 +1,11 @@
-// herdr.ts — Herdr (the terminal workspace manager for coding agents) lent to an iterate project from
+// herdr.ts — Herdr (the terminal workspace manager for coding agents) lent to an iterate mind from
 // the computer it runs on, with `iterate provide`:
 //   - CALLS: `itx.jonas.herdr.call(method, params)` is Herdr's whole socket API.
-//   - EVENTS: what happens in Herdr lands on a stream of the project as `herdr/<kind>`. News (panes,
+//   - EVENTS: what happens in Herdr lands on a stream of the mind as `herdr/<kind>`. News (panes,
 //     worktrees, an agent's status) is durable; focus and layout are ephemeral, live subscribers only.
+//   - WITH A KEY OF ITS OWN (`iterate provide --key`), the bridge is not a person: its `itx` lends and
+//     does nothing else, and events go through the `append` the CLI hands it, each one a statement
+//     the key signs. Only news is sent that way.
 // Herdr's socket takes one JSON line a request and closes after the answer; `events.subscribe` is the
 // one connection that stays open. The wire is the contract, so there is no client library.
 import { createConnection, type Socket } from "node:net";
@@ -25,6 +28,12 @@ export function socketPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export type Itx = { cd(path: string): { append(...events: HerdrEvent[]): Promise<unknown> } };
+
+/** What `iterate provide --key --paths` hands the file: one event at a path, signed by the key. */
+export type KeyAppend = (
+  path: string,
+  event: { type: string; payload?: Record<string, unknown> },
+) => Promise<unknown>;
 
 /** An event as it lands: `herdr/<kind>`, Herdr's data under `data`. Ephemeral ones are never kept. */
 export type HerdrEvent = {
@@ -194,6 +203,7 @@ const kindOf = (event: string) => event.replaceAll(".", "_");
 /** The lend. `socket` is Herdr's; `retryMs` is the wait before dialing Herdr again, the tests' to shorten. */
 export function createBridge(input: { logPath: string; socket: string; retryMs?: number }) {
   let itx: Itx | undefined;
+  let keyAppend: KeyAppend | undefined;
   let watching: Promise<void> | undefined;
   let stopping = false;
   /** Appends go one after another, so events land in the order Herdr said them. */
@@ -204,8 +214,13 @@ export function createBridge(input: { logPath: string; socket: string; retryMs?:
   const emit = (kind: string, data: unknown) => {
     const event: HerdrEvent = { type: `herdr/${kind}`, payload: { event: kind, data } };
     if (!DURABLE.has(kind)) event.ephemeral = true;
+    // A signed statement is an HTTP request of its own and is always kept: no place for "right now".
+    if (keyAppend && event.ephemeral) return;
+    const { type, payload } = event;
     appended = appended
-      .then(() => itx?.cd(input.logPath).append(event))
+      .then(() =>
+        keyAppend ? keyAppend(input.logPath, { type, payload }) : itx?.cd(input.logPath).append(event),
+      )
       .catch((error: unknown) =>
         log(`${kind} was not appended (${error instanceof Error ? error.message : String(error)})`),
       );
@@ -286,10 +301,12 @@ export function createBridge(input: { logPath: string; socket: string; retryMs?:
   };
 
   return {
-    /** `iterate provide`'s default export: called on every connection to the project. Events that
-     *  came while it was away are lost; a snapshot says where things stand now. */
-    provide: async ({ itx: next }: { itx: Itx }) => {
+    /** `iterate provide`'s default export: called on every connection to the mind. Events that
+     *  came while it was away are lost; a snapshot says where things stand now. `append` comes with
+     *  a bridge's own key (`--key` and `--paths`). */
+    provide: async ({ itx: next, append }: { itx: Itx; append?: KeyAppend }) => {
       itx = next;
+      keyAppend = append;
       if (watching) void snapshot().catch((error) => log(`no snapshot (${error.message})`));
       else watching = watch();
       return lent;
