@@ -49,19 +49,20 @@ You need Node 22.18 or later, an `iterate` CLI that knows a mind (`npm install -
 
 ```sh
 git clone https://github.com/jonastemplestein/iterategrations && cd iterategrations
-iterate provide herdr/src/herdr.ts --name jonas.herdr --mind example.com \
-  --key ~/.iterate/herdr-example.com.key --paths /integrations/herdr/
+iterate login example.com
+iterate provide herdr/src/herdr.ts --name jonas.herdr --mind example.com
 ```
 
 - `--name jonas.herdr` is `itx.jonas.herdr`: a dotted name keeps all of one person's capabilities
   under `itx.jonas`.
-- `--key` gives the bridge a key of its own, so it is not a person. The first run prints a link to
-  the mind's own page; a member opens it and presses Allow, once. Later runs connect with no
-  sign-in. The key may lend that one name and add events under `--paths`, and nothing else. A
-  member removes it on `https://iterate.<mind>/keys`.
 - Without `--key`, the bridge uses your own sign-in (`iterate login example.com`) and acts as you.
-  Focus and layout events are sent only then: a key's event is a signed statement that is always
-  kept, so with a key the bridge sends the news alone.
+  This is the usual way.
+- `--key` and `--paths` give the bridge a key of its own, for a bridge that should hold less power.
+  The first run prints a link to the mind's own page; a member opens it and presses Allow, once.
+  Later runs connect with no sign-in. The key may lend that one name and add events under
+  `--paths`, and nothing else. A member removes it on `https://iterate.<mind>/keys`. A key's event
+  is a signed statement that is always kept, so with a key the bridge sends the news alone, not
+  focus and layout.
 
 It finds Herdr's socket the way Herdr does (`HERDR_SOCKET_PATH`, then `HERDR_SESSION`, then the
 default session). Stop with Ctrl-C.
@@ -70,8 +71,8 @@ default session). Stop with Ctrl-C.
 
 `herdr-plugin.toml` makes this a Herdr plugin, `iterate-bridge`: Herdr starts the lends itself, at every
 server start and live handoff, and nothing else needs to run. A startup hook is one-shot, so
-`plugin/bridge.sh start` starts one `iterate provide --key` for each line of the plugin's `targets`
-file in the background, each redialing until stopped, and exits.
+`plugin/bridge.sh start` starts one `iterate provide` for each line of the plugin's `targets` file in
+the background, each redialing until stopped, and exits.
 
 **First time**
 
@@ -82,23 +83,32 @@ file in the background, each redialing until stopped, and exits.
    `herdr plugin link "$PWD/iterategrations/herdr"`.
 3. Start it once: `herdr plugin action invoke iterate-bridge.restart` (or restart Herdr). With no `targets`
    file it writes a template, `$(herdr plugin config-dir iterate-bridge)/targets`, and shows a
-   notification saying so. Edit it: one line a mind, `<the mind's address> [name]`, such as
-   `example.com jonas.herdr`. Run the restart action again.
-4. Allow the key, once for each mind. The plugin shows a notification, and the link is in
-   `~/.local/state/herdr/plugins/iterate-bridge/<address>.allow-link`. Open it, sign in to the mind
-   with your passkey and press Allow. The page says what the key may do: lend `itx.<name>` and add
-   events under `/integrations/herdr/`. The lend starts by itself, within 15 minutes of the link;
-   after that, the next try prints the same link again.
+   notification saying so. Edit it: one line a mind, `<the mind's address> [name] [key]`, such as
+   `example.com jonas.herdr`.
+4. Sign in to the mind: `iterate login example.com`. Run the restart action again; a target that was
+   not signed in connects by itself once you are.
+
+**Its own sign-in, or a key that may do less.** By default a bridge uses this computer's sign-in to
+the mind and acts as you. A line that ends in `key` (`example.com jonas.herdr key`) gives the bridge
+a key of its own: it may lend `itx.<name>` and add events under `/integrations/herdr/`, and nothing
+else. A member allows the key once. The plugin shows a notification, and the link is in
+`~/.local/state/herdr/plugins/iterate-bridge/<address>.allow-link`: open it, sign in to the mind
+with your passkey and press Allow. The lend starts by itself, within 15 minutes of the link; after
+that, the next try prints the same link again.
 
 **What goes wrong shows on screen.** A startup hook's output is only in the plugin log, so the plugin
 also raises a notification (by Herdr's own `ui.toast.delivery`: a macOS banner on a Mac) for: no `targets`
-file (first run), a line that names no address, no Node 22.18, no `npx` and no CLI, and a key that
-waits for a member (at most once in 12 hours for a mind).
+file (first run), a line that names no address, no Node 22.18, no `npx` and no CLI, a computer that is
+not signed in or whose sign-in has ended, and a key that waits for a member. The last two are said at
+most once in 12 hours for a mind.
 
-- **`targets`**: one line a mind, its address and the capability's name. A file from before
-  minds (`<iterate config> <project> [name]`) is refused line by line, with a notification.
-- **The key** is `<plugin config dir>/keys/<address>.key` (mode 600), one for each mind. It has no
-  end date and needs no renewal: each connection gets a token for an hour with a statement the key
+- **`targets`**: one line a mind, its address, the capability's name, and `key` or nothing. A file
+  from before minds (`<iterate config> <project> [name]`) is refused line by line, with a
+  notification.
+- **The sign-in** is the CLI's own, kept by the CLI (`iterate login <address>`). A running lend
+  renews it.
+- **A key** is `<plugin config dir>/keys/<address>.key` (mode 600), one for each mind. It has no end
+  date and needs no renewal: each connection gets a token for an hour with a statement the key
   signs. Whoever can read the file is the bridge. A member ends it on the mind's `/keys` page; the
   log then says that the mind gave the key no token.
 - **`config.sh`** in the plugin's config dir is sourced when present: `HERDR_LABEL` (the name a model
@@ -107,7 +117,7 @@ waits for a member (at most once in 12 hours for a mind).
   `status`). Logs are in `~/.local/state/herdr/plugins/iterate-bridge/<address>.log`, and
   `herdr plugin log list --plugin iterate-bridge` has what each action printed.
 - **A second host** is the same plugin there, with its own `HERDR_LOG_PATH=/integrations/herdr/beelink`
-  and `name` (`jonas.herdrBeelink`) in `targets`. Each host makes its own key.
+  and `name` (`jonas.herdrBeelink`) in `targets`. Each host has its own sign-in, or its own key.
 - **The CLI starts in the plugin's state dir.** Started inside a checkout of iterate, the `iterate`
   CLI runs that checkout's copy instead of itself, which may be an older one.
 - Herdr's docs say plugins "must stop detached background processes before their parent command or pane

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Lend this Herdr to iterate minds: one `iterate provide` for each line of the `targets` file in the
-# plugin's config dir, kept running in the background (herdr/README.md). Each bridge has a key of its
-# own (`--key`): a member of the mind allows it once, and it then connects with no sign-in. A Herdr
-# startup hook is one-shot, so `start` detaches them and exits; each redials until `stop`.
+# plugin's config dir, kept running in the background (herdr/README.md). A bridge uses this
+# computer's own sign-in to the mind (`iterate login <address>`). A line that ends in `key` gives its
+# bridge a key of its own instead (`--key`), which may do less: a member of the mind allows it once.
+# A Herdr startup hook is one-shot, so `start` detaches them and exits; each redials until `stop`.
 #
 #   bridge.sh start | stop | restart | status
 set -u
@@ -63,17 +64,18 @@ resolve_cli() {
   CLI_CMD=(env "PATH=$(dirname "$node"):$PATH" "$npx" --yes iterate@latest)
 }
 
-# The lines of `targets`: <the mind's address> [capability name, default jonas.herdr]
+# The lines of `targets`: <the mind's address> [capability name, default jonas.herdr] [key]
 each_target() {
-  local mind name
+  local mind name how
   [ -f "$TARGETS" ] || return 1
-  while read -r mind name _; do
+  while read -r mind name how _; do
     case "$mind" in '' | '#'*) continue ;; esac
     case "$mind" in
       *.*) ;;
-      *) fail "$TARGETS: \"$mind\" is no mind's address (a line is now: <address> [name], e.g. example.com jonas.herdr)"; continue ;;
+      *) fail "$TARGETS: \"$mind\" is no mind's address (a line is now: <address> [name] [key], e.g. example.com jonas.herdr)"; continue ;;
     esac
-    "$1" "$mind" "${name:-jonas.herdr}"
+    [ "$name" = key ] && { name=""; how=key; }
+    "$1" "$mind" "${name:-jonas.herdr}" "${how:-}"
   done <"$TARGETS"
 }
 
@@ -91,22 +93,28 @@ alive() { # a pid file whose process runs
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-# While `iterate provide` waits for a member to allow the bridge's key, it prints the link to the
-# mind's own page. Say so, with the link, at most once in 12 hours for a target. $3 is the log's line
-# count before the run, so an older link never counts.
-warn_allow() {
-  local mind="$1" logfile="$2" before="$3" link
-  link="$(tail -n +"$((before + 1))" "$logfile" | grep -o 'https://[^ ]*/keys/enrol[^ ]*' | head -n 1)"
-  [ -n "$link" ] || return 0
-  local stamp="$STATE_DIR/$mind.allow-warned"
+# What a run printed that a person must act on, said at most once in 12 hours for a target. $3 is the
+# log's line count before the run, so older lines never count.
+#   - with a key: `iterate provide` prints the link to the mind's own page and waits for a member;
+#   - with a sign-in: every error of a sign-in that is missing or over names `iterate login`.
+warn() {
+  local mind="$1" logfile="$2" before="$3" link said
+  said="$(tail -n +"$((before + 1))" "$logfile")"
+  link="$(printf '%s\n' "$said" | grep -o 'https://[^ ]*/keys/enrol[^ ]*' | head -n 1)"
+  [ -n "$link" ] || printf '%s\n' "$said" | grep -q 'iterate login' || return 0
+  local stamp="$STATE_DIR/$mind.warned"
   [ -z "$(find "$stamp" -mmin -720 2>/dev/null)" ] || return 0
   touch "$stamp"
-  printf '%s\n' "$link" >"$STATE_DIR/$mind.allow-link"
-  fail "$mind: a member allows this Herdr's key once. Open the link in $STATE_DIR/$mind.allow-link and press Allow (the lend starts by itself afterwards)"
+  if [ -n "$link" ]; then
+    printf '%s\n' "$link" >"$STATE_DIR/$mind.allow-link"
+    fail "$mind: a member allows this Herdr's key once. Open the link in $STATE_DIR/$mind.allow-link and press Allow (the lend starts by itself afterwards)"
+  else
+    fail "$mind: this computer is not signed in. Run  iterate login $mind  (the lend starts by itself afterwards)"
+  fi
 }
 
 start_one() {
-  local mind="$1" name="$2"
+  local mind="$1" name="$2" how="$3"
   local pidfile="$STATE_DIR/$mind.pid" logfile="$STATE_DIR/$mind.log"
   if alive "$pidfile"; then
     log "$mind already runs (pid $(cat "$pidfile"))"
@@ -115,25 +123,29 @@ start_one() {
   local node
   node="$(pick_node)" || { fail "needs Node 22.18 or later: install it, or set NODE in $CONFIG_DIR/config.sh"; return 1; }
   resolve_cli "$node" || { fail "needs the iterate CLI: install Node's npm (for npx) or run: npm install -g iterate"; return 1; }
-  mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"
+  local with=()
+  if [ "$how" = key ]; then
+    mkdir -p "$KEYS_DIR" && chmod 700 "$KEYS_DIR"
+    # the key may lend the one name, and add events under the stream's folder alone
+    with=(--key "$KEYS_DIR/$mind.key" --paths "$(dirname "$HERDR_LOG_PATH")/")
+  fi
   (
     exec >>"$logfile" 2>&1
     while true; do
       before="$(wc -l <"$logfile" | tr -d ' ')"
-      # the key may lend the one name, and add events under the stream's folder alone
-      "${CLI_CMD[@]}" provide "$ROOT/src/herdr.ts" --name "$name" --mind "$mind" \
-        --key "$KEYS_DIR/$mind.key" --paths "$(dirname "$HERDR_LOG_PATH")/" &
+      "${CLI_CMD[@]}" provide "$ROOT/src/herdr.ts" --name "$name" --mind "$mind" ${with[@]+"${with[@]}"} &
       provide=$!
-      # the link is printed at once, and `provide` then waits 15 minutes for the member
+      # a key's link is printed at once, and `provide` then waits 15 minutes for the member
       sleep 20
-      warn_allow "$mind" "$logfile" "$before"
+      warn "$mind" "$logfile" "$before"
       wait "$provide"
       echo "$(date -u +%FT%TZ) iterate provide ended (exit $?); again in 30 s"
+      warn "$mind" "$logfile" "$before"
       sleep 30
     done
   ) &
   echo $! >"$pidfile"
-  log "started $mind as itx.$name (pid $!, log $logfile)"
+  log "started $mind as itx.$name${how:+ with a key of its own} (pid $!, log $logfile)"
 }
 
 stop_one() {
@@ -146,7 +158,7 @@ stop_one() {
   else
     log "$1 does not run"
   fi
-  rm -f "$pidfile" "$STATE_DIR/$1.allow-warned"
+  rm -f "$pidfile" "$STATE_DIR/$1.warned"
 }
 
 status_one() {

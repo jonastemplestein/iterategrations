@@ -1,11 +1,13 @@
 # The plugin's `targets` file: one line for each iterate mind to lend this Herdr to, as itx.<name>
 # (default jonas.herdr):
 #
-#   <the mind's address>  [name]
+#   <the mind's address>  [name]  [key]
 #
-# The address is the mind's domain, as in `iterate login <address>`. The bridge signs in with a key
-# of its own, kept in "<config dir>/keys/<address>.key" (mode 600). On the first run a member of the
-# mind allows that key once: the plugin shows a notification, and the link is in the state dir's
-# "<address>.allow-link". After that it connects with no sign-in, until a member removes the key on
-# the mind's /keys page.
+# The address is the mind's domain, as in `iterate login <address>`. The bridge uses this computer's
+# own sign-in to the mind: sign in once with `iterate login <address>`.
+#
+# A line that ends in `key` gives its bridge a key of its own instead, kept in
+# "<config dir>/keys/<address>.key" (mode 600). It may lend the one name and add events under the
+# stream's folder, and nothing else. A member of the mind allows it once: the plugin shows a
+# notification, and the link is in the state dir's "<address>.allow-link".
 example.com
