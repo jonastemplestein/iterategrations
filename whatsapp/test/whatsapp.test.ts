@@ -9,6 +9,7 @@ import { EventEmitter } from "node:events";
 import { test } from "vite-plus/test";
 import provideDummy from "../src/dummy.ts";
 import provideWhatsApp, {
+  describeLend,
   description,
   lendOnly,
   provideWhatsApp as lendOver,
@@ -276,6 +277,41 @@ test("with a list, only the functions it names are lent: the other ways to send,
   );
   // a list that names nothing lends nothing but the description
   assert.deepEqual(Object.keys(await lendWith([])), ["__describe"]);
+});
+
+test("a lend's description is one line within the project's limit of 500 characters, whatever the account's text and the list", () => {
+  const tenNames = [
+    "sendMessage",
+    "downloadMedia",
+    "groupMetadata",
+    "groupFetchAllParticipating",
+    "onWhatsApp",
+    "profilePictureUrl",
+    "fetchStatus",
+    "user",
+    "getPNForLID",
+    "getLIDForPN",
+  ];
+  const account =
+    "Sam's own personal WhatsApp account, +44 7700 900123: writing from it is writing as Sam, so ask Sam first";
+  // the case that a project refused: ten names and an account's text of some hundred characters
+  const listed = describeLend(account, tenNames, "/integrations/whatsapp/personal");
+  assert.ok(listed.length <= 500, `${listed.length} characters`);
+  assert.ok(listed.startsWith(account), "the account's text is whole when there is room");
+  assert.match(listed, /it lends 10 named functions of it and no other; call __describe\(\) first/);
+  assert.doesNotMatch(listed, /groupFetchAllParticipating/);
+  assert.match(listed, /\(\/integrations\/whatsapp\/personal\)\.$/);
+  assert.match(describeLend(account, ["sendMessage"], "/x"), /it lends 1 named function of it/);
+  // a long list, an account's text of many lines, and no list at all: each is one line in the limit
+  const long = `${"A long account text.\n".repeat(60)}`;
+  const many = Array.from({ length: 300 }, (_, at) => `aFunctionWithALongName${at}`);
+  for (const lend of [many, tenNames, [], undefined]) {
+    const said = describeLend(long, lend, "/integrations/whatsapp/personal");
+    assert.ok(said.length <= 500, `${said.length} characters`);
+    assert.doesNotMatch(said, /\n/);
+    // what gives way is the account's text: how to use the lend and where its events land stay
+    assert.match(said, /call __describe\(\) first.*\(\/integrations\/whatsapp\/personal\)\.$/);
+  }
 });
 
 test("WHATSAPP_LEND is names with commas between them; unset is the whole socket, and empty is no function", () => {
