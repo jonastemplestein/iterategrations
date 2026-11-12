@@ -30,6 +30,7 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestWaWebVersion,
   useMultiFileAuthState,
+  type AuthenticationCreds,
   type BaileysEventMap,
   type WAMessage,
   type WASocket,
@@ -47,6 +48,12 @@ const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
  *  +44 7700 900123: writing from it is writing as Sam"). Two accounts lent from one file are
  *  otherwise told apart by nothing but their name. */
 const ACCOUNT = process.env.WHATSAPP_ACCOUNT || "A WhatsApp account";
+
+/** The personal account (the second account, on /integrations/whatsapp-personal) never looks online
+ *  just because this computer holds its link: WhatsApp shows a person online while any device of
+ *  theirs says it is available, and stops notifying their phone meanwhile. Any other account keeps
+ *  Baileys' defaults. */
+const APPEAR_OFFLINE = LOG_PATH === "/integrations/whatsapp-personal";
 
 /** THE FUNCTIONS THIS LEND HAS, when it is not the whole socket: WHATSAPP_LEND, names with commas
  *  between them (`sendMessage,groupMetadata,downloadMedia`). The project can call nothing else
@@ -495,7 +502,10 @@ async function connectBaileys(onSocket: (socket: WASocket) => void): Promise<voi
       version,
       logger,
       getMessage: async (key) => (key.id ? recent.get(key.id) : undefined),
+      // Baileys says "available" at every connection unless told otherwise; this says "unavailable"
+      ...(APPEAR_OFFLINE && { markOnlineOnConnect: false }),
     });
+    if (APPEAR_OFFLINE) withoutNameAnnouncements(socket, state.creds);
     socket.ev.on("creds.update", saveCreds);
     socket.ev.on("messages.upsert", ({ messages }) => {
       for (const message of messages)
@@ -547,6 +557,24 @@ async function connectBaileys(onSocket: (socket: WASocket) => void): Promise<voi
     onSocket(socket);
   };
   open();
+}
+
+/** Baileys (7.0.0-rc14) announces the account's name as a `<presence>` with no type, which WhatsApp
+ *  reads as "available", whenever a `creds.update` carries a `me.name` other than the one it holds;
+ *  an update with no `me`, as most are (app-state syncs, pre-keys, history syncs), counts as another
+ *  (WhiskeySockets/Baileys#2553). Here each update reaches Baileys with the name it holds, a new
+ *  one set first, so it announces none; the new name is kept all the same. */
+export function withoutNameAnnouncements(
+  socket: Pick<WASocket, "ev">,
+  creds: Pick<AuthenticationCreds, "me">,
+): void {
+  const emit = socket.ev.emit.bind(socket.ev);
+  socket.ev.emit = ((event: keyof BaileysEventMap, data: unknown) => {
+    if (event !== "creds.update" || !creds.me) return emit(event, data as never);
+    const me = (data as Partial<AuthenticationCreds>).me ?? creds.me;
+    creds.me = { ...creds.me, name: me.name };
+    return emit(event, { ...(data as Partial<AuthenticationCreds>), me });
+  }) as typeof socket.ev.emit;
 }
 
 export default provideWhatsApp({
