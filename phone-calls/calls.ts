@@ -174,6 +174,13 @@ type ActiveCall = {
   personHeardAt: number;
   byeTimer: ReturnType<typeof setTimeout> | null;
   endedAfterGoodbyes: boolean;
+  /** THE LIMITS' state: when either side last spoke (a transcript, or a sound from the person),
+   *  when the voice last said a goodbye, when the person last said anything, and the watch that
+   *  ends a silent or overlong call. */
+  spokeAt: number;
+  voiceByeAt: number;
+  personSpokeAt: number;
+  limitWatch: ReturnType<typeof setInterval> | null;
 };
 
 /** A line of `jeeves-phone serve`'s stdout (serve.go). */
@@ -370,6 +377,10 @@ const newCall = (
   voicePlaysUntil: 0,
   personHeardAt: 0,
   byeTimer: null,
+  spokeAt: 0,
+  voiceByeAt: 0,
+  personSpokeAt: 0,
+  limitWatch: null,
   endedAfterGoodbyes: false,
 });
 
@@ -401,6 +412,44 @@ const GOODBYE =
 const GOODBYE_GRACE_MS = 2_500;
 /** A microphone frame louder than this (mean absolute PCM16 sample) is the person making a sound. */
 const PERSON_SOUND_LEVEL = 700;
+/** After the voice's goodbye has played, how long the person may stay silent before the call ends
+ *  although they said no goodbye of their own ("I'll leave you in peace"). */
+const VOICE_GOODBYE_ALONE_MS = 8_000;
+/** THE LIMITS (12 November 2026: two voices said goodbye in other words, and the call ran on idle
+ *  for twelve minutes, with two live models paid by the minute). A call ends when nobody has spoken
+ *  for PHONE_CALLS_SILENCE_SECONDS (45), and in any case after PHONE_CALLS_MAX_SECONDS (1800). */
+const SILENCE_MS = 1000 * Number(process.env.PHONE_CALLS_SILENCE_SECONDS || 45);
+const MAX_CALL_MS = 1000 * Number(process.env.PHONE_CALLS_MAX_SECONDS || 1800);
+/** How long this call may run: MAX_CALL_MS. A copy of this lend that treats callers apart may say otherwise. */
+const maxCallMsFor = (_current: ActiveCall): number => MAX_CALL_MS;
+
+/** Starts the watch of THE LIMITS once a call is answered: a silent or overlong call is hung up. */
+function watchLimits(current: ActiveCall): void {
+  current.spokeAt = Date.now();
+  const limit = maxCallMsFor(current);
+  const stop = () => {
+    if (current.limitWatch) clearInterval(current.limitWatch);
+    current.limitWatch = null;
+  };
+  current.limitWatch = setInterval(() => {
+    if (current.over || active !== current) return stop();
+    const now = Date.now();
+    const quiet = now - Math.max(current.spokeAt, current.voicePlaysUntil);
+    if (quiet >= SILENCE_MS) {
+      console.error(
+        `phone-calls: nobody spoke for ${String(Math.round(quiet / 1000))} s with ${current.who}; hanging up`,
+      );
+      stop();
+      tell({ hangup: true });
+    } else if (current.answeredAt !== null && now - current.answeredAt >= limit) {
+      console.error(
+        `phone-calls: the call with ${current.who} reached ${String(Math.round(limit / 1000))} s; hanging up`,
+      );
+      stop();
+      tell({ hangup: true });
+    }
+  }, 1000);
+}
 
 /** THE GOODBYE BACKSTOP. The voice's model is told to end the call itself once goodbyes are said,
  *  and sometimes does not: on 2026-10-07 it said "Bye" back and stayed on the line until the
@@ -410,18 +459,22 @@ const PERSON_SOUND_LEVEL = 700;
 function armGoodbye(current: ActiveCall): void {
   if (current.byeTimer) clearTimeout(current.byeTimer);
   current.byeTimer = null;
+  // the voice's goodbye alone ends the call too, once the person has said nothing after it
+  const alone = () =>
+    current.voiceSaidBye && !current.personSaidBye && current.personSpokeAt < current.voiceByeAt;
   if (
-    !current.personSaidBye ||
+    !(current.personSaidBye || alone()) ||
     !current.voiceSaidBye ||
     current.answeredAt === null ||
     current.over
   )
     return;
-  const wait = Math.max(0, current.voicePlaysUntil - Date.now()) + GOODBYE_GRACE_MS;
+  const grace = current.personSaidBye ? GOODBYE_GRACE_MS : VOICE_GOODBYE_ALONE_MS;
+  const wait = Math.max(0, current.voicePlaysUntil - Date.now()) + grace;
   current.byeTimer = setTimeout(() => {
     current.byeTimer = null;
-    if (current.over || !current.personSaidBye || !current.voiceSaidBye) return;
-    if (Date.now() - current.personHeardAt < GOODBYE_GRACE_MS) return armGoodbye(current);
+    if (current.over || !current.voiceSaidBye || !(current.personSaidBye || alone())) return;
+    if (Date.now() - current.personHeardAt < grace) return armGoodbye(current);
     console.error(`phone-calls: both sides said goodbye to ${current.who}; hanging up`);
     current.endedAfterGoodbyes = true;
     tell({ hangup: true });
@@ -520,11 +573,14 @@ async function connectVoice(mind: Mind, current: ActiveCall, resumed: boolean): 
       if (fact.type === "events.iterate.com/voice-agent/utterance-transcribed") {
         current.said.push(`Person: ${fact.payload.text}`);
         current.personSaidBye = GOODBYE.test(fact.payload.text);
+        current.spokeAt = current.personSpokeAt = Date.now();
         armGoodbye(current);
       }
       if (fact.type === "events.iterate.com/voice-agent/answer-transcribed") {
         current.said.push(`Voice: ${fact.payload.text}`);
         current.voiceSaidBye = GOODBYE.test(fact.payload.text);
+        current.spokeAt = Date.now();
+        if (current.voiceSaidBye) current.voiceByeAt = Date.now();
         armGoodbye(current);
       }
       if (
@@ -617,6 +673,8 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
   if (current.over) return;
   current.over = true;
   if (current.byeTimer) clearTimeout(current.byeTimer);
+  if (current.limitWatch) clearInterval(current.limitWatch);
+  current.limitWatch = null;
   if (active === current) active = null;
   if (itx) clearBusy(itx);
   current.placed?.reject(new Error(`The call could not be placed (${reason}).`));
@@ -825,8 +883,8 @@ function onBridgeEvent(event: BridgeEvent): void {
   if (event.event === "mic") {
     if (!event.pcm || !current) return;
     current.voice?.sendMicFrame(event.pcm);
-    if (current.byeTimer && soundLevel(event.pcm) > PERSON_SOUND_LEVEL)
-      current.personHeardAt = Date.now();
+    if (soundLevel(event.pcm) > PERSON_SOUND_LEVEL)
+      current.spokeAt = current.personHeardAt = Date.now();
     return;
   }
   if (event.event === "ready") {
@@ -864,6 +922,7 @@ function onBridgeEvent(event: BridgeEvent): void {
   if (event.callId !== current.callId) return;
   if (event.event === "answered") {
     current.answeredAt = Date.now();
+    watchLimits(current);
     current.metrics.ringMs = current.ringingAt ? current.answeredAt - current.ringingAt : null;
     void record("call-answered", {
       callId: current.callId,

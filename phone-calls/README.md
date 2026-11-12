@@ -45,6 +45,11 @@ export PHONE_CALLS_ANSWER_WITH='{"447700900001":"At your service, sir.","default
 iterate provide phone-calls/calls.ts --name phoneCalls --mind <your mind>
 ```
 
+**A call ends by itself** when nobody has spoken for `PHONE_CALLS_SILENCE_SECONDS` (45), after
+`PHONE_CALLS_MAX_SECONDS` (1800) in any case, and a few seconds after the voice's goodbye when the
+person says nothing more: a live model is paid by the minute, and two voices once said goodbye in
+other words and stayed on the line.
+
 `PHONE_CALLS_ANSWER_WITH` falls back to `WHATSAPP_CALLS_ANSWER_WITH`. Keep it running with a loop,
 as for [WhatsApp](../whatsapp#run-it). `serve`'s other settings (`PHONE_SIP_PORT`, 5062;
 `PHONE_SIP_DOMAIN`; `PHONE_SIP_TRACE`, which logs every SIP message's first line by default) are
