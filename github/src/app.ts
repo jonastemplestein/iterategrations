@@ -47,6 +47,8 @@ export type GithubItx = {
       }[];
       /** Where the Dash's form sends the person once it is saved. */
       redirectUrl?: string;
+      /** The vault operations the secret answers: none unless named. */
+      operations?: "verifyHmac"[];
     }): Promise<{ path: string; url: string }>;
   };
   cd(path: string): {

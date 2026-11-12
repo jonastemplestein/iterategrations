@@ -126,6 +126,7 @@ const collectLink = (itx: GithubItx, here: string): Promise<string> =>
       description: COLLECT_DESCRIPTION,
       fields: FIELDS,
       redirectUrl: `${here}/`,
+      operations: ["verifyHmac"], // the webhook checks each delivery with it
     })
     .then((link) => link.url);
 

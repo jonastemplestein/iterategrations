@@ -14,8 +14,8 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a mind's config r
 | [`arbor/`](arbor)                           | `iterate-arbor`                            | Arbor, the school MIS, as a parent sees it, with plain `fetch`: children, meals, messages, calendar, attendance, payments; `submitForm` sends the school's forms.                |
 | [`seesaw/`](seesaw)                         | `iterate-seesaw`                           | Seesaw parent API client and CLI: journals, classes, activities, notifications and messages.                                                                                     |
 | [`tapestry/`](tapestry)                     | `iterate-tapestry`                         | Tapestry Education Platform client and CLI: observations, messages and care diary pages.                                                                                         |
-| [`monzo/`](monzo)                           | `iterate-monzo`                            | Monzo transactions as events (a webhook with a generated secret in its URL), signed in through zero-trust-mcp.                                                                   |
-| [`yoto/`](yoto)                             | none                                       | Yoto players and library for a mind's agents, connected through zero-trust-mcp.                                                                                                  |
+| [`monzo/`](monzo)                           | `iterate-monzo`                            | Monzo transactions as events (a webhook with a generated secret in its URL), and Monzo's API by tool name.                                                                       |
+| [`yoto/`](yoto)                             | none                                       | Yoto players and library for a mind's agents: the mind signs in to Yoto itself.                                                                                                  |
 | [`sonos/`](sonos)                           | none                                       | A Sonos system for a mind's agents, through Sonos's official MCP server.                                                                                                         |
 | [`whatsapp/`](whatsapp)                     | none: run with `iterate provide`           | Your WhatsApp (Baileys, from your own computer) as `itx.whatsapp`, every message an event; a dummy to try it without an account.                                                 |
 | [`whatsapp-calls/`](whatsapp-calls)         | none: run with `iterate provide`           | WhatsApp voice calls both ways, carried to the mind's voice app: `itx.whatsappCalls.call(…)` rings a person, and a known caller is picked up.                                    |
@@ -51,14 +51,16 @@ mind's root). How an integration reaches a mind depends on what it is:
   [`adding-an-integration.md`](adding-an-integration.md).
 - **Lent from your own computer** (WhatsApp, WhatsApp calls, Herdr, ChatGPT desktop: "run with `iterate provide`"): one
   command lends it to the mind as `itx.<name>`. Each recipe says what to run and has a sample call.
-- **Through zero-trust-mcp** (Monzo's sign-in, Yoto): [`zero-trust-mcp.md`](zero-trust-mcp.md) connects
-  the server; the recipe then calls its tools.
+- **A sign-in and a file** (Yoto; Monzo's API beside its package): the mind signs in to the service
+  itself with `itx.secrets.beginOAuth`, and one file of plain `fetch` calls gives its agents the API
+  by tool name.
 
 Never take a secret in chat: a recipe that needs one makes a form with `itx.secrets.collectFromUser`.
 
-[`zero-trust-mcp.md`](zero-trust-mcp.md) is the shared step behind Monzo and Yoto: connecting a
+[`zero-trust-mcp.md`](zero-trust-mcp.md) connects a
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) server, which keeps no credentials of its
-own, to a mind. A folder without a package is just a recipe.
+own, to a mind. No recipe here needs one: Monzo and Yoto connect directly. A folder without a
+package is just a recipe.
 
 ## Working on this repo
 

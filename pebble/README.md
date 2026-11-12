@@ -54,6 +54,7 @@ async (itx) =>
     egress: { urls: ["https://pebble.invalid"] }, // only ever compared, never sent anywhere
     description:
       "The signing secret for your Pebble Index webhook: the same value you'll type into the Pebble app's **Sign requests** field.",
+    operations: ["verifyHmac"], // the receiver checks each signature with it
   });
 ```
 

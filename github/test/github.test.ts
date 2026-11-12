@@ -392,6 +392,7 @@ test("the page links to the Dash's one form for the App, its ID and slug public 
           { name: "webhookSecret", label: "Webhook secret" },
         ],
         redirectUrl: `${ORIGIN}/`,
+        operations: ["verifyHmac"],
       },
     ],
   );

@@ -354,6 +354,8 @@ test("the page shows the status with a link to set the token, every step of the 
   assert.deepEqual(mind.collected[0].egress, { urls: ["https://iphone-voice-notes.invalid"] });
   // the form sends the person back to this page once the token is saved
   assert.equal(mind.collected[0].redirectUrl, `${ORIGIN}/`);
+  // the receiver checks the token with verifyEquals, so the secret must answer it
+  assert.deepEqual(mind.collected[0].operations, ["verifyEquals"]);
   assert.ok(html.includes(`data-copy="${ORIGIN}/webhook"`));
   assert.ok(html.includes(`data-copy="x-voice-note-token"`));
   for (const step of [
