@@ -255,6 +255,22 @@ test("a pane that appears ends the connection, and the next one subscribes to it
   assert.equal(project.events.filter((e) => e.type === "herdr/snapshot").length, 2);
 });
 
+test("a tab that closes takes its panes with it: a fresh snapshot follows", async () => {
+  const { herdr, project } = await started();
+  await until(
+    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 1,
+    "the first snapshot",
+  );
+  // Herdr says `tab_closed`, and no `pane_closed` for the panes in it
+  herdr.setPanes([]);
+  herdr.pushEvent({ event: "tab_closed", data: { type: "tab_closed", tab_id: "w1:t1" } });
+  await until(
+    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 2,
+    "the snapshot after the tab closed",
+  );
+  assert.ok(project.events.some((e) => e.type === "herdr/tab_closed"));
+});
+
 test("a dropped connection is dialed again, with a fresh snapshot", async () => {
   const { herdr, project } = await started();
   await until(

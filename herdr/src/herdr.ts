@@ -196,6 +196,16 @@ function subscribe(path: string, subscriptions: unknown[], onFrame: (frame: Fram
   });
 }
 
+/** The events after which the set of panes is another: a pane came or went, or a tab or a
+ *  workspace closed with its panes (Herdr then says `tab_closed` and no `pane_closed`). */
+const PANES_CHANGED = new Set([
+  "pane_created",
+  "pane_closed",
+  "pane_exited",
+  "tab_closed",
+  "workspace_closed",
+]);
+
 /** Herdr names an event `workspace_focused` as it arrives, and `pane.agent_status_changed` when it
  *  answers a subscription of that name: one spelling, Herdr's own `EventKind`, underscores. */
 const kindOf = (event: string) => event.replaceAll(".", "_");
@@ -248,7 +258,7 @@ export function createBridge(input: { logPath: string; socket: string; retryMs?:
         const { type: _type, ...data } = frame.data ?? {};
         const kind = kindOf(frame.event);
         emit(kind, data);
-        if (["pane_created", "pane_closed", "pane_exited"].includes(kind)) {
+        if (PANES_CHANGED.has(kind)) {
           again = true;
           close();
         }
