@@ -41,6 +41,7 @@ async (itx) =>
     egress: { urls: ["https://iphone-voice-notes.invalid"] }, // only ever compared, never sent anywhere
     description:
       "The token your iPhone voice-note shortcut sends: the same value you'll put in its **X-Voice-Note-Token** header.",
+    operations: ["verifyEquals"], // the receiver checks each request's token with it
   });
 ```
 

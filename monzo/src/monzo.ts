@@ -1,5 +1,7 @@
 import { servePage } from "./page.js";
 
+export { monzoApi, type MonzoApiItx } from "./api.js";
+
 /** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type MonzoItx = {
   secrets: {
@@ -36,7 +38,7 @@ export type Integration = {
  *  It is also the account's connection on the Dash's Integrations page. */
 const ACCOUNT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** The sign-in zero-trust-mcp keeps for the mind (the recipe's step 1). */
+/** The mind's own OAuth sign-in with Monzo (the recipe's step 1). */
 const SIGN_IN = "/secrets/monzo";
 
 /** Each account's webhook secret is this and the account's name (the recipe's step 4). */

@@ -11,6 +11,8 @@ export type VoiceNotesItx = {
       description?: string;
       /** Where the Dash's form sends the person once it is saved. */
       redirectUrl?: string;
+      /** The vault operations the secret answers: none unless named. */
+      operations?: "verifyEquals"[];
     }): Promise<{ url: string }>;
   };
   files: {
@@ -128,6 +130,7 @@ const collectUrl = async (itx: VoiceNotesItx, here: string): Promise<string | nu
       egress: { urls: ["https://iphone-voice-notes.invalid"] }, // only ever compared, never sent
       description: `The token your iPhone voice-note shortcut sends in its **${TOKEN_HEADER}** header: make it up, save it here, and put the same value in the shortcut.`,
       redirectUrl: here,
+      operations: ["verifyEquals"], // `receive` checks each request's token with it
     })
     .then((link) => link.url)
     .catch(() => null);

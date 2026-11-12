@@ -29,7 +29,11 @@ export type TelegramItx = {
     set(
       path: string,
       material: string | Record<string, string>,
-      options: { urls: string[] },
+      options: {
+        urls: string[];
+        placement?: "header" | "url";
+        operations?: "verifyEquals"[];
+      },
     ): Promise<unknown>;
     delete(path: string): Promise<unknown>;
     verifyEquals(path: string, input: { value: string }): Promise<boolean>;
@@ -166,12 +170,14 @@ export async function connectBot(
   await itx.secrets.set(
     `/secrets/telegram-${name}`,
     { token: token.trim() },
-    { urls: ["https://api.telegram.org"] },
+    // the placeholder sits in the URL path: https://api.telegram.org/bot<token>/<method>
+    { urls: ["https://api.telegram.org"], placement: "url" },
   );
   const secret = hex(32);
   // kept first, so a delivery that arrives the moment the webhook is set can be checked
   await itx.secrets.set(`/secrets/telegram-webhook-${name}`, secret, {
     urls: ["https://telegram.invalid"],
+    operations: ["verifyEquals"], // the webhook checks each delivery with it
   });
   await call(itx, placeholder(name), "setWebhook", {
     url: `${webhookBase}/webhook/${name}`,

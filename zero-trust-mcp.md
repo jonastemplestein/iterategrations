@@ -1,7 +1,8 @@
 # Connect a zero-trust-mcp server to an iterate mind
 
-Shared by the [Monzo](monzo/README.md) and [Yoto](yoto/README.md) recipes. You are a coding agent
-with iterate's MCP server (`run({ script })`, `async (itx) => …` at the mind's root; read
+No recipe here needs this: the [Monzo](monzo/README.md) and [Yoto](yoto/README.md) recipes connect
+the mind to the service directly. It is for a person who runs such a server and wants the mind to
+use it. You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the mind's root; read
 <https://os.iterate.com/connect-a-service.md> first if that is new to you, and never take a secret
 in chat).
 
@@ -12,8 +13,9 @@ holds_, and iterate is that client. So the mind ends up holding one secret,
 `/secrets/<integration>`, which iterate's platform keeps refreshed, and the Worker holds no copy of
 anything that can call the third party.
 
-Prefer this to giving the mind the third party's own OAuth app and tokens: the third party's
-client id and secret are typed into the Worker's setup page, never into iterate or a chat.
+What it gives over a direct sign-in: the third party's client id and secret are typed into the
+Worker's setup page, never into iterate. What it costs: a Worker to run, which sees the tokens of
+each request it serves.
 
 ## Which server
 

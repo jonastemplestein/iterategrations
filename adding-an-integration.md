@@ -119,7 +119,10 @@ Every integration seen so far is one of these, or a mix.
 service needs (`itx.secrets.collectFromUser` gives a link where the person pastes a token: the
 package never sees it, and `redirectUrl`, the page's own URL, brings them back once it is saved), sets the webhook at the service to `/webhook/<name>` on the mind's host, and
 registers a row. The webhook proves itself: `itx.secrets.verifyHmac(path, { payload, signature })`
-for a signed body, `itx.secrets.verifyEquals(path, { value })` for a token in the URL. Each delivery
+for a signed body, `itx.secrets.verifyEquals(path, { value })` for a token in the URL. A secret
+answers only the operations it was made with, so make it with the one its webhook calls:
+`itx.secrets.collectFromUser({ path, egress, operations: ["verifyHmac"] })`, and the same option
+for `set` and `beginOAuth`. Otherwise each check throws, and the webhook answers 500. Each delivery
 lands once on `/integrations/<slug>/<connection>`, keyed by the service's delivery id. The page and
 its forms send `Content-Security-Policy` with `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 

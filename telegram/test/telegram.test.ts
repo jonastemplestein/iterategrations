@@ -440,9 +440,13 @@ test("pasting a token checks it, keeps it as a secret, and registers the webhook
   assert.equal(res.headers.get("x-frame-options"), "DENY");
   assert.deepEqual(mind.secrets[`/secrets/telegram-${BOT}`], {
     material: { token: TOKEN },
-    options: { urls: ["https://api.telegram.org"] },
+    options: { urls: ["https://api.telegram.org"], placement: "url" },
   });
   const webhookSecret = (mind.secrets[`/secrets/telegram-webhook-${BOT}`] as any).material;
+  assert.deepEqual((mind.secrets[`/secrets/telegram-webhook-${BOT}`] as any).options, {
+    urls: ["https://telegram.invalid"],
+    operations: ["verifyEquals"],
+  });
   assert.match(webhookSecret, /^[0-9a-f]{64}$/);
   const set = sent(mind, "setWebhook")[0]!;
   assert.equal(set.credential, `getSecret("/secrets/telegram-${BOT}", { field: "token" })`);
