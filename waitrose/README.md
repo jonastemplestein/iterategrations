@@ -1,24 +1,24 @@
 # Waitrose
 
-The Waitrose grocery API (search, trolley, orders, delivery slots, checkout) for an iterate project,
+The Waitrose grocery API (search, trolley, orders, delivery slots, checkout) for an iterate mind,
 logged in with the person's own Waitrose account. There is no client to install: a run script, the
-project's own code and an agent call Waitrose with plain `fetch`. Waitrose publishes no API docs, so
+mind's own code and an agent call Waitrose with plain `fetch`. Waitrose publishes no API docs, so
 [Calling Waitrose](#calling-waitrose) is the doc.
 
-The project never holds the password or the token: they live in a secret, and iterate's egress
+The mind never holds the password or the token: they live in a secret, and iterate's egress
 swaps the token into each request and logs in again when Waitrose answers 401.
 
 It is the package `iterate-waitrose`. `waitroseFetch` and `graphql` add what every call needs,
 `OPERATIONS` holds the app's GraphQL operations, `reviewCheckout` reports what blocks a checkout and
 spends nothing, and `placeOrder` is the one call that spends money, with its guards. The login is
 the secret's refresh. `waitrose()` is one element in the
-`integrations` array of the project's config worker, with a page of its own for the project's
-members: the status. The project's Integrations page in the Dash shows a Waitrose card ("Set up by
+`integrations` array of the mind's config worker, with a page of its own for the mind's
+members: the status. The mind's Integrations page in the Dash shows a Waitrose card ("Set up by
 your coding agent" until the account's secret exists), with an **Open** button to the page and a
 **Recipe** button to this recipe.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 1. The account, as a secret
@@ -90,14 +90,14 @@ export async function exchange(material, fetch) {
 }
 ```
 
-## 2. The package, in the project's config repo
+## 2. The package, in the mind's config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and the element to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-waitrose";
 const IMPORT = 'import { waitrose } from "iterate-waitrose";';
 const ELEMENT = "waitrose()";
@@ -105,12 +105,12 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`waitrose()` answers the project's `waitrose` host. Its page at `/` is for the project's members: it
+`waitrose()` answers the mind's `waitrose` host. Its page at `/` is for the mind's members: it
 shows the status (whether the account's secret exists). It has no webhook, so there is no URL to
-paste. Its install hook (`project/worker-updated`) puts the Waitrose card on the Dash. With the
-package in `package.json`, the project's code can import the helpers.
+paste. Its install hook (`mind/worker-updated`) puts the Waitrose card on the Dash. With the
+package in `package.json`, the mind's code can import the helpers.
 
-Earlier builds of this package served a `Waitrose` over Cap'n Web on the project's `waitrose` host,
+Earlier builds of this package served a `Waitrose` over Cap'n Web on the mind's `waitrose` host,
 and an earlier version of this recipe added `waitrose({ rpcResponse: iterateRpcResponse })` with an
 import of `newWorkersRpcResponse`. The script leaves an element it finds as it is: change it to
 `waitrose()`, and take that import out. Move any code that imports `Waitrose` or `WaitroseApi` to the
@@ -119,7 +119,7 @@ nothing is committed.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+By hand: [add-to-a-mind.md](../add-to-a-mind.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/index.ts`](src/index.ts) (`waitrose()` and the exports),
 [`src/page.ts`](src/page.ts) (its page), [`src/fetch.ts`](src/fetch.ts) (`waitroseFetch` and `graphql`),
 [`src/operations.ts`](src/operations.ts), [`src/place-order.ts`](src/place-order.ts) and
@@ -133,7 +133,7 @@ Run the script in [The helpers in a script](#the-helpers-in-a-script) as it is. 
 and a `customerOrderId` back is the proof. The first call logs in by the secret's refresh, so it
 takes a moment.
 
-Then write into the project's `AGENTS.md` that agents call Waitrose with `fetch` and the token's
+Then write into the mind's `AGENTS.md` that agents call Waitrose with `fetch` and the token's
 placeholder, with a link to this README's
 [Calling Waitrose](https://github.com/jonastemplestein/iterategrations/tree/main/waitrose#calling-waitrose).
 
@@ -141,8 +141,8 @@ placeholder, with a link to this README's
 
 Read this before the first call. These are the Waitrose Android app's (v3.9.1) GraphQL and REST
 services, as the package's earlier client called them. Every call is plain `fetch`. In every worker
-the platform loads (the project's config worker, a run script), the global `fetch` is the project's
-egress, so a run script, the project's code and an agent all call Waitrose the same way.
+the platform loads (the mind's config worker, a run script), the global `fetch` is the mind's
+egress, so a run script, the mind's code and an agent all call Waitrose the same way.
 
 - **The placeholder:**
   `authorization: 'Bearer getSecret("/secrets/waitrose", { field: "accessToken" })'`, on every
@@ -162,7 +162,7 @@ egress, so a run script, the project's code and an agent all call Waitrose the s
 
 ### The helpers
 
-The project's code imports them:
+The mind's code imports them:
 
 ```ts
 import { graphql, OPERATIONS, placeOrder, reviewCheckout, waitroseFetch } from "iterate-waitrose";
@@ -242,7 +242,7 @@ async () => {
 ```
 
 Each example below is a task: keep everything above `// The task`, and put the example in place of
-the rest. The project's code writes the same lines, with the helpers and `OPERATIONS` imported.
+the rest. The mind's code writes the same lines, with the helpers and `OPERATIONS` imported.
 
 ### GraphQL operations
 
@@ -535,7 +535,7 @@ When instant checkout is not allowed, the person checks out on the website inste
 
 ### Checkout methods on the worker
 
-`waitrose()` in the `integrations` array gives the project its page and its card. It gives agents no
+`waitrose()` in the `integrations` array gives the mind its page and its card. It gives agents no
 checkout method. An import in `worker.ts` gives them none either, and a run script cannot import a
 package. So an agent can reach `reviewCheckout` and `placeOrder` only through a method on the
 worker's class.

@@ -1,4 +1,4 @@
-// jeeves-phone — real phone calls on an Andrews & Arnold VoIP number, for an iterate project's
+// jeeves-phone — real phone calls on an Andrews & Arnold VoIP number, for an iterate mind's
 // voice agent: the number registered as a SIP phone, its calls carried as the WhatsApp bridge
 // carries WhatsApp's (whatsapp-calls/serve.go), so one lend's code drives either.
 //

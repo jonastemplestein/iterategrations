@@ -1,6 +1,6 @@
 import { servePage } from "./page.js";
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type PebbleItx = {
   secrets: {
     list(): Promise<{ path: string }[]>;
@@ -32,10 +32,10 @@ export type IntegrationHost = {
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -43,7 +43,7 @@ export type Integration = {
   processEvent?(args: { event: IntegrationEvent; itx: PebbleItx }): Promise<void>;
 };
 
-/** What `pebble(options)` takes: one receiver's names, for a project with a receiver per ring.
+/** What `pebble(options)` takes: one receiver's names, for a mind with a receiver per ring.
  *  Each is optional, and each default comes from `slug`, so `pebble({ slug: "pebble-kim" })` is a
  *  receiver of its own: its own host, signing secret, stream, audio folder and card. With no
  *  options at all, `pebble()` is the receiver this package always was. */
@@ -54,7 +54,7 @@ export type PebbleOptions = {
   signingSecret?: string;
   /** The stream its `pebble/recording-created` events land on. Default `/<slug>`. */
   stream?: string;
-  /** The project-file folder its audio goes in. Default: the stream's path. */
+  /** The mind-file folder its audio goes in. Default: the stream's path. */
   audioDir?: string;
   /** Its card's key on the Dash's Integrations page. Default: the slug. */
   integration?: string;
@@ -83,13 +83,13 @@ const MAX_CLOCK_SKEW_SECONDS = 300;
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const SLUG = "pebble";
 const TITLE = "Pebble Index 01";
 const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/pebble";
 
-/** A routing slug (iterate/project-ingress `ROUTING_SLUG`), which the registry also takes as an
+/** A routing slug (iterate/mind-ingress `ROUTING_SLUG`), which the registry also takes as an
  *  integration's key: a DNS label that starts with a letter. */
 const NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 /** A secret's path as iterate takes it: `/secrets/<name>`, never `.` or `..`. */
@@ -148,7 +148,7 @@ function receiverOf(options: PebbleOptions): Receiver {
       TITLE_TEXT,
       "1 to 80 characters",
     ),
-    description: `Every recording made with the ring: the transcript as a pebble/recording-created event on ${stream}, the audio as a project file.`,
+    description: `Every recording made with the ring: the transcript as a pebble/recording-created event on ${stream}, the audio as a mind file.`,
     legacy,
   };
 }
@@ -180,7 +180,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 }
 
 /** Pebble Index 01's webhook (webhook protocol version 1): verify the signature with the
- *  receiver's secret, store the audio as a project file in its folder and publish
+ *  receiver's secret, store the audio as a mind file in its folder and publish
  *  `pebble/recording-created` on its stream. */
 async function receive(request: Request, itx: PebbleItx, receiver: Receiver): Promise<Response> {
   if (request.method !== "POST") return new Response("POST only\n", { status: 405 });
@@ -270,14 +270,14 @@ async function receive(request: Request, itx: PebbleItx, receiver: Receiver): Pr
   return Response.json({ ok: true });
 }
 
-/** A project's Pebble Index 01 receiver, as an integration its worker hosts:
+/** A mind's Pebble Index 01 receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [pebble()];`
  *
  *  On its routing slug (`pebble` by default) it answers the Pebble app's webhook at `/webhook` and,
  *  for members only, its page at `/`; any other path is a 404. Its install hook
- *  (`project/worker-updated`) lists it on the Dash's Integrations page.
+ *  (`mind/worker-updated`) lists it on the Dash's Integrations page.
  *
- *  A project with two rings hosts a receiver for each, every name its own (`PebbleOptions`):
+ *  A mind with two rings hosts a receiver for each, every name its own (`PebbleOptions`):
  *  `[pebble({ slug: "pebble-kim" }), pebble({ slug: "pebble-sam" })]`. It throws on an option it
  *  cannot use. */
 export function pebble(options: PebbleOptions = {}): Integration {
@@ -302,8 +302,8 @@ export function pebble(options: PebbleOptions = {}): Integration {
         secret: receiver.signingSecret,
         saved: await hasSigningSecret(itx, receiver),
         hint: receiver.legacy
-          ? `Set up ${TITLE} in my iterate project. Follow the recipe at ${RECIPE}`
-          : `Set up ${receiver.title} in my iterate project: the receiver on routing slug ${receiver.slug}, with the signing secret ${receiver.signingSecret}. Follow the recipe at ${RECIPE}`,
+          ? `Set up ${TITLE} in my iterate mind. Follow the recipe at ${RECIPE}`
+          : `Set up ${receiver.title} in my iterate mind: the receiver on routing slug ${receiver.slug}, with the signing secret ${receiver.signingSecret}. Follow the recipe at ${RECIPE}`,
       });
     },
     async processEvent({ event, itx }) {

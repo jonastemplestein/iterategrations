@@ -1,7 +1,7 @@
 // Runs against dist, the package as shipped. `telegramBehind` puts a pretend Telegram behind the
-// global `fetch`, which is the project's egress in a loaded worker: it records each Bot API call
+// global `fetch`, which is the mind's egress in a loaded worker: it records each Bot API call
 // (the credential in the URL path, the method, the JSON body) and answers ok, or refuses a method
-// as Telegram does. `projectFiles` is the project's `itx.files`: the files that exist, with their
+// as Telegram does. `mindFiles` is the mind's `itx.files`: the files that exist, with their
 // content types, and a signed URL for each, recording the expiry asked for.
 import assert from "node:assert/strict";
 import { afterEach, test } from "vite-plus/test";
@@ -44,8 +44,8 @@ function telegramBehind(refuse: Record<string, string> = {}) {
   return calls;
 }
 
-/** The project's files: each path that exists, with its content type. */
-function projectFiles(files: Record<string, string>) {
+/** The mind's files: each path that exists, with its content type. */
+function mindFiles(files: Record<string, string>) {
   const expiries: number[] = [];
   const itx = {
     files: {
@@ -126,7 +126,7 @@ test("a call Telegram refuses throws its method and Telegram's description", asy
 
 test("sendAnswer sends one photo with short words as its caption, in the chat's topic, from a signed URL that lasts ten minutes", async () => {
   const calls = telegramBehind();
-  const { itx, expiries } = projectFiles({ "/plans/sofa.jpg": "image/jpeg" });
+  const { itx, expiries } = mindFiles({ "/plans/sofa.jpg": "image/jpeg" });
   await sendAnswer(
     itx,
     { bot: BOT, chatId: -100, threadId: 9 },
@@ -149,7 +149,7 @@ test("sendAnswer sends one photo with short words as its caption, in the chat's 
 
 test("sendAnswer says a file that does not exist in the words, and sends each file that does as what its type and name say", async () => {
   const calls = telegramBehind();
-  const { itx } = projectFiles({
+  const { itx } = mindFiles({
     "/notes/memo.ogg": "audio/ogg",
     "/notes/song.mp3": "audio/mpeg",
     "/notes/clip.mp4": "video/mp4",
@@ -199,7 +199,7 @@ test("sendAnswer says a file that does not exist in the words, and sends each fi
 
 test("sendAnswer sends long words as messages of at most 4096 characters, then the file with its own caption", async () => {
   const calls = telegramBehind();
-  const { itx } = projectFiles({ "/plans/floor.png": "image/png" });
+  const { itx } = mindFiles({ "/plans/floor.png": "image/png" });
   const text = Array.from({ length: 1000 }, (_, i) => `line${i}`).join("\n");
   await sendAnswer(
     itx,

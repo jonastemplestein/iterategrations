@@ -1,7 +1,7 @@
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type ChatgptItx = {
   fetch(request: Request): Promise<Response>;
-  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  /** The mind's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<unknown>;
@@ -48,12 +48,12 @@ export const SECRET = "/secrets/chatgpt";
 /** The only origins the tokens are ever sent to. */
 export const PIN: string[] = ["https://api.openai.com", "https://auth.openai.com"];
 
-/** The kv keys: the sign-in in progress, who is signed in (nothing secret), this project's host id. */
+/** The kv keys: the sign-in in progress, who is signed in (nothing secret), this mind's host id. */
 export const PENDING_KEY = "chatgpt/pending";
 export const ACCOUNT_KEY = "chatgpt/account";
 export const HOST_KEY = "chatgpt/host";
 
-/** A sign-in the person has not finished. The verifier stays here, in the project. */
+/** A sign-in the person has not finished. The verifier stays here, in the mind. */
 export type Pending = { url: string; state: string; verifier: string; expiresAt: number };
 export type Account = { id: string; email?: string; plan?: string; at: string };
 

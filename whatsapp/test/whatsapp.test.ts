@@ -1,8 +1,8 @@
-// whatsapp.test.ts — the lend over the pretend WhatsApp (dummy.ts), with a pretend project: what the
-// project calls reaches the socket and comes back as JSON, every event of the socket lands as
+// whatsapp.test.ts — the lend over the pretend WhatsApp (dummy.ts), with a pretend mind: what the
+// mind calls reaches the socket and comes back as JSON, every event of the socket lands as
 // whatsapp/<Baileys' name> (a message as one whatsapp/messages.upsert of its own) on the account's
 // stream and again on its chat's, media round-trips through downloadMedia, a url that would read
-// this computer is refused, and events that could not reach the project wait for its next connection.
+// this computer is refused, and events that could not reach the mind wait for its next connection.
 // The same lend through a real deployment is the README's walkthrough.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -25,8 +25,8 @@ test("the real lend imports without connecting: a default export and a descripti
 });
 
 test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messages that wait for the next connection", async () => {
-  const project = pretendProject();
-  const lent = (await provideDummy({ itx: project.itx })) as Lent;
+  const mind = pretendMind();
+  const lent = (await provideDummy({ itx: mind.itx })) as Lent;
   assert.ok(lent.sendMessage && lent.groupMetadata && lent.downloadMedia && lent.__describe);
 
   // a send comes back as Baileys' message, as JSON, and lands as an `append`
@@ -36,16 +36,16 @@ test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messag
     fromMe: true,
     id: sent.key.id,
   });
-  await project.settled();
+  await mind.settled();
   const landed = {
     type: "whatsapp/messages.upsert",
     payload: { event: "messages.upsert", data: { type: "append", messages: [sent] } },
     idempotencyKey: `whatsapp/messages.upsert:447700900002@s.whatsapp.net:${sent.key.id}`,
   };
-  assert.deepEqual(project.events.at(-1), landed);
+  assert.deepEqual(mind.events.at(-1), landed);
   // and again on the chat's own stream
   assert.deepEqual(
-    project.streams.get("/integrations/whatsapp-dummy/chats/447700900002@s.whatsapp.net"),
+    mind.streams.get("/integrations/whatsapp-dummy/chats/447700900002@s.whatsapp.net"),
     [landed],
   );
 
@@ -54,8 +54,8 @@ test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messag
     from: "447700900003@s.whatsapp.net",
     image: { data: new Uint8Array([7, 8, 9]), mimetype: "image/png", caption: "look" },
   });
-  await project.settled();
-  const received = project.events.at(-1)!.payload.data as { type: string; messages: any[] };
+  await mind.settled();
+  const received = mind.events.at(-1)!.payload.data as { type: string; messages: any[] };
   assert.equal(received.type, "notify");
   assert.equal(received.messages[0].message.imageMessage.mediaKey.type, "Buffer");
   assert.deepEqual([...(await lent.downloadMedia(received.messages[0]))], [7, 8, 9]);
@@ -71,58 +71,58 @@ test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messag
       /must be https: or data:/,
     );
 
-  // the project unreachable: messages wait, then arrive once over the next connection
-  project.failing = true;
+  // the mind unreachable: messages wait, then arrive once over the next connection
+  mind.failing = true;
   await lent.simulateIncomingMessage({
     from: "447700900003@s.whatsapp.net",
     text: "while you were away",
   });
-  await project.settled();
-  const before = project.events.length;
-  project.failing = false;
-  await provideDummy({ itx: project.itx }); // what `iterate provide` does on its next connection
-  await project.settled();
-  assert.equal(project.events.length, before + 1);
+  await mind.settled();
+  const before = mind.events.length;
+  mind.failing = false;
+  await provideDummy({ itx: mind.itx }); // what `iterate provide` does on its next connection
+  await mind.settled();
+  assert.equal(mind.events.length, before + 1);
   assert.equal(
-    (project.events.at(-1)!.payload.data as any).messages[0].message.conversation,
+    (mind.events.at(-1)!.payload.data as any).messages[0].message.conversation,
     "while you were away",
   );
 });
 
 test("a message WhatsApp delivers again with a different body stays one event, and never holds up the next", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const ev = new EventEmitter();
   const lend = lendOver({
     logPath: "/integrations/whatsapp",
     connect: async (onSocket) => onSocket({ ev } as unknown as Parameters<typeof onSocket>[0]),
     downloadMedia: async () => new Uint8Array(),
   });
-  await lend({ itx: project.itx });
+  await lend({ itx: mind.itx });
   const message = (id: string, text: string) => ({
     key: { remoteJid: "447700900003@s.whatsapp.net", fromMe: false, id },
     message: { conversation: text },
   });
   ev.emit("messages.upsert", { type: "notify", messages: [message("A", "first")] });
-  await project.settled();
+  await mind.settled();
   // the same message as an `append`, in one batch with a new one: the platform refuses the batch
   ev.emit("messages.upsert", {
     type: "append",
     messages: [message("A", "first"), message("B", "second")],
   });
-  await project.settled();
+  await mind.settled();
   ev.emit("messages.upsert", { type: "notify", messages: [message("C", "third")] });
-  await project.settled();
+  await mind.settled();
   const messages = (events: WhatsAppEvent[]) =>
     events
       .map((event) => event.payload.data as any)
       .map((data) => [data.type, data.messages[0].key.id]);
-  assert.deepEqual(messages(project.events), [
+  assert.deepEqual(messages(mind.events), [
     ["notify", "A"],
     ["append", "B"],
     ["notify", "C"],
   ]);
   assert.deepEqual(
-    messages(project.streams.get("/integrations/whatsapp/chats/447700900003@s.whatsapp.net")!),
+    messages(mind.streams.get("/integrations/whatsapp/chats/447700900003@s.whatsapp.net")!),
     [
       ["notify", "A"],
       ["append", "B"],
@@ -133,14 +133,14 @@ test("a message WhatsApp delivers again with a different body stays one event, a
 
 test("after a restart the account's own stream is appended first, and the chats' streams after it, a few at once", async () => {
   const OWN = "/integrations/whatsapp";
-  const project = heldProject();
+  const mind = heldMind();
   const ev = new EventEmitter();
   const lend = lendOver({
     logPath: OWN,
     connect: async (onSocket) => onSocket({ ev } as unknown as Parameters<typeof onSocket>[0]),
     downloadMedia: async () => new Uint8Array(),
   });
-  await lend({ itx: project.itx });
+  await lend({ itx: mind.itx });
   const from = (chat: number, id: string) => ({
     key: { remoteJid: `4477009000${chat}@s.whatsapp.net`, fromMe: false, id },
     message: { conversation: id },
@@ -151,46 +151,46 @@ test("after a restart the account's own stream is appended first, and the chats'
     type: "append",
     messages: chats.map((chat) => from(chat, `old-${chat}`)),
   });
-  await project.asked();
+  await mind.asked();
   // the account's stream alone, with all twenty: no chat's stream is asked for before it answers
-  assert.deepEqual(project.open(), [[OWN, 20]]);
+  assert.deepEqual(mind.open(), [[OWN, 20]]);
 
-  project.answer();
-  await project.asked();
+  mind.answer();
+  await mind.asked();
   // then the chats' streams: eight at once, no more
   assert.deepEqual(
-    project.open(),
+    mind.open(),
     chats.slice(0, 8).map((chat) => [`${OWN}/chats/4477009000${chat}@s.whatsapp.net`, 1]),
   );
 
   // a new message while those are open: it goes on the account's stream before the next chats
   ev.emit("messages.upsert", { type: "notify", messages: [from(10, "new")] });
-  await project.asked();
-  assert.equal(project.open().length, 8);
-  project.answer();
-  await project.asked();
-  assert.deepEqual(project.open(), [[OWN, 1]]);
+  await mind.asked();
+  assert.equal(mind.open().length, 8);
+  mind.answer();
+  await mind.asked();
+  assert.deepEqual(mind.open(), [[OWN, 1]]);
 
-  while (project.open().length > 0) {
-    assert.ok(project.open().length <= 8);
-    project.answer();
-    await project.asked();
+  while (mind.open().length > 0) {
+    assert.ok(mind.open().length <= 8);
+    mind.answer();
+    await mind.asked();
   }
   // all of it landed, each stream in the order it came
   const ids = (path: string) =>
-    project.streams.get(path)!.map((event) => (event.payload.data as any).messages[0].key.id);
+    mind.streams.get(path)!.map((event) => (event.payload.data as any).messages[0].key.id);
   assert.deepEqual(ids(OWN), [...chats.map((chat) => `old-${chat}`), "new"]);
   assert.deepEqual(ids(`${OWN}/chats/447700900010@s.whatsapp.net`), ["old-10", "new"]);
   for (const chat of chats.slice(1))
     assert.deepEqual(ids(`${OWN}/chats/4477009000${chat}@s.whatsapp.net`), [`old-${chat}`]);
   // and never two appends open on one stream
-  assert.equal(project.mostOpenOnOneStream, 1);
+  assert.equal(mind.mostOpenOnOneStream, 1);
 });
 
 test("what failed over a connection that a newer one replaced meanwhile goes over the newer one, with no new event", async () => {
   const OWN = "/integrations/whatsapp";
-  const old = heldProject();
-  const newer = heldProject();
+  const old = heldMind();
+  const newer = heldMind();
   const ev = new EventEmitter();
   const lend = lendOver({
     logPath: OWN,
@@ -226,14 +226,14 @@ test("what failed over a connection that a newer one replaced meanwhile goes ove
     console.error = consoleError;
   }
   assert.equal(errors.length, 1);
-  assert.match(errors[0]!, /2 event\(s\) wait for the project's next connection/);
+  assert.match(errors[0]!, /2 event\(s\) wait for the mind's next connection/);
   assert.equal(old.streams.size, 0);
   assert.equal(newer.streams.get(OWN)!.length, 1);
   assert.equal(newer.streams.get(`${OWN}/chats/447700900003@s.whatsapp.net`)!.length, 1);
 });
 
 test("every other event of the socket lands as whatsapp/<its Baileys name>, and user() and the LID mapping are lent", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const ev = new EventEmitter();
   let emitAll: (events: Record<string, unknown>) => void = () => {};
   const socket = {
@@ -252,7 +252,7 @@ test("every other event of the socket lands as whatsapp/<its Baileys name>, and 
     connect: async (onSocket) => onSocket(socket as unknown as Parameters<typeof onSocket>[0]),
     downloadMedia: async () => new Uint8Array(),
   });
-  const lent = (await lend({ itx: project.itx })) as Lent;
+  const lent = (await lend({ itx: mind.itx })) as Lent;
   const key = { remoteJid: "447700900002@s.whatsapp.net", fromMe: true, id: "A" };
   // one batch, as Baileys emits them: a receipt, a group change, the keys, and a message
   emitAll({
@@ -269,9 +269,9 @@ test("every other event of the socket lands as whatsapp/<its Baileys name>, and 
     "creds.update": { noiseKey: "secret" },
     "messages.upsert": { type: "notify", messages: [] },
   });
-  await project.settled();
+  await mind.settled();
   assert.deepEqual(
-    project.events.map(({ type, payload }) => [type, payload]),
+    mind.events.map(({ type, payload }) => [type, payload]),
     [
       [
         "whatsapp/messages.update",
@@ -300,7 +300,7 @@ test("every other event of the socket lands as whatsapp/<its Baileys name>, and 
   // each chat's own stream holds its part, in the event's own shape; a chat known by its `@lid`
   // goes by the phone number WhatsApp told this account
   assert.deepEqual(
-    [...project.streams]
+    [...mind.streams]
       .filter(([path]) => path.includes("/chats/"))
       .map(([path, events]) => [path, events.map((event) => event.payload)]),
     [
@@ -341,7 +341,7 @@ test("with a list, only the functions it names are lent: the other ways to send,
     ev: Object.assign(new EventEmitter(), { process: () => {} }),
     user: { id: "447700900001:1@s.whatsapp.net" },
     sendMessage: async () => void called.push("sendMessage"),
-    // Baileys' `sendMessage` calls `relayMessage`: a project that holds one by name must not get the other
+    // Baileys' `sendMessage` calls `relayMessage`: a mind that holds one by name must not get the other
     relayMessage: async () => void called.push("relayMessage"),
     sendNode: async () => void called.push("sendNode"),
     groupMetadata: async (jid: string) => ({ id: jid, subject: "The group" }),
@@ -353,7 +353,7 @@ test("with a list, only the functions it names are lent: the other ways to send,
       only,
       connect: async (onSocket) => onSocket(socket as unknown as Parameters<typeof onSocket>[0]),
       downloadMedia: async () => new Uint8Array([1]),
-    })({ itx: pretendProject().itx })) as Lent;
+    })({ itx: pretendMind().itx })) as Lent;
 
   const lent = await lendWith(["sendMessage", "groupMetadata", "downloadMedia", "noSuchFunction"]);
   const names = ["__describe", "downloadMedia", "groupMetadata", "sendMessage"];
@@ -380,7 +380,7 @@ test("with a list, only the functions it names are lent: the other ways to send,
   assert.deepEqual(Object.keys(await lendWith([])), ["__describe"]);
 });
 
-test("a lend's description is one line within the project's limit of 500 characters, whatever the account's text and the list", () => {
+test("a lend's description is one line within the mind's limit of 500 characters, whatever the account's text and the list", () => {
   const tenNames = [
     "sendMessage",
     "downloadMedia",
@@ -395,7 +395,7 @@ test("a lend's description is one line within the project's limit of 500 charact
   ];
   const account =
     "Sam's own personal WhatsApp account, +44 7700 900123: writing from it is writing as Sam, so ask Sam first";
-  // the case that a project refused: ten names and an account's text of some hundred characters
+  // the case that a mind refused: ten names and an account's text of some hundred characters
   const listed = describeLend(account, tenNames, "/integrations/whatsapp/personal");
   assert.ok(listed.length <= 500, `${listed.length} characters`);
   assert.ok(listed.startsWith(account), "the account's text is whole when there is room");
@@ -505,13 +505,13 @@ test("an event's part for each chat keeps the event's own shape, and the account
     assert.deepEqual([...chatParts(name, data)], []);
 });
 
-/** A project whose `cd(path).append` stays open until the test answers it: `open()` is the appends
+/** A mind whose `cd(path).append` stays open until the test answers it: `open()` is the appends
  *  that wait, in the order they were asked, each as its stream and how many events it carries;
  *  `answer()` lets all of them land (or fail with `error`); `asked()` waits for the lend's next
  *  step. */
-function heldProject() {
+function heldMind() {
   const waiting: { path: string; events: WhatsAppEvent[]; settle: (error?: Error) => void }[] = [];
-  const project = {
+  const mind = {
     streams: new Map<string, WhatsAppEvent[]>(),
     mostOpenOnOneStream: 0,
     open: () => waiting.map(({ path, events }) => [path, events.length]),
@@ -530,26 +530,26 @@ function heldProject() {
               events,
               settle: (error) => {
                 if (error) return reject(error);
-                project.streams.set(path, [...(project.streams.get(path) ?? []), ...events]);
+                mind.streams.set(path, [...(mind.streams.get(path) ?? []), ...events]);
                 resolve();
               },
             });
-            project.mostOpenOnOneStream = Math.max(
-              project.mostOpenOnOneStream,
+            mind.mostOpenOnOneStream = Math.max(
+              mind.mostOpenOnOneStream,
               waiting.filter((call) => call.path === path).length,
             );
           }),
       }),
     } as Itx,
   };
-  return project;
+  return mind;
 }
 
-/** A project whose `cd(path).append` keeps the events, or fails while `failing`. As the platform
+/** A mind whose `cd(path).append` keeps the events, or fails while `failing`. As the platform
  *  does, a key it holds dedupes the same body and refuses a different one, the whole call with it,
  *  by message alone (what reaches `iterate provide`). */
-function pretendProject() {
-  const project: {
+function pretendMind() {
+  const mind: {
     /** every stream appended to, by its path */
     streams: Map<string, WhatsAppEvent[]>;
     /** the account's stream: the one that is no chat's */
@@ -561,22 +561,22 @@ function pretendProject() {
   } = {
     streams: new Map<string, WhatsAppEvent[]>(),
     get events() {
-      return [...project.streams].find(([path]) => !path.includes("/chats/"))?.[1] ?? [];
+      return [...mind.streams].find(([path]) => !path.includes("/chats/"))?.[1] ?? [];
     },
     failing: false,
     calls: [] as Promise<unknown>[],
     itx: {
       cd: (path: string) => ({
         append: (...events: WhatsAppEvent[]) => {
-          const stream = project.streams.get(path) ?? [];
+          const stream = mind.streams.get(path) ?? [];
           const held = (event: WhatsAppEvent) =>
             stream.findIndex((kept) => kept.idempotencyKey === event.idempotencyKey);
           const conflict = events.find(
             (event) =>
               held(event) >= 0 && JSON.stringify(stream[held(event)]) !== JSON.stringify(event),
           );
-          const call: Promise<unknown> = project.failing
-            ? Promise.reject(new Error("the project is unreachable"))
+          const call: Promise<unknown> = mind.failing
+            ? Promise.reject(new Error("the mind is unreachable"))
             : conflict
               ? Promise.reject(
                   new Error(
@@ -584,12 +584,9 @@ function pretendProject() {
                   ),
                 )
               : Promise.resolve(
-                  project.streams.set(path, [
-                    ...stream,
-                    ...events.filter((event) => held(event) < 0),
-                  ]),
+                  mind.streams.set(path, [...stream, ...events.filter((event) => held(event) < 0)]),
                 );
-          project.calls.push(call.catch(() => {}));
+          mind.calls.push(call.catch(() => {}));
           return call;
         },
       }),
@@ -598,9 +595,9 @@ function pretendProject() {
     settled: async () => {
       for (let round = 0; round < 5; round++) {
         await new Promise((resolve) => setImmediate(resolve));
-        await Promise.all(project.calls);
+        await Promise.all(mind.calls);
       }
     },
   };
-  return project;
+  return mind;
 }

@@ -1,7 +1,7 @@
 // dummy.ts — whatsapp.ts's lend over a pretend WhatsApp that talks to nobody, to try the lend without
 // a WhatsApp account or a phone:
 //
-//   iterate provide whatsapp/src/dummy.ts --name whatsappDummy --project <slug>
+//   iterate provide whatsapp/src/dummy.ts --name whatsappDummy --mind <address>
 //
 // The socket answers Baileys' shapes for the functions a first script uses (sendMessage with text,
 // media by { url } or bytes, reactions; onWhatsApp; groupMetadata; readMessages;
@@ -118,7 +118,7 @@ function makeDummySocket() {
     async readMessages(_keys: unknown[]) {},
     async sendPresenceUpdate(_type: string, _jid?: string) {},
     /** The pretend WhatsApp's own: a contact writes to you, as Baileys would hand it over —
-     *  `afterMs` later, to have it arrive while the project is out of reach. */
+     *  `afterMs` later, to have it arrive while the mind is out of reach. */
     async simulateIncomingMessage(input: {
       from: string;
       pushName?: string;

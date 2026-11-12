@@ -1,39 +1,39 @@
 # JMAP
 
-A mailbox for an iterate project over [JMAP](https://jmap.io), the standard (RFC 8620, RFC 8621)
+A mailbox for an iterate mind over [JMAP](https://jmap.io), the standard (RFC 8620, RFC 8621)
 that Fastmail designed and serves natively: send from it, search it, read whole threads. And
 Fastmail's [Masked Email](https://www.fastmail.com/dev/#masked-email-api): throwaway addresses an
 agent makes for one site and switches off later.
 
 An agent's run script cannot import a package, so an agent calls Fastmail's JMAP API with plain
-`fetch`: [Using the mailbox](#using-the-mailbox) has every call. The project's own code imports
-`mailbox()` from the package instead: [In the project's code](#in-the-projects-code). The package,
+`fetch`: [Using the mailbox](#using-the-mailbox) has every call. The mind's own code imports
+`mailbox()` from the package instead: [In the mind's code](#in-the-minds-code). The package,
 `iterate-jmap`, is also the mailbox's card on the Dash and a page with its status.
 
-Mail the project sends goes through the mailbox itself: it is written to Drafts, submitted, and moved
-to Sent. So the mailbox holds everything the project sent and received, as a person's mailbox would,
+Mail the mind sends goes through the mailbox itself: it is written to Drafts, submitted, and moved
+to Sent. So the mailbox holds everything the mind sent and received, as a person's mailbox would,
 and a person can read it there.
 
-The project never holds the token. It lives in a secret, `/secrets/fastmail`, pinned to
+The mind never holds the token. It lives in a secret, `/secrets/fastmail`, pinned to
 `https://api.fastmail.com`. A request names it with a placeholder, and iterate's egress swaps the
 token in on the way out. In every worker the platform loads (a run script, the config worker) the
 global `fetch` is that egress.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a mailbox and a token
 
 The person does this in Fastmail:
 
-1. **A Fastmail user of its own for the project's mail**, not an alias on their own user. A token
-   reaches its whole user, so a separate user keeps the project out of the person's mail.
+1. **A Fastmail user of its own for the mind's mail**, not an alias on their own user. A token
+   reaches its whole user, so a separate user keeps the mind out of the person's mail.
 2. **A token for that user:** signed in as it, Settings → Privacy & Security → Integrations → API
    tokens → New API token. Give it Mail (not read-only) and Email submission, and Masked Email if
-   the project should make throwaway addresses.
-3. **To read the project's mail beside their own** (optional): Fastmail lets users of one account
-   share folders. Signed in as the project's user, share its Inbox and Sent with the person's user.
+   the mind should make throwaway addresses.
+3. **To read the mind's mail beside their own** (optional): Fastmail lets users of one account
+   share folders. Signed in as the mind's user, share its Inbox and Sent with the person's user.
 
 ## 1. The token, as a secret
 
@@ -43,7 +43,7 @@ async (itx) =>
     path: "/secrets/fastmail",
     egress: { urls: ["https://api.fastmail.com"] },
     description:
-      "The Fastmail API token of the project's own mailbox. It is only ever sent to api.fastmail.com.",
+      "The Fastmail API token of the mind's own mailbox. It is only ever sent to api.fastmail.com.",
     fields: [{ name: "token", label: "API token" }],
   });
 ```
@@ -52,12 +52,12 @@ Send the person the returned `url` and wait until they say it is saved.
 
 ## 2. The card on the Dash, and the page
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the
 package (built by this repo's CI and served by pkg.pr.new, never npm), adds `jmap()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it:
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-jmap";
 const IMPORT = 'import { jmap } from "iterate-jmap";';
 const ELEMENT = "jmap()";
@@ -65,15 +65,15 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`jmap()` answers the project's `jmap` host. Its page at `/` is for the project's members: it shows
+`jmap()` answers the mind's `jmap` host. Its page at `/` is for the mind's members: it shows
 the status (whether the token exists). It has no webhook, so there is no URL to paste. Its install
-hook (`project/worker-updated`) puts a Mailbox card on the Dash's Integrations page: "Set up by your
+hook (`mind/worker-updated`) puts a Mailbox card on the Dash's Integrations page: "Set up by your
 coding agent: see the recipe" until the token exists, and "ok" after, with an **Open** button to the
 page and a **Recipe** button to this recipe.
 
 Earlier builds of this package shipped a client (`connectJmap`, `maskedEmails`), and an earlier
 version of this recipe added `mail.ts` and a `mailbox()` member to `worker.ts` that use it. Move any
-code that imports that client to [`mailbox()`](#in-the-projects-code) first, in a commit of its own:
+code that imports that client to [`mailbox()`](#in-the-minds-code) first, in a commit of its own:
 otherwise the script's probe fails on the newer build and nothing is committed.
 
 ## 3. Prove it
@@ -82,17 +82,17 @@ Run the script in [The session, and one call](#the-session-and-one-call) as it i
 session and lists the mailboxes. Mailboxes back, with Inbox, Drafts and Sent among them, is the
 proof.
 
-Then write into the project's `AGENTS.md` the mailbox's address, that agents call it with `fetch` and
+Then write into the mind's `AGENTS.md` the mailbox's address, that agents call it with `fetch` and
 the token's placeholder, and a link to this README's
 [Using the mailbox](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#using-the-mailbox).
-The project's code uses `mailbox()`:
-[In the project's code](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#in-the-projects-code).
+The mind's code uses `mailbox()`:
+[In the mind's code](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#in-the-minds-code).
 
-## In the project's code
+## In the mind's code
 
-The project's own code (`worker.ts`, or a file it imports) imports the helpers from the package.
+The mind's own code (`worker.ts`, or a file it imports) imports the helpers from the package.
 They are built on [jmap-jam](https://github.com/htunnicliff/jmap-jam) (MIT), which the package
-compiles in, so the project installs nothing else.
+compiles in, so the mind installs nothing else.
 
 ```ts
 import { mailbox } from "iterate-jmap";
@@ -114,7 +114,7 @@ origins the secret is pinned to, and the origin it was not sent to.
 ```ts
 // from an address one of the identities covers: written to Drafts, submitted, filed in Sent
 const { emailId, submissionId, filedInSent } = await mail.send({
-  from: { name: "The project", email: "project@your-domain.example" },
+  from: { name: "The mind", email: "mind@your-domain.example" },
   to: ["someone@example.com"],
   subject: "Re: the order",
   text: "Thanks, all received.",
@@ -161,7 +161,7 @@ await mail.setMaskedEmailState(id, "disabled");
 
 ### Who sent a forwarded mail
 
-Mail that Fastmail forwards to the project's address ([Mail arriving](#mail-arriving)) reaches the
+Mail that Fastmail forwards to the mind's address ([Mail arriving](#mail-arriving)) reaches the
 platform from Fastmail's servers, so the platform's own check sees Fastmail, not the sender.
 Fastmail checked the sender when the mail arrived, and its copy says so in an ARC set that Fastmail
 sealed on top of the message. `fastmailCopies` reads that copy with the mailbox's token, by the
@@ -183,13 +183,13 @@ const { verified, reason } = fastmailVerdict({ messageId, from, subject, text },
 - Only Fastmail's own ARC set counts: the first and highest, sealed by `messagingengine.com`. A
   sender's own results sit below it and are never read. The seal's signature is not checked, since
   the copy comes from Fastmail itself.
-- Whom to trust once a sender is verified is the project's own rule.
+- Whom to trust once a sender is verified is the mind's own rule.
 
 ## Using the mailbox
 
 Read this before the first call. Every call is plain `fetch`. The examples are scripts for `run`,
-which cannot import a package. The project's code makes the same requests through
-[`mailbox()`](#in-the-projects-code).
+which cannot import a package. The mind's code makes the same requests through
+[`mailbox()`](#in-the-minds-code).
 
 - **The placeholder:** `authorization: Bearer getSecret("/secrets/fastmail", { field: "token" })`,
   on every request.
@@ -398,8 +398,8 @@ return thread.list.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
 ### Send
 
 ```js
-// The task: send from the project's address, as a reply
-const sender = "project@your-domain.example"; // an address one of the identities covers
+// The task: send from the mind's address, as a reply
+const sender = "mind@your-domain.example"; // an address one of the identities covers
 const [[, mailboxes]] = await call(
   [CORE, MAIL],
   [["Mailbox/get", { accountId: mailAccount }, "0"]],
@@ -537,8 +537,8 @@ return { id, email };
 
 ## Mail arriving
 
-The fastest way in is a Fastmail rule that forwards a copy of each message to the project's own
-address, `<project>@<its email domain>`, where it lands as an event straight away. The other way is
+The fastest way in is a Fastmail rule that forwards a copy of each message to the mind's own
+address, `<mind>@<its email domain>`, where it lands as an event straight away. The other way is
 to poll on a schedule: [Search](#search-and-read) with `after` set to the last time. For a forwarded
 mail, [Who sent a forwarded mail](#who-sent-a-forwarded-mail) says whether Fastmail verified its
 sender.

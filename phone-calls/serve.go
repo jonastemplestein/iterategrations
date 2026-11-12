@@ -1,5 +1,5 @@
 // serve.go — the phone line, kept registered, with its calls on stdin and stdout for a parent
-// process that carries their audio somewhere else (calls.ts, which carries it to the project's
+// process that carries their audio somewhere else (calls.ts, which carries it to the mind's
 // voice processor). It speaks the WhatsApp bridge's protocol (whatsapp-calls/serve.go) line for
 // line, so the two lends drive their bridges the same way: it places calls, and it is rung: an
 // incoming call is announced and left ringing until the parent says to answer it (or to reject

@@ -1,7 +1,7 @@
 {
   "name": "iterate-pebble",
   "version": "0.0.0",
-  "description": "Receive Pebble Index 01 recordings in an iterate project",
+  "description": "Receive Pebble Index 01 recordings in an iterate mind",
   "type": "module",
   "exports": {
     ".": {

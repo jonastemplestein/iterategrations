@@ -5,17 +5,17 @@ import { register, WORKER_UPDATED } from "./registry.js";
 export type { Account, ChatgptItx } from "./auth.js";
 
 /** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
- *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
+ *  `using itx = host.getItx()` is the mind's scope for one block, and `host.auth.require` the
  *  gate of a members-only page. */
 export type IntegrationHost = {
   getItx(): ChatgptItx & Disposable;
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -23,11 +23,11 @@ export type Integration = {
   processEvent?(args: { event: IntegrationEvent; itx: ChatgptItx }): Promise<void>;
 };
 
-/** A project's ChatGPT connection, as an integration its worker hosts:
+/** A mind's ChatGPT connection, as an integration its worker hosts:
  *  `const integrations: Integration[] = [chatgpt()];`
  *
  *  On its routing slug it answers, for members only, the Connect ChatGPT page at `/`; any other
- *  path is a 404. Its install hook (`project/worker-updated`) lists it on the Dash's Integrations
+ *  path is a 404. Its install hook (`mind/worker-updated`) lists it on the Dash's Integrations
  *  page: the card, and the connected account's row.
  *
  *  - `slug`: the routing slug to answer on. Default `chatgpt`. */

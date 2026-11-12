@@ -1,12 +1,12 @@
-# Adding a package to a project
+# Adding a package to a mind
 
 The recipes for `pebble/`, `iphone-voice-notes/`, `waitrose/`, `monzo/`, `jmap/`, `telegram/`, `chatgpt/` and `github/` all
-end the same way: the package goes into the project's config repo (`/repos/config`), as a dependency
+end the same way: the package goes into the mind's config repo (`/repos/config`), as a dependency
 and as one element of the `integrations` array in `worker.ts`. This is the one script that does it,
 so a recipe gives only its own values.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
 To write and publish a package of your own, read [adding-an-integration.md](adding-an-integration.md).
 
 ## What it does
@@ -18,17 +18,17 @@ To write and publish a package of your own, read [adding-an-integration.md](addi
    the recipe names. The array is `const integrations: Integration[] = [telegram()];`: the worker
    hands each element the requests on its routing slug and every event, so nothing else changes.
 3. **Probes** the result before anything is committed: it loads the whole patched repo as a worker and
-   makes one request. A published commit whose worker fails takes every host of the project down.
+   makes one request. A published commit whose worker fails takes every host of the mind down.
 4. Commits once, with `parent` set to the tip it read (so it is refused if someone committed meanwhile,
-   and you run it again), and waits for the platform's answer: `project/worker-updated`, or
-   `project/worker-update-failed`, in which case the commit is not live.
+   and you run it again), and waits for the platform's answer: `mind/worker-updated`, or
+   `mind/worker-update-failed`, in which case the commit is not live.
 
 A `worker.ts` from before the array (the default template's, until October 2026) gets it: the
 `Integration` type in its `iterate/sdk` import, the array before `export default class`, the
 dispatch at the top of `fetch(request)` and the packages' hooks at the top of `processEvent`, each in
 a block of its own so its names never meet the worker's. The template runs the hooks after the
-project's own cases; an older worker's cases `return`, which would skip them, so there they run
-first. The order is a project's choice.
+mind's own cases; an older worker's cases `return`, which would skip them, so there they run
+first. The order is a mind's choice.
 
 It is safe to run twice. A package already in `package.json` gets the newer pin. A `worker.ts` whose
 array already lists the package is left as it is. One that imports the package the way its recipe
@@ -136,7 +136,7 @@ async (itx) => {
       worker = atTop(
         event,
         `{
-  // Every package sees the event too. The template runs these after the project's own cases;
+  // Every package sees the event too. The template runs these after the mind's own cases;
   // here they run first, since a case that returns would skip them. The order is yours.
   const hooks = await Promise.allSettled(
     integrations.map((integration) => integration.processEvent?.(${args})),
@@ -156,7 +156,7 @@ async (itx) => {
       const at = /\nexport default class [^{]*\{\n/.exec(worker).index + 1;
       worker =
         worker.slice(0, at) +
-        "// The integration packages this project hosts: one element each, from its package.\n" +
+        "// The integration packages this mind hosts: one element each, from its package.\n" +
         "const integrations: Integration[] = [];\n\n" +
         worker.slice(at);
     }
@@ -207,8 +207,8 @@ async (itx) => {
   });
   const outcome = await itx.waitForEvent({
     type: [
-      "events.iterate.com/project/worker-updated",
-      "events.iterate.com/project/worker-update-failed",
+      "events.iterate.com/mind/worker-updated",
+      "events.iterate.com/mind/worker-update-failed",
     ],
     payload: { commitOid },
     afterOffset: 0,
@@ -223,8 +223,8 @@ it, and nothing on a recipe's own host runs. If it fails, nothing was committed:
 `worker.ts` by hand, and run the commit yourself with
 `repo.commitFiles({ message, parent: tip, changes })`.
 
-Once it is live, the platform's `project/worker-updated` runs each package's install hook, and the
-project's Integrations page in the Dash shows the package's card, with a link to its page.
+Once it is live, the platform's `mind/worker-updated` runs each package's install hook, and the
+mind's Integrations page in the Dash shows the package's card, with a link to its page.
 
 ## By hand
 

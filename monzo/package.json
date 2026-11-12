@@ -1,7 +1,7 @@
 {
   "name": "iterate-monzo",
   "version": "0.0.0",
-  "description": "Turn Monzo transaction webhooks into events in an iterate project",
+  "description": "Turn Monzo transaction webhooks into events in an iterate mind",
   "type": "module",
   "exports": {
     ".": {

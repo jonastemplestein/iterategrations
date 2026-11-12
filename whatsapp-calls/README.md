@@ -1,13 +1,13 @@
 # WhatsApp voice calls
 
-Real WhatsApp voice calls between a person and an iterate project's voice agent, both ways, from
-the project's own WhatsApp account:
+Real WhatsApp voice calls between a person and an iterate mind's voice agent, both ways, from
+the mind's own WhatsApp account:
 
 - **Out**: an agent calls `itx.whatsappCalls.call({ to, opening, brief, reportTo })` and the
   person's phone rings on WhatsApp.
 - **In**: a person the lend answers rings the account, and the call is picked up.
 
-Either way the call is one of the project's voice calls, the same as its voice app's: a press on
+Either way the call is one of the mind's voice calls, the same as its voice app's: a press on
 the person's own voice device, `whatsapp-<the other person's digits>`, which the lend provisions once
 (`itx.voice.ensureVoiceDevice`) and keeps. For a person the lend answers, it does so when it starts,
 so their first call does not wait for it. Its relay is at `/voice/whatsapp-<digits>` and its agent
@@ -20,7 +20,7 @@ at once.
 [meowcaller](https://github.com/purpshell/meowcaller) (WhatsApp's call stack in Go, on a
 [whatsmeow](https://github.com/tulir/whatsmeow) fork): `jeeves-call`, a second linked device of
 the same account. `calls.ts` is what `iterate provide` lends: it keeps `jeeves-call serve` running
-and carries each call's audio between it and the project (16 kHz mono PCM16 both ways, the voice
+and carries each call's audio between it and the mind (16 kHz mono PCM16 both ways, the voice
 processor's own format).
 
 This is not an official WhatsApp API. An account that calls people who did not ask for it can be
@@ -28,7 +28,7 @@ restricted: lend it for the few people it was set up for.
 
 ## Run it
 
-You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a project with the
+You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a mind with the
 voice app installed on a build with `itx.voice.ensureVoiceDevice`, and this
 repository.
 
@@ -43,15 +43,15 @@ export WHATSAPP_CALLS_DIR=~/.config/iterate-whatsapp-calls   # the linked device
 
 export WHATSAPP_CALLS_ALLOWED=447700900001,447700900002      # who may be rung, and whose calls are picked up
 export WHATSAPP_CALLS_ANSWER_WITH='{"447700900001":"At your service, sir.","default":"Hello."}'
-iterate provide whatsapp-calls/calls.ts --name whatsappCalls --project <your project>
+iterate provide whatsapp-calls/calls.ts --name whatsappCalls --mind <your mind>
 ```
 
 Without a number, `jeeves-call link` pairs by QR code instead: each code's text is written to
 `$WHATSAPP_CALLS_DIR/qr.txt`. Keep it running with a loop, as for [WhatsApp](../whatsapp#run-it).
 `jeeves-call play <number> <file.mp3> [seconds]` rings a number and plays a file: a test of the
-link with no project. `link`, `play` and `serve` connect as the same device, so run one at a time.
+link with no mind. `link`, `play` and `serve` connect as the same device, so run one at a time.
 
-## What the project gets
+## What the mind gets
 
 ```js
 const { callId, streamPath } = await itx.whatsappCalls.call({
@@ -66,7 +66,7 @@ await itx.whatsappCalls.hangup();
 ```
 
 **A note for a caller's next call.** To have the voice say something particular when a person next
-rings, the project leaves a note in its kv first; it replaces the usual greeting, and its `brief`
+rings, the mind leaves a note in its kv first; it replaces the usual greeting, and its `brief`
 is what the call's agent is told:
 
 ```js
@@ -86,7 +86,7 @@ One call at a time. Every call leaves its facts on `/integrations/whatsapp-calls
 
 | Event                          | When                                                                                                                                                                                              |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `whatsapp-calls/call-placed`   | A call the project placed is ringing: `callId`, `to`, `reportTo`, `streamPath`.                                                                                                                   |
+| `whatsapp-calls/call-placed`   | A call the mind placed is ringing: `callId`, `to`, `reportTo`, `streamPath`.                                                                                                                      |
 | `whatsapp-calls/call-received` | Someone rang the account: `callId`, `from`, `answering`, and the `reason` when it is left alone (not a number the lend answers, a group or video call, another call in progress).                 |
 | `whatsapp-calls/call-answered` | Audio flows: `callId`, `direction`, `to` or `from`, `streamPath`.                                                                                                                                 |
 | `whatsapp-calls/call-ended`    | `callId`, `direction` (`"out"` or `"in"`), `to` or `from`, `answered`, `reason`, `seconds`, `transcript` (every `Person:` and `Voice:` line), `streamPath`, `activations`, `reportTo`, `metrics`. |
@@ -110,12 +110,12 @@ gaps in an answer and the deepest queue.
 - **A voice connection that drops mid-call is replaced** (twice at most): the new one is told what
   was said and apologises. The call ends when the voice's agent hangs up, the person does, or
   nobody has spoken for a minute.
-- **The call's agent knows only `brief`** (and whatever the project gives an agent at that path).
+- **The call's agent knows only `brief`** (and whatever the mind gives an agent at that path).
   On an incoming call the brief says who rang and nothing more.
 - Group calls and video calls are not picked up.
 
 ## Test
 
 ```sh
-pnpm test   # calls.ts over a pretend jeeves-call and a pretend project
+pnpm test   # calls.ts over a pretend jeeves-call and a pretend mind
 ```

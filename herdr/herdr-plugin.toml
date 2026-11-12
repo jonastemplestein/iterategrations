@@ -2,7 +2,7 @@ id = "iterate-bridge"
 name = "iterate bridge"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Lends this Herdr to iterate projects as itx.jonas.herdr: one call(method, params) for the whole socket API, and every event on a stream. See README.md."
+description = "Lends this Herdr to iterate minds as itx.jonas.herdr: one call(method, params) for the whole socket API, and every event on a stream. See README.md."
 platforms = ["macos", "linux"]
 
 # Startup hooks are one-shot, so this starts each bridge in the background and exits; it runs at every

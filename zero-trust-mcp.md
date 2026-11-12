@@ -1,18 +1,18 @@
-# Connect a zero-trust-mcp server to an iterate project
+# Connect a zero-trust-mcp server to an iterate mind
 
 Shared by the [Monzo](monzo/README.md) and [Yoto](yoto/README.md) recipes. You are a coding agent
-with iterate's MCP server (`run({ script })`, `async (itx) => …` at the project's root; read
+with iterate's MCP server (`run({ script })`, `async (itx) => …` at the mind's root; read
 <https://os.iterate.com/connect-a-service.md> first if that is new to you, and never take a secret
 in chat).
 
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) is a small Cloudflare Worker that puts
 one third party's API behind an MCP server (`/monzo/mcp`, `/yoto/mcp`, `/waitrose/mcp`) and stores
 nothing: the person's upstream credentials live encrypted _inside the OAuth tokens the MCP client
-holds_, and iterate is that client. So the project ends up holding one secret,
+holds_, and iterate is that client. So the mind ends up holding one secret,
 `/secrets/<integration>`, which iterate's platform keeps refreshed, and the Worker holds no copy of
 anything that can call the third party.
 
-Prefer this to giving the project the third party's own OAuth app and tokens: the third party's
+Prefer this to giving the mind the third party's own OAuth app and tokens: the third party's
 client id and secret are typed into the Worker's setup page, never into iterate or a chat.
 
 ## Which server
@@ -128,5 +128,5 @@ The platform sends the sealed access token and refreshes it with the sealed refr
 expires. If a call answers `invalid_grant` or the sign-in has lapsed (Monzo, for one, wants the person
 to reconfirm access every 90 days), run step 2 again.
 
-Write the connection down for the project's agents (`AGENTS.md` in `/repos/config`): the MCP URL,
+Write the connection down for the mind's agents (`AGENTS.md` in `/repos/config`): the MCP URL,
 the secret path, and the two lines of `connectToMcp` above.

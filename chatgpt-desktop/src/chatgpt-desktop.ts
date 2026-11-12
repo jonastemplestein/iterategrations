@@ -1,10 +1,10 @@
 // chatgpt-desktop.ts — the agent of the ChatGPT desktop app (OpenAI's ChatGPT app with Codex), lent to
-// an iterate project from the computer it runs on, with `iterate provide`:
+// an iterate mind from the computer it runs on, with `iterate provide`:
 //   - CALLS: `itx.jonas.chatgptDesktop.ask(task)` starts a task that works in the app's in-app browser
 //     and answers when its turn ends; `start`, `send`, `wait`, `read`, `names`, `archive`; `call(tool,
 //     args)` is any of the app's own agent tools.
 //   - EVENTS: what the tasks started here (or by the `chatgpt-browser` command line) do lands on a
-//     stream of the project as `chatgpt-desktop/<kind>`: each turn's start and end, the agent's
+//     stream of the mind as `chatgpt-desktop/<kind>`: each turn's start and end, the agent's
 //     messages, its tool calls. Nothing else from the app's sessions is read or sent.
 // The app serves its agent tools on a Unix socket in /tmp/codex-app-tools-<uid> (in /tmp/codex-browser-use
 // before app 26.1103): a 4-byte little-endian
@@ -737,7 +737,7 @@ export function createLend(options: Options = {}) {
   };
 
   return {
-    /** `iterate provide`'s default export: called on every connection to the project. */
+    /** `iterate provide`'s default export: called on every connection to the mind. */
     provide: async ({ itx: next }: { itx: Itx }) => {
       itx = next;
       watch();

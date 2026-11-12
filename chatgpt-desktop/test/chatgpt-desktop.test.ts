@@ -1,5 +1,5 @@
 // chatgpt-desktop.test.ts — the lend over a pretend app (a Unix socket that speaks the app's wire: a
-// 4-byte little-endian length, then JSON-RPC; tools/list and tools/call) and a pretend project: ask
+// 4-byte little-endian length, then JSON-RPC; tools/list and tools/call) and a pretend mind: ask
 // makes a named task with the browser mention and answers its turn; send waits for the new turn, not
 // the last one; the tasks' rollout lines land as chatgpt-desktop/<kind>, and the app's own developer
 // messages never do; a taken name is refused; with no app, the error says so. A task is a fork of the

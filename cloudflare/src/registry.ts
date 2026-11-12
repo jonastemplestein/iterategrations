@@ -9,15 +9,15 @@ import {
   type CloudflareItx,
 } from "./app.js";
 
-/** THE DASH'S INTEGRATIONS PAGE lists what a project's packages register on its `/integrations`
+/** THE DASH'S INTEGRATIONS PAGE lists what a mind's packages register on its `/integrations`
  *  context (iterate/integrations): one card per package, and one row per connection under it. Both
  *  are set semantics: a change appends the whole card or row again, and a null row takes one away.
- *  The install hook registers everything again (`project/worker-updated`), so a registry that was
+ *  The install hook registers everything again (`mind/worker-updated`), so a registry that was
  *  emptied, or is older than the package, heals at the next publish. */
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 /** What the platform appends when a secret is set or deleted: first on the secret's own path, then
  *  on `/`, where the catalog (`secrets.list()`) folds it. */
@@ -72,7 +72,7 @@ export async function registerCard(itx: CloudflareItx, slug: string, key?: strin
       card: {
         title: "Cloudflare",
         description:
-          "The project's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent (its Workers, D1, KV, R2 and the rest), with tokens the platform refreshes.",
+          "The mind's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent (its Workers, D1, KV, R2 and the rest), with tokens the platform refreshes.",
         status: connected
           ? { kind: "ok" }
           : {

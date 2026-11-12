@@ -91,7 +91,7 @@ const COLLECT_DESCRIPTION = `Your X app's OAuth 2.0 Client ID and Client Secret.
 - **Client ID:** under the app's **Keys and tokens** in [X's developer console](https://console.x.com), at OAuth 2.0 Client ID and Client Secret.
 - **Client secret:** beside the client ID. X shows it once: if it is lost, regenerate it there.
 
-The platform sends the secret only to X's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
+The platform sends the secret only to X's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the mind's code.`;
 
 /** The client's two fields: its ID, public, in the shape X gives it (HTML's `pattern`, which the
  *  browser compiles with the `v` flag), and its secret. */
@@ -136,9 +136,9 @@ async function render(
   const accounts = await listAccounts(itx);
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>
-    <p>Open <a href="https://console.x.com">console.x.com</a>, X's developer console, and the app the project should use, or create one. In the app's <b>Settings</b>, press <b>Set up</b> (or <b>Edit</b>) at <b>User authentication settings</b>, and fill in:</p>
+    <p>Open <a href="https://console.x.com">console.x.com</a>, X's developer console, and the app the mind should use, or create one. In the app's <b>Settings</b>, press <b>Set up</b> (or <b>Edit</b>) at <b>User authentication settings</b>, and fill in:</p>
     <ul>
-      <li><b>App permissions:</b> what the project needs: <b>Read</b>, or <b>Read and write</b> to post.</li>
+      <li><b>App permissions:</b> what the mind needs: <b>Read</b>, or <b>Read and write</b> to post.</li>
       <li><b>Type of App:</b> Web App, Automated App or Bot. It is a confidential client, which has a Client Secret.</li>
       <li><b>Callback URI / Redirect URL:</b> this one, exactly:${copyRow(callback)}</li>
       <li><b>Website URL:</b> this page:${copyRow(`${here}/`)}</li>
@@ -151,13 +151,13 @@ async function render(
       app
         ? `<p class="ok">Client ID ${esc(app.clientId)}</p>`
         : incomplete
-          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
+          ? `<p class="warn">The mind's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
           : ""
     }
     ${
       typeof link === "string"
         ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the client"}</a></p>${copyRow(link)}`
-        : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
+        : `<p class="error">The mind could not make the link: ${esc(link.failed)}</p>`
     }
     <p class="muted">The link opens a page of iterate's Dash, which asks for the client ID and the client secret, and keeps them as <code>${APP_SECRET}</code>, pinned to api.x.com. The secret never passes through this page.</p>
   </section>`;
@@ -205,7 +205,7 @@ export async function servePage(
     const flash = error
       ? `<p class="error">${esc(error)}</p>`
       : connected
-        ? `<p class="ok">Connected ${esc(connected)}. The project's code and agents can now call X's API as this account.</p>`
+        ? `<p class="ok">Connected ${esc(connected)}. The mind's code and agents can now call X's API as this account.</p>`
         : "";
     // iterate's one callback: what X is told to come back to, on the platform's origin, where
     // Connect's start link leads first

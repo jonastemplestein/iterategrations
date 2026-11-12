@@ -1,15 +1,15 @@
 import { isConnected, readAccount, type ChatgptItx } from "./auth.js";
 
-/** THE DASH'S INTEGRATIONS PAGE lists what a project's packages register on its `/integrations`
+/** THE DASH'S INTEGRATIONS PAGE lists what a mind's packages register on its `/integrations`
  *  context (iterate/integrations): the package's card, and a row per connection. Both are set
  *  semantics: a change appends the whole card or row again, and a null row takes one away. A
- *  project has one ChatGPT connection (`/secrets/chatgpt`), so the row is set or taken away
+ *  mind has one ChatGPT connection (`/secrets/chatgpt`), so the row is set or taken away
  *  whole each time, and a registry that was emptied, or is older than the package, heals at the
  *  next publish. */
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-export const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 /** The package's name on the Dash, and its one connection's. */
 const INTEGRATION = "chatgpt";

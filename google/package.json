@@ -1,7 +1,7 @@
 {
   "name": "iterate-google",
   "version": "0.0.0",
-  "description": "A project's own Google OAuth client for an iterate project: a Connect Google page, its callback, and each connected account as a secret",
+  "description": "A mind's own Google OAuth client for an iterate mind: a Connect Google page, its callback, and each connected account as a secret",
   "type": "module",
   "exports": {
     ".": {

@@ -1,16 +1,16 @@
 # Telegram
 
-A Telegram bot for an iterate project, with a **Connect Telegram** page of its own. People write to the
+A Telegram bot for an iterate mind, with a **Connect Telegram** page of its own. People write to the
 bot in a private chat, or in a group, and each chat has an agent that answers.
 
-It is project code: one element, `telegram()`, in the `integrations` array of the project's config
-worker, which hands it the requests on the project's `telegram` routing slug, and every event. It
-reaches Telegram with `fetch` alone. The project never sends the bot's token anywhere but
+It is mind code: one element, `telegram()`, in the `integrations` array of the mind's config
+worker, which hands it the requests on the mind's `telegram` routing slug, and every event. It
+reaches Telegram with `fetch` alone. The mind never sends the bot's token anywhere but
 api.telegram.org. The token is kept as a secret, and iterate's egress swaps it in: the agent only
 ever sends a placeholder naming the secret. Telegram puts the token in the URL path
 (`/bot<token>/<method>`), so the placeholder goes there.
 
-- **The page** (members only, at the project's `telegram` address, `/`): the BotFather steps, a form
+- **The page** (members only, at the mind's `telegram` address, `/`): the BotFather steps, a form
   for the token, invite links, the people waiting to be let in, who is in, and a Disconnect button.
 - **The webhook** (the same address, `/webhook/<bot>`): Telegram's, checked with a secret.
 - **Private chats:** a message from someone who is in wakes that chat's agent. The chat shows
@@ -20,25 +20,25 @@ ever sends a placeholder naming the secret. Telegram puts the token in the URL p
   rest as context.
 - **Invites:** a one-time link, `t.me/<bot>?start=<code>`. The person opens it and taps Start. The bot
   says "You're in." Nobody types a user id. That is how a wife, a colleague or a second phone joins.
-- **The Dash:** the project's Integrations page shows a Telegram card ("Connect a bot" until there is
+- **The Dash:** the mind's Integrations page shows a Telegram card ("Connect a bot" until there is
   one) and a row per bot: its username, how many people are let in, and buttons to the page and to
   the bot in Telegram.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `telegram()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-telegram";
 const IMPORT = 'import { telegram } from "iterate-telegram";';
 const ELEMENT = "telegram()";
@@ -47,7 +47,7 @@ const FILES = {};
 ```
 
 `telegram({ slug: "tg" })` answers another routing slug, and `telegram({ deliver: "events" })` hands
-each message to the project's own agents (below). The project must have the agents app installed
+each message to the mind's own agents (below). The mind must have the agents app installed
 (`installAgents`, as the default template does). Check that it is live. The webhook takes only
 `POST`, so a `GET` is answered `405`, and that is the proof:
 
@@ -94,7 +94,7 @@ make a bot an admin or change privacy mode: only a person can, and the link is t
 other ways: Edit, Administrators, Add Administrator in the group; or `/setprivacy` to @BotFather, choose
 the bot, **Disable**, then remove and re-add the bot.) The page asks Telegram which it is.
 
-Then write the bot's username and where its page is into the project's `AGENTS.md`.
+Then write the bot's username and where its page is into the mind's `AGENTS.md`.
 
 ## What the agent gets
 
@@ -108,7 +108,7 @@ reads it on its next turn but does not wake for it.
 
 Every update of every kind, from everyone, is also recorded as `telegram/update` on
 `/integrations/telegram/<bot>` (`payload.update` is Telegram's `Update`, untouched). The bot's other
-state is in the project's own `kv` (the root's; a sub-context has none): `telegram/<bot>/bot`,
+state is in the mind's own `kv` (the root's; a sub-context has none): `telegram/<bot>/bot`,
 `telegram/<bot>/allowed/<user id>`, `telegram/<bot>/pending/<user id>`, `telegram/<bot>/invite/<code>`,
 and `telegram/bots/<bot>` for each connected bot.
 
@@ -126,10 +126,10 @@ then `telegram/removed/<bot>` in the kv marks it.
 ## Calling Telegram
 
 The package exports no Telegram client. An agent calls the
-[Bot API](https://core.telegram.org/bots/api) with `fetch`. The project's own code can do the same,
-or import a few small helpers ([In the project's code](#in-the-projects-code)). In every worker the
-platform loads (the project's config worker, a run script, an agent's script) the global `fetch` is
-the project's egress.
+[Bot API](https://core.telegram.org/bots/api) with `fetch`. The mind's own code can do the same,
+or import a few small helpers ([In the mind's code](#in-the-minds-code)). In every worker the
+platform loads (the mind's config worker, a run script, an agent's script) the global `fetch` is
+the mind's egress.
 
 Each bot's token is the secret `/secrets/telegram-<bot>`, field `token`. It is pinned to
 `https://api.telegram.org`, so egress sends it nowhere else. A request names it with a placeholder,
@@ -155,10 +155,10 @@ The package checks Telegram's deliveries against the bot's other secret,
 `/secrets/telegram-webhook-<bot>`. It is pinned to `https://telegram.invalid`, a host that can never
 exist, so egress sends it nowhere.
 
-## In the project's code
+## In the mind's code
 
 A run script cannot import a package, so an agent calls Telegram with `fetch`, as above. The
-project's own code (`worker.ts` and the files it imports) can import these helpers. `api` and
+mind's own code (`worker.ts` and the files it imports) can import these helpers. `api` and
 `sendAnswer` send with the global `fetch` and the bot's placeholder, as above:
 
 ```ts
@@ -190,7 +190,7 @@ import { api, MESSAGE_LIMIT, placeholder, sendAnswer, splitText } from "iterate-
   for (const text of splitText(report)) await api("acme-bot", "sendMessage", { chat_id: 42, text });
   ```
 
-- `sendAnswer(itx, to, answer)` sends an agent's answer to a chat: the words, then each project
+- `sendAnswer(itx, to, answer)` sends an agent's answer to a chat: the words, then each mind
   file (`itx.files`) as the photo, video, voice note, audio or document its content type and name
   say. The words go as messages of at most 4096 characters. One photo, video or document with words
   of at most 1,000 characters carries the words as its caption. A file that does not exist is said
@@ -212,7 +212,7 @@ file, and a voice note only for an Ogg file of at most 1 MB: a larger one arrive
 
 ## Good to know
 
-- **The token passes through the page once.** The form posts it to the project's own worker, which
+- **The token passes through the page once.** The form posts it to the mind's own worker, which
   checks it with Telegram's `getMe` and stores it as the secret `/secrets/telegram-<bot>`. It goes
   nowhere else. (A coding agent never takes it in chat: the person types it into the page.) The bot's
   name here is its username, lowercased, with `_` turned into `-`.
@@ -239,16 +239,16 @@ takes any row left with it:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "telegram", card: null } })`. Who was let in stays in the
 kv under `telegram/<bot>/`, for a bot connected again; delete those keys to forget them too.
 
-## When the project has agents of its own
+## When the mind has agents of its own
 
-By default each chat gets an agent here, and the agent answers by calling the Bot API. A project with
+By default each chat gets an agent here, and the agent answers by calling the Bot API. A mind with
 agents of its own (a chief of staff that already answers WhatsApp, say) lists
 `telegram({ deliver: "events" })` instead. The package then keeps the door: who is let in, invites,
 welcomes, who waits.
 For each message from someone who is let in it records `telegram/message-accepted` on
-`/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The project routes that event
+`/integrations/telegram/<bot>`, keyed by the update, and routes nothing. The mind routes that event
 to its agents and sends their answers itself, with `sendAnswer`
-([In the project's code](#in-the-projects-code)) or with `fetch`
+([In the mind's code](#in-the-minds-code)) or with `fetch`
 ([Calling Telegram](#calling-telegram)): `bot` names the secret, `chat.id` is the `chat_id` and
 `threadId` the `message_thread_id`. Its payload: `bot`, `updateId`, `messageId`,
 `chat { id, type, title }`, `threadId`, `from { id, name, username }`, `text`, `caption`,

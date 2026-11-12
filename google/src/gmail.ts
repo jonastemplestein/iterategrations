@@ -1,11 +1,11 @@
 // A GMAIL ACCOUNT'S MAIL ON A STREAM, PUSHED RATHER THAN POLLED. Gmail publishes each change to
 // the account's inbox and sent mail to a Pub/Sub topic (`watchGmail`, Gmail's `users.watch`), and
-// the topic's push subscription POSTs each notification to the project (`receiveGmailPush`), which
-// lands it on the account's stream as `gmail/push-received`. The project answers that event with a
+// the topic's push subscription POSTs each notification to the mind (`receiveGmailPush`), which
+// lands it on the account's stream as `gmail/push-received`. The mind answers that event with a
 // sync (`pullGmail`): each message the account receives or sends lands once on the stream as
-// `gmail/message-added`, its attachments as project files beside it. Each call to Gmail is a plain
+// `gmail/message-added`, its attachments as mind files beside it. Each call to Gmail is a plain
 // `fetch` with the account's placeholder: in every worker the platform loads, the global `fetch` is
-// the project's egress, which swaps the token in.
+// the mind's egress, which swaps the token in.
 // https://developers.google.com/workspace/gmail/api/guides/push
 import type { GoogleItx } from "./app.js";
 
@@ -34,7 +34,7 @@ const once = (append: Promise<unknown>): Promise<unknown> =>
 
 /** The push subscription's POST. It answers 405 to any other method, and 401 unless the SHA-256 of
  *  the URL's `token` query parameter is `tokenSha256` (lowercase hex): the token lives only in the
- *  subscription's URL, and the project keeps its hash. Pub/Sub delivers again anything but a 2xx,
+ *  subscription's URL, and the mind keeps its hash. Pub/Sub delivers again anything but a 2xx,
  *  so a body that is no Gmail notification, or one for an address that `streamOf` names no stream
  *  for, is acknowledged (204) and dropped. `streamOf` gets the address in lowercase. Otherwise
  *  `gmail/push-received` lands on that stream once per Pub/Sub message: `{ emailAddress,
@@ -134,7 +134,7 @@ type Gmail = <T>(url: string) => Promise<T>;
 /** The sync: what is new since the cursor (kv `gmail-sync:<path>`: Gmail's history id, and the ids
  *  still to fetch), at most 25 messages a call, oldest first; the rest wait for the next call.
  *  Each message lands once on `path` as `gmail/message-added`, its attachments, and a body over
- *  256 KiB, as project files under `<path>/<message id>/`. Drafts are skipped. The first call
+ *  256 KiB, as mind files under `<path>/<message id>/`. Drafts are skipped. The first call
  *  starts from the last day's mail, and so does one whose history Gmail no longer keeps (about a
  *  week). `secret` is the account's secret. Answers how many messages it added, how many wait,
  *  and the history id it has read to. */

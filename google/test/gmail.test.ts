@@ -1,8 +1,8 @@
 // Runs against dist, the package as shipped. `fakeGmail` puts a pretend Gmail behind the global
-// `fetch`, which is the project's egress in a loaded worker: it answers the profile, the last
+// `fetch`, which is the mind's egress in a loaded worker: it answers the profile, the last
 // day's messages, the history from each start it knows (any other start is a 404, as Gmail answers
 // a history id it no longer keeps), each message and attachment, and the watch, and it records
-// every request. `fakeProject` is the project's `itx`: a kv, files, and appends that refuse a key
+// every request. `fakeMind` is the mind's `itx`: a kv, files, and appends that refuse a key
 // used twice for another event (as the platform does; the same event again is a no-op).
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -12,7 +12,7 @@ import { pullGmail, receiveGmailPush, watchGmail } from "../dist/google.js";
 const SECRET = "/secrets/own-google-1a2b3c4d";
 const AUTHORIZATION = 'Bearer getSecret("/secrets/own-google-1a2b3c4d", { field: "accessToken" })';
 const STREAM = "/integrations/gmail-ada";
-const TOPIC = "projects/acme-example/topics/gmail-push";
+const TOPIC = "minds/acme-example/topics/gmail-push";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PUSH_URL = "https://gmail-push--acme.example/push";
 const TOKEN = "a-made-up-push-token";
@@ -98,7 +98,7 @@ function fakeGmail() {
   return gmail;
 }
 
-function fakeProject() {
+function fakeMind() {
   const kv: Record<string, string> = {};
   const files: Record<string, { contentType: string; data: Uint8Array }> = {};
   const appended: { path: string; event: any }[] = [];
@@ -171,26 +171,26 @@ const push = (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       message: { data: encode(JSON.stringify(data)), ...message },
-      subscription: "projects/acme-example/subscriptions/gmail-push",
+      subscription: "minds/acme-example/subscriptions/gmail-push",
     }),
   });
 const ADA = { emailAddress: "ada@example.com", historyId: "12345" };
 
 test("the push receiver takes only a POST whose token hashes to tokenSha256: anything else is refused and appends nothing", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const options = { tokenSha256: TOKEN_SHA256, streamOf: () => STREAM };
   const get = new Request(`${PUSH_URL}?token=${TOKEN}`);
-  assert.equal((await receiveGmailPush(get, project.itx, options)).status, 405);
+  assert.equal((await receiveGmailPush(get, mind.itx, options)).status, 405);
   for (const token of ["wrong", "", null])
-    assert.equal((await receiveGmailPush(push(token, ADA), project.itx, options)).status, 401);
+    assert.equal((await receiveGmailPush(push(token, ADA), mind.itx, options)).status, 401);
   // with no hash kept, no token is good
   const unset = { ...options, tokenSha256: null };
-  assert.equal((await receiveGmailPush(push(TOKEN, ADA), project.itx, unset)).status, 401);
-  assert.deepEqual(project.appended, []);
+  assert.equal((await receiveGmailPush(push(TOKEN, ADA), mind.itx, unset)).status, 401);
+  assert.deepEqual(mind.appended, []);
 });
 
 test("a push that is no Gmail notification, or names an address streamOf does not know, is acknowledged and appends nothing", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const asked: string[] = [];
   const options = {
     tokenSha256: TOKEN_SHA256,
@@ -205,13 +205,13 @@ test("a push that is no Gmail notification, or names an address streamOf does no
     push(TOKEN, ADA, { publishTime: "2026-10-09T08:00:00.000Z" }), // no Pub/Sub message id
     push(TOKEN, { emailAddress: "Grace@Example.com", historyId: "1" }),
   ])
-    assert.equal((await receiveGmailPush(request, project.itx, options)).status, 204);
+    assert.equal((await receiveGmailPush(request, mind.itx, options)).status, 204);
   assert.deepEqual(asked, ["grace@example.com"]);
-  assert.deepEqual(project.appended, []);
+  assert.deepEqual(mind.appended, []);
 });
 
 test("a notification lands once on the stream of the address it names, however often Pub/Sub delivers it, in either base64 alphabet", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const asked: string[] = [];
   const options = {
     tokenSha256: TOKEN_SHA256,
@@ -221,12 +221,12 @@ test("a notification lands once on the stream of the address it names, however o
     ),
   };
   const delivery = () => push(TOKEN, { emailAddress: "Ada@Example.com", historyId: 12345 });
-  assert.equal((await receiveGmailPush(delivery(), project.itx, options)).status, 204);
-  assert.equal((await receiveGmailPush(delivery(), project.itx, options)).status, 204);
+  assert.equal((await receiveGmailPush(delivery(), mind.itx, options)).status, 204);
+  assert.equal((await receiveGmailPush(delivery(), mind.itx, options)).status, 204);
   // the same Pub/Sub message again with other contents conflicts, and is acknowledged all the same
   const other = push(TOKEN, { emailAddress: "Ada@Example.com", historyId: 12399 });
-  assert.equal((await receiveGmailPush(other, project.itx, options)).status, 204);
-  assert.deepEqual(project.appended, [
+  assert.equal((await receiveGmailPush(other, mind.itx, options)).status, 204);
+  assert.deepEqual(mind.appended, [
     {
       path: STREAM,
       event: {
@@ -254,12 +254,10 @@ test("a notification lands once on the stream of the address it names, however o
     ["2070443601311542", (text: string) => Buffer.from(text).toString("base64")],
   ] as const) {
     const request = push(TOKEN, tilde, { messageId }, encode);
-    assert.equal((await receiveGmailPush(request, project.itx, either)).status, 204);
+    assert.equal((await receiveGmailPush(request, mind.itx, either)).status, 204);
   }
   assert.deepEqual(
-    project.appended
-      .slice(1)
-      .map((a) => [a.event.payload.emailAddress, a.event.payload.publishTime]),
+    mind.appended.slice(1).map((a) => [a.event.payload.emailAddress, a.event.payload.publishTime]),
     [
       ["ada~home@example.com", null],
       ["ada~home@example.com", null],
@@ -271,8 +269,8 @@ test("a notification lands once on the stream of the address it names, however o
 
 test("watchGmail asks Gmail, as the account, to publish the INBOX and SENT changes to the topic, and records the watch on the stream", async () => {
   const gmail = fakeGmail();
-  const project = fakeProject();
-  const watch = await watchGmail(project.itx, { secret: SECRET, path: STREAM, topicName: TOPIC });
+  const mind = fakeMind();
+  const watch = await watchGmail(mind.itx, { secret: SECRET, path: STREAM, topicName: TOPIC });
   assert.deepEqual(watch, {
     topicName: TOPIC,
     historyId: "4000",
@@ -286,24 +284,24 @@ test("watchGmail asks Gmail, as the account, to publish the INBOX and SENT chang
       body: { topicName: TOPIC, labelIds: ["INBOX", "SENT"], labelFilterBehavior: "include" },
     },
   ]);
-  assert.deepEqual(project.appended, [
+  assert.deepEqual(mind.appended, [
     { path: STREAM, event: { type: "gmail/watch-registered", payload: watch } },
   ]);
   // a watch Gmail refuses throws, and records nothing
   gmail.watch.status = 403;
   await assert.rejects(
-    watchGmail(project.itx, { secret: SECRET, path: STREAM, topicName: TOPIC }),
+    watchGmail(mind.itx, { secret: SECRET, path: STREAM, topicName: TOPIC }),
     /gmail watch answered 403: .*the topic refuses Gmail/,
   );
-  assert.equal(project.appended.length, 1);
+  assert.equal(mind.appended.length, 1);
 });
 
 // ---------------------------------------------------------------------- the sync
 
 test("a page of history becomes the ids still to fetch, drafts and ids already waiting skipped, and at most 25 messages land a run, oldest first", async () => {
   const gmail = fakeGmail();
-  const project = fakeProject();
-  project.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "500", pending: ["m00"] });
+  const mind = fakeMind();
+  mind.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "500", pending: ["m00"] });
   gmail.history["500"] = {
     history: [
       { messagesAdded: added(...ids(1, 20)) },
@@ -324,13 +322,13 @@ test("a page of history becomes the ids still to fetch, drafts and ids already w
   for (const id of ids(0, 29)) gmail.messages[id] = mail(id);
   delete gmail.messages["m05"]; // deleted since it arrived: nothing to add
 
-  assert.deepEqual(await pullGmail(project.itx, { secret: SECRET, path: STREAM }), {
+  assert.deepEqual(await pullGmail(mind.itx, { secret: SECRET, path: STREAM }), {
     added: 25,
     waiting: 4,
     historyId: "520",
   });
-  assert.deepEqual(project.added(), [...ids(0, 4), ...ids(6, 25)]);
-  assert.deepEqual(project.cursor(), { historyId: "520", pending: ids(26, 29) });
+  assert.deepEqual(mind.added(), [...ids(0, 4), ...ids(6, 25)]);
+  assert.deepEqual(mind.cursor(), { historyId: "520", pending: ids(26, 29) });
   assert.ok(gmail.requests.every((request) => request.authorization === AUTHORIZATION));
   assert.deepEqual(
     gmail.requests.filter((request) => request.url.includes("/history?")).map((r) => r.url),
@@ -342,33 +340,33 @@ test("a page of history becomes the ids still to fetch, drafts and ids already w
 
   // the next run takes the rest
   gmail.history["520"] = { historyId: "520" };
-  assert.deepEqual(await pullGmail(project.itx, { secret: SECRET, path: STREAM }), {
+  assert.deepEqual(await pullGmail(mind.itx, { secret: SECRET, path: STREAM }), {
     added: 4,
     waiting: 0,
     historyId: "520",
   });
-  assert.deepEqual(project.added().slice(-4), ids(26, 29));
+  assert.deepEqual(mind.added().slice(-4), ids(26, 29));
 });
 
 test("a history id Gmail no longer keeps (404) starts again from the last day's mail and keeps the ids still to fetch; so does a first sync", async () => {
   const gmail = fakeGmail();
-  const project = fakeProject();
-  project.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "7", pending: ["old"] });
+  const mind = fakeMind();
+  mind.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "7", pending: ["old"] });
   gmail.recent = ["new2", "new1", "old"]; // newest first
   gmail.history["900"] = { historyId: "900" };
   for (const id of ["old", "new1", "new2"]) gmail.messages[id] = mail(id);
-  assert.deepEqual(await pullGmail(project.itx, { secret: SECRET, path: STREAM }), {
+  assert.deepEqual(await pullGmail(mind.itx, { secret: SECRET, path: STREAM }), {
     added: 3,
     waiting: 0,
     historyId: "900",
   });
-  assert.deepEqual(project.added(), ["old", "new1", "new2"]);
+  assert.deepEqual(mind.added(), ["old", "new1", "new2"]);
   assert.ok(
     gmail.requests.some((r) => r.url === `${API}/messages?q=newer_than%3A1d&maxResults=500`),
   );
 
   // a first sync has no cursor: it starts from the profile's history id and the last day's mail
-  const first = fakeProject();
+  const first = fakeMind();
   assert.deepEqual(await pullGmail(first.itx, { secret: SECRET, path: STREAM }), {
     added: 3,
     waiting: 0,
@@ -377,9 +375,9 @@ test("a history id Gmail no longer keeps (404) starts again from the last day's 
   assert.deepEqual(first.added(), ["old", "new1", "new2"]);
 });
 
-test("a message lands once as gmail/message-added, field for field, its attachments and a long body as project files beside it", async () => {
+test("a message lands once as gmail/message-added, field for field, its attachments and a long body as mind files beside it", async () => {
   const gmail = fakeGmail();
-  const project = fakeProject();
+  const mind = fakeMind();
   const html = `<p>${"long ".repeat(60_000)}</p>`; // over 256 KiB
   const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // %PDF-
   gmail.attachments["att-1"] = pdf;
@@ -419,11 +417,11 @@ test("a message lands once as gmail/message-added, field for field, its attachme
       ],
     },
   };
-  project.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "500", pending: [] });
+  mind.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "500", pending: [] });
   gmail.history["500"] = { history: [{ messagesAdded: added("m1") }], historyId: "501" };
-  await pullGmail(project.itx, { secret: SECRET, path: STREAM });
+  await pullGmail(mind.itx, { secret: SECRET, path: STREAM });
 
-  assert.deepEqual(project.appended, [
+  assert.deepEqual(mind.appended, [
     {
       path: STREAM,
       event: {
@@ -467,22 +465,22 @@ test("a message lands once as gmail/message-added, field for field, its attachme
       },
     },
   ]);
-  assert.deepEqual(Object.keys(project.files).sort(), [
+  assert.deepEqual(Object.keys(mind.files).sort(), [
     `${STREAM}/m1/a_b.txt`,
     `${STREAM}/m1/body.html`,
     `${STREAM}/m1/plan (2).pdf`,
     `${STREAM}/m1/plan.pdf`,
   ]);
-  assert.deepEqual(project.files[`${STREAM}/m1/plan.pdf`], {
+  assert.deepEqual(mind.files[`${STREAM}/m1/plan.pdf`], {
     contentType: "application/pdf",
     data: pdf,
   });
-  assert.equal(project.files[`${STREAM}/m1/body.html`]!.contentType, "text/html; charset=utf-8");
-  assert.equal(new TextDecoder().decode(project.files[`${STREAM}/m1/body.html`]!.data), html);
+  assert.equal(mind.files[`${STREAM}/m1/body.html`]!.contentType, "text/html; charset=utf-8");
+  assert.equal(new TextDecoder().decode(mind.files[`${STREAM}/m1/body.html`]!.data), html);
 
   // seen again (Gmail's history names it under other labels later): nothing new lands
-  project.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "501", pending: ["m1"] });
+  mind.kv[`gmail-sync:${STREAM}`] = JSON.stringify({ historyId: "501", pending: ["m1"] });
   gmail.history["501"] = { historyId: "502" };
-  await pullGmail(project.itx, { secret: SECRET, path: STREAM });
-  assert.equal(project.appended.length, 1);
+  await pullGmail(mind.itx, { secret: SECRET, path: STREAM });
+  assert.equal(mind.appended.length, 1);
 });

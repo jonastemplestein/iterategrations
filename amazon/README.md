@@ -57,11 +57,11 @@ when you want agents to have a separate basket.
 
 ## Lend the HTTP API to iterate
 
-Use Node 22.18 or later and an iterate CLI with `provide`. Sign into the intended project:
+Use Node 22.18 or later and an iterate CLI with `provide`. Sign into the intended mind:
 
 ```sh
 iterate login
-iterate provide amazon/dist/provide.js --name amazon --project <project>
+iterate provide amazon/dist/provide.js --name amazon --mind <address>
 ```
 
 The bridge runs on your computer and keeps the authentication state there. Chrome is needed for
@@ -158,7 +158,7 @@ See the [research report](../reports/Amazon%20UK%20agent%20shopping.md) for the 
 On 6 October 2026, one explicitly approved order completed through a self-hosted Iterate MCP
 server and this local HTTP bridge. Amazon's order history confirmed the product, exact total
 and delivery status. The original basket was restored. The proof used a stored address and card
-on an Amazon Business account. On 7 October 2026, a native project agent completed a second
+on an Amazon Business account. On 7 October 2026, a native mind agent completed a second
 explicitly approved purchase on a dedicated consumer account. It confirmed the saved card,
 preserved a fresh review, submitted once and verified the order number, item, total and delivery
 window in Amazon's order history. The bridge ran on a Linux host; Chrome

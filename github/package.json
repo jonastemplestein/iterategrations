@@ -1,7 +1,7 @@
 {
   "name": "iterate-github",
   "version": "0.0.0",
-  "description": "A project's own GitHub App for an iterate project: a Connect GitHub page, the setup callback, and the webhook as events",
+  "description": "A mind's own GitHub App for an iterate mind: a Connect GitHub page, the setup callback, and the webhook as events",
   "type": "module",
   "exports": {
     ".": {

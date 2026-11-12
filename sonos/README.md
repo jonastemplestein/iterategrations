@@ -1,6 +1,6 @@
 # Sonos
 
-Give an iterate project's agents the person's Sonos system: play from their linked music services
+Give an iterate mind's agents the person's Sonos system: play from their linked music services
 (Spotify and others), Sonos Favorites and playlists, volume, grouping and transport. Nothing to
 receive and no package: Sonos hosts an official MCP server, [Sonos 27mcp](https://support.sonos.com/en/article/control-your-sonos-system-with-ai-using-sonos-27mcp),
 at `https://mcp.ws.sonos.com/mcp`, so this recipe is only the connection.
@@ -10,7 +10,7 @@ their Sonos account. It is Early Access, English only, and needs an S2 system on
 If an action fails, try it on <https://play.sonos.com>; the server can do only what that can.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
 
 ## 1. Connect
 
@@ -41,4 +41,4 @@ async (itx) => {
 ```
 
 Sonos's terms say the tools change: list them each time and never hard-code their names. Then
-write the connection down for the project's agents (`AGENTS.md` in `/repos/config`).
+write the connection down for the mind's agents (`AGENTS.md` in `/repos/config`).

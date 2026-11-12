@@ -14,7 +14,7 @@ const HEADERS = {
 
 /** `fetch` with the headers every Arbor call needs merged in, and `content-type:
  *  application/json` when there is a body. Headers in `init` win. In every worker the platform
- *  loads, the global `fetch` is the project's egress. */
+ *  loads, the global `fetch` is the mind's egress. */
 export function arborFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(
     init.body ? { ...HEADERS, "content-type": "application/json" } : HEADERS,

@@ -1,4 +1,4 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// Runs against dist, the package as shipped. `fakeMind` is a mind: secrets (a catalog that
 // answers the public fields a set named and never a secret one, an HMAC check run here as the
 // platform's is, a delete of a missing secret refused as SECRET_NOT_SET, and a collection link to a
 // pretend Dash), a kv, appends that refuse a key used twice for another event (as the platform
@@ -42,7 +42,7 @@ const SLUG_PATTERN = String.raw`[a-z0-9][a-z0-9\-]{0,99}`;
 
 type Call = { url: string; headers: Record<string, string> };
 
-function fakeProject(options: { slug?: string } = {}) {
+function fakeMind(options: { slug?: string } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
@@ -207,10 +207,10 @@ function fakeProject(options: { slug?: string } = {}) {
       }),
     );
   };
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   /** What was registered on `/integrations` for the Dash, in order. */
@@ -242,7 +242,7 @@ const location = (res: Response) => decodeURIComponent(res.headers.get("location
 const card = (status: object, label: string, routingSlug = "github") => ({
   title: "GitHub",
   description:
-    "The project's own GitHub App: each installation's webhook deliveries as events, and GitHub's API as the installation, with tokens the platform mints.",
+    "The mind's own GitHub App: each installation's webhook deliveries as events, and GitHub's API as the installation, with tokens the platform mints.",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });
@@ -261,57 +261,57 @@ const NOT_READY = card(
   "Connect",
 );
 
-/** A project with installation 42 connected through the page. */
+/** A mind with installation 42 connected through the page. */
 async function connected() {
-  const project = fakeProject();
-  await project.setUp();
-  await project.callback({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.callback({
     installation_id: "42",
     setup_action: "install",
-    state: await project.install(),
+    state: await mind.install(),
   });
-  return project;
+  return mind;
 }
 
 // ------------------------------------------------------------- the integration
 
 test("every name the package keeps is its own: no secret, stream or kv key the platform's shared GitHub App could own", async () => {
-  const project = await connected();
-  await project.deliver({ action: "opened", installation: { id: 42 } });
-  await project.callback({ setup_action: "request", state: await project.install() });
-  await project.callback({
+  const mind = await connected();
+  await mind.deliver({ action: "opened", installation: { id: 42 } });
+  await mind.callback({ setup_action: "request", state: await mind.install() });
+  await mind.callback({
     installation_id: "42",
     setup_action: "update",
-    state: await project.install(),
+    state: await mind.install(),
   });
-  project.faults.registry = 1; // leaves a tombstone behind, for a while
-  await project.page("/disconnect", { form: { id: "42" } });
-  await project.publish(3);
+  mind.faults.registry = 1; // leaves a tombstone behind, for a while
+  await mind.page("/disconnect", { form: { id: "42" } });
+  await mind.publish(3);
   // the App's own secret is the Dash's to write; the package writes the proof's and the installation's
-  assert.deepEqual([...project.written.secrets].sort(), [
+  assert.deepEqual([...mind.written.secrets].sort(), [
     "/secrets/own-github-42",
     "/secrets/own-github-42-proof",
   ]);
-  assert.ok(project.written.kv.size >= 5, [...project.written.kv].join(" "));
-  for (const path of project.written.secrets) assert.match(path, /^\/secrets\/own-github-/);
-  for (const key of project.written.kv) assert.match(key, /^own-github\//);
-  for (const { path } of project.appended)
+  assert.ok(mind.written.kv.size >= 5, [...mind.written.kv].join(" "));
+  for (const path of mind.written.secrets) assert.match(path, /^\/secrets\/own-github-/);
+  for (const key of mind.written.kv) assert.match(key, /^own-github\//);
+  for (const { path } of mind.appended)
     assert.match(path, /^\/integrations(\/own-github(\/\d+)?)?$/, path);
 });
 
 test("it answers its own routing slug, github unless another is given; anything but its page, callback and webhook is a 404", async () => {
   assert.equal(github().routingSlug, "github");
   assert.equal(github({ slug: "gh" }).routingSlug, "gh");
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/nope", "/oauth2/callbacks", "/webhook/x"])
-    assert.equal((await project.page(path)).status, 404, path);
-  // a member's stray path opens the project's scope and releases it, and writes nothing
-  assert.equal(project.scopes.opened, project.scopes.disposed);
-  assert.deepEqual(project.kv, {});
+    assert.equal((await mind.page(path)).status, 404, path);
+  // a member's stray path opens the mind's scope and releases it, and writes nothing
+  assert.equal(mind.scopes.opened, mind.scopes.disposed);
+  assert.deepEqual(mind.kv, {});
 });
 
 test("the page and the callback are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
@@ -319,33 +319,33 @@ test("the page and the callback are for members: whatever auth.require answers i
     ["/connect", { id: "42" }],
     ["/oauth2/callback?installation_id=42&setup_action=install&state=x", undefined],
   ] as const)
-    assert.equal((await project.page(path, { form }, refused)).status, 401, path);
-  assert.deepEqual(project.kv, {});
-  assert.deepEqual(project.secrets, {});
-  assert.deepEqual(project.calls, []);
-  assert.equal(project.scopes.opened, 0);
+    assert.equal((await mind.page(path, { form }, refused)).status, 401, path);
+  assert.deepEqual(mind.kv, {});
+  assert.deepEqual(mind.secrets, {});
+  assert.deepEqual(mind.calls, []);
+  assert.equal(mind.scopes.opened, 0);
 });
 
 test("each request opens one scope and releases it; the webhook asks for no member", async () => {
-  const project = fakeProject();
-  await project.page("/");
-  await project.deliver({ zen: "Keep it logically awesome." }, { event: "ping" });
-  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+  const mind = fakeMind();
+  await mind.page("/");
+  await mind.deliver({ zen: "Keep it logically awesome." }, { event: "ping" });
+  assert.deepEqual(mind.scopes, { opened: 2, disposed: 2 });
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page shows the URLs to paste at GitHub, from the request's origin and the base path a paths ingress strips, each with a Copy button", async () => {
-  const project = fakeProject();
-  const res = await project.page("/", {
-    headers: { "x-iterate-base-path": "/projects/iterate" },
+  const mind = fakeMind();
+  const res = await mind.page("/", {
+    headers: { "x-iterate-base-path": "/minds/iterate" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
   for (const url of [
-    `${ORIGIN}/projects/iterate/`,
-    `${ORIGIN}/projects/iterate/oauth2/callback`,
-    `${ORIGIN}/projects/iterate/webhook`,
+    `${ORIGIN}/minds/iterate/`,
+    `${ORIGIN}/minds/iterate/oauth2/callback`,
+    `${ORIGIN}/minds/iterate/webhook`,
   ])
     assert.ok(html.includes(`data-copy="${url}"`), url);
   assert.match(html, /Redirect on update/);
@@ -362,13 +362,13 @@ test("the page shows the URLs to paste at GitHub, from the request's origin and 
 });
 
 test("the page links to the Dash's one form for the App, its ID and slug public beside its secrets, which never pass through this code; the form checks the ID's and the slug's shapes as the browser does", async () => {
-  const project = fakeProject();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  const html = await (await mind.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
   assert.match(html, />Save the App</);
-  assert.match(project.collected[0]!.description, /BEGIN and END lines/);
+  assert.match(mind.collected[0]!.description, /BEGIN and END lines/);
   assert.deepEqual(
-    project.collected.map((input) => ({ ...input, description: undefined })),
+    mind.collected.map((input) => ({ ...input, description: undefined })),
     [
       {
         path: "/secrets/own-github-app",
@@ -403,72 +403,72 @@ test("the page links to the Dash's one form for the App, its ID and slug public 
   assert.match("iterate-acme", shape(SLUG_PATTERN));
   for (const value of ["Not A Slug", "-acme", "https://github.com/apps/iterate-acme"])
     assert.doesNotMatch(value, shape(SLUG_PATTERN));
-  await project.setUp();
-  assert.match(await (await project.page("/")).text(), />Replace it</);
+  await mind.setUp();
+  assert.match(await (await mind.page("/")).text(), />Replace it</);
 });
 
 test("the App is read from the catalog's public fields: the page shows its ID and link, Install leads to it, and the kv keeps no copy", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  await mind.setUp();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /App 123456/);
   assert.match(html, /href="https:\/\/github\.com\/apps\/iterate-acme"/);
   assert.doesNotMatch(html, /has no public App ID/);
-  const to = new URL((await project.page("/install", { form: {} })).headers.get("location")!);
+  const to = new URL((await mind.page("/install", { form: {} })).headers.get("location")!);
   assert.equal(to.origin + to.pathname, "https://github.com/apps/iterate-acme/installations/new");
-  await project.callback({
+  await mind.callback({
     installation_id: "42",
     setup_action: "install",
     state: to.searchParams.get("state")!,
   });
-  assert.equal(project.secrets["/secrets/own-github-42"]!.material.appId, APP_ID);
-  assert.ok(!Object.values(project.kv).some((value) => value.includes("iterate-acme")));
+  assert.equal(mind.secrets["/secrets/own-github-42"]!.material.appId, APP_ID);
+  assert.ok(!Object.values(mind.kv).some((value) => value.includes("iterate-acme")));
 });
 
 test("a secret without the public fields is not set up: the page asks to save the App again, and Install is refused", async () => {
-  const project = fakeProject();
-  project.secrets["/secrets/own-github-app"] = structuredClone(SECRETS_ALONE);
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  mind.secrets["/secrets/own-github-app"] = structuredClone(SECRETS_ALONE);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /has no public App ID and slug\. Save the App again/);
   assert.match(html, />Save the App</);
   assert.doesNotMatch(html, /action="install"/);
-  assert.match(location(await project.page("/install", { form: {} })), /error=Save the App first/);
+  assert.match(location(await mind.page("/install", { form: {} })), /error=Save the App first/);
   assert.deepEqual(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-github/pending/")),
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-github/pending/")),
     [],
   );
 });
 
 test("Install needs the App; then it sends the person to GitHub with a nonce good for an hour", async () => {
-  const project = fakeProject();
-  assert.match(location(await project.page("/install", { form: {} })), /error=Save the App first/);
+  const mind = fakeMind();
+  assert.match(location(await mind.page("/install", { form: {} })), /error=Save the App first/);
   assert.deepEqual(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-github/pending/")),
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-github/pending/")),
     [],
   );
-  await project.setUp();
-  const res = await project.page("/install", { form: {} });
+  await mind.setUp();
+  const res = await mind.page("/install", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
   assert.equal(to.origin + to.pathname, "https://github.com/apps/iterate-acme/installations/new");
   const nonce = to.searchParams.get("state")!;
   assert.match(nonce, /^[0-9a-f]{32}$/);
-  const at = JSON.parse(project.kv[`own-github/pending/${nonce}`]!).at;
+  const at = JSON.parse(mind.kv[`own-github/pending/${nonce}`]!).at;
   assert.ok(Math.abs(Date.now() - at) < 5000);
-  assert.match(await (await project.page("/")).text(), /<form method="post" action="install">/);
+  assert.match(await (await mind.page("/")).text(), /<form method="post" action="install">/);
 });
 
 test("no other site can frame the page's answers or the callback's", async () => {
-  const project = fakeProject();
-  await project.setUp();
+  const mind = fakeMind();
+  await mind.setUp();
   const answers = [
-    await project.page("/connect", { form: { id: "7" } }),
-    await project.page("/disconnect", { form: { id: "7" } }),
-    await project.callback({ installation_id: "42", setup_action: "install", state: "x" }),
-    await project.callback({
+    await mind.page("/connect", { form: { id: "7" } }),
+    await mind.page("/disconnect", { form: { id: "7" } }),
+    await mind.callback({ installation_id: "42", setup_action: "install", state: "x" }),
+    await mind.callback({
       installation_id: "42",
       setup_action: "install",
-      state: await project.install(),
+      state: await mind.install(),
     }),
   ];
   for (const res of answers) {
@@ -480,11 +480,11 @@ test("no other site can frame the page's answers or the callback's", async () =>
 // --------------------------------------------------------------- the callback
 
 test("the callback for an install sets the installation's secret, proves it with one call, lists it, registers its row and the card, and sends the person back", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const nonce = await project.install();
-  const before = project.registry().length;
-  const res = await project.callback({
+  const mind = fakeMind();
+  await mind.setUp();
+  const nonce = await mind.install();
+  const before = mind.registry().length;
+  const res = await mind.callback({
     installation_id: "42",
     setup_action: "install",
     state: nonce,
@@ -492,7 +492,7 @@ test("the callback for an install sets the installation's secret, proves it with
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "../?connected=acme");
   // the App ID and the key's placeholder, which the platform resolves at each mint
-  assert.deepEqual(project.secrets["/secrets/own-github-42"], {
+  assert.deepEqual(mind.secrets["/secrets/own-github-42"], {
     material: {
       appId: "123456",
       privateKey: 'getSecret("/secrets/own-github-app", { field: "privateKey" })',
@@ -503,12 +503,12 @@ test("the callback for an install sets the installation's secret, proves it with
         kind: "github-app-installation",
         apiOrigin: "https://api.github.com",
         installationId: "42",
-        client: { project: "github" },
+        client: { mind: "github" },
       },
     },
   });
   // proved through a secret of its own, which is gone again
-  assert.deepEqual(project.calls, [
+  assert.deepEqual(mind.calls, [
     {
       url: "https://api.github.com/installation/repositories?per_page=1",
       headers: {
@@ -518,44 +518,44 @@ test("the callback for an install sets the installation's secret, proves it with
       },
     },
   ]);
-  assert.equal(project.secrets["/secrets/own-github-42-proof"], undefined);
-  assert.equal(JSON.parse(project.kv["own-github/installations/42"]!).account, "acme");
+  assert.equal(mind.secrets["/secrets/own-github-42-proof"], undefined);
+  assert.equal(JSON.parse(mind.kv["own-github/installations/42"]!).account, "acme");
   // the nonce is claimed once, in the log: kv cannot claim anything
-  const claims = project.appended.filter((a) => a.event.type === "own-github/nonce-used");
+  const claims = mind.appended.filter((a) => a.event.type === "own-github/nonce-used");
   assert.equal(claims.length, 1);
   assert.equal(claims[0]!.path, "/integrations/own-github");
   assert.equal(claims[0]!.event.idempotencyKey, `own-github:nonce:${nonce}`);
   assert.equal(claims[0]!.event.payload.nonce, nonce);
   // the card first: a row stands under its card alone
-  assert.deepEqual(project.registry().slice(before), [
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "github", card: READY } },
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "github", connection: "42", row: row() },
     },
   ]);
-  const html = await (await project.page("/?connected=acme")).text();
+  const html = await (await mind.page("/?connected=acme")).text();
   assert.match(html, /Installed on acme/);
   assert.match(html, /<b>acme<\/b> <span class="muted">installation 42/);
 });
 
 test("the callback for an update does the same; a nonce is good once, and a missing, unknown or expired one is refused and sets nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const nonce = await project.install();
-  const updated = await project.callback({
+  const mind = fakeMind();
+  await mind.setUp();
+  const nonce = await mind.install();
+  const updated = await mind.callback({
     installation_id: "42",
     setup_action: "update",
     state: nonce,
   });
   assert.equal(updated.headers.get("location"), "../?connected=acme");
-  delete project.secrets["/secrets/own-github-42"];
-  delete project.kv["own-github/installations/42"];
+  delete mind.secrets["/secrets/own-github-42"];
+  delete mind.kv["own-github/installations/42"];
 
-  const expired = await project.install();
-  project.kv[`own-github/pending/${expired}`] = JSON.stringify({ at: Date.now() - 61 * 60 * 1000 });
+  const expired = await mind.install();
+  mind.kv[`own-github/pending/${expired}`] = JSON.stringify({ at: Date.now() - 61 * 60 * 1000 });
   for (const state of [nonce, "", "0".repeat(32), "not-a-nonce", expired]) {
-    const res = await project.callback({ installation_id: "42", setup_action: "install", state });
+    const res = await mind.callback({ installation_id: "42", setup_action: "install", state });
     assert.match(
       location(res),
       /error=GitHub came back from an install this page did not start/,
@@ -563,217 +563,217 @@ test("the callback for an update does the same; a nonce is good once, and a miss
     );
   }
   assert.equal(
-    (await project.callback({ installation_id: "42", setup_action: "install" })).status,
+    (await mind.callback({ installation_id: "42", setup_action: "install" })).status,
     303,
   );
-  assert.equal(project.secrets["/secrets/own-github-42"], undefined);
-  assert.equal(project.kv["own-github/installations/42"], undefined);
+  assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
 });
 
 test("two callbacks with one nonce, started together: exactly one goes on, and the other writes nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const nonce = await project.install();
+  const mind = fakeMind();
+  await mind.setUp();
+  const nonce = await mind.install();
   const answers = await Promise.all(
     [0, 1].map(() =>
-      project.callback({ installation_id: "42", setup_action: "install", state: nonce }),
+      mind.callback({ installation_id: "42", setup_action: "install", state: nonce }),
     ),
   );
   const flashes = answers.map(location).sort();
   assert.equal(flashes.filter((flash) => flash.endsWith("?connected=acme")).length, 1, flashes[0]);
   assert.equal(flashes.filter((flash) => flash.includes("?error=")).length, 1, flashes[1]);
-  assert.equal(project.calls.length, 1, "one proof");
-  assert.equal(project.secrets["/secrets/own-github-42"]!.material.appId, APP_ID);
-  assert.ok(project.kv["own-github/installations/42"]);
-  assert.equal(project.appended.filter((a) => a.event.type === "own-github/nonce-used").length, 1);
+  assert.equal(mind.calls.length, 1, "one proof");
+  assert.equal(mind.secrets["/secrets/own-github-42"]!.material.appId, APP_ID);
+  assert.ok(mind.kv["own-github/installations/42"]);
+  assert.equal(mind.appended.filter((a) => a.event.type === "own-github/nonce-used").length, 1);
 });
 
 test("the callback for a request records a row that waits for an owner's approval; the installation that follows replaces it", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const nonce = await project.install();
-  const res = await project.callback({ setup_action: "request", state: nonce });
+  const mind = fakeMind();
+  await mind.setUp();
+  const nonce = await mind.install();
+  const res = await mind.callback({ setup_action: "request", state: nonce });
   assert.equal(res.headers.get("location"), "../?requested=1");
   const connection = `request-${nonce.slice(0, 16)}`;
-  assert.equal(JSON.parse(project.kv[`own-github/installations/${connection}`]!).requested, true);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-github-app"]);
-  const requested = project.registry().at(-1)!;
+  assert.equal(JSON.parse(mind.kv[`own-github/installations/${connection}`]!).requested, true);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-github-app"]);
+  const requested = mind.registry().at(-1)!;
   assert.equal(requested.payload.connection, connection);
   assert.equal(requested.payload.row.account, "An installation request");
   assert.deepEqual(requested.payload.row.status, {
     kind: "attention",
     text: "Awaiting an owner's approval",
   });
-  assert.match(await (await project.page("/?requested=1")).text(), /awaiting an owner's approval/);
+  assert.match(await (await mind.page("/?requested=1")).text(), /awaiting an owner's approval/);
 
   // the owner approves it, and GitHub comes back with the request's own nonce, after the hour too
   const removed = (connection: string) =>
-    project
+    mind
       .registry()
       .some((event) => event.payload.connection === connection && event.payload.row === null);
-  project.github.accounts["77"] = "acme-org";
-  const approved = await project.callback({
+  mind.github.accounts["77"] = "acme-org";
+  const approved = await mind.callback({
     installation_id: "77",
     setup_action: "install",
     state: nonce,
   });
   assert.equal(approved.headers.get("location"), "../?connected=acme-org");
-  assert.equal(project.kv[`own-github/installations/${connection}`], undefined);
+  assert.equal(mind.kv[`own-github/installations/${connection}`], undefined);
   assert.ok(removed(connection));
-  assert.equal(JSON.parse(project.kv["own-github/installations/77"]!).account, "acme-org");
+  assert.equal(JSON.parse(mind.kv["own-github/installations/77"]!).account, "acme-org");
   // and the request's nonce is spent with it
-  const again = await project.callback({ setup_action: "request", state: nonce });
+  const again = await mind.callback({ setup_action: "request", state: nonce });
   assert.match(location(again), /error=GitHub came back from an install this page did not start/);
 });
 
 test("an install answers only the request whose nonce came back with it: the others wait, for their approval or for Forget", async () => {
-  const project = fakeProject();
-  await project.setUp();
+  const mind = fakeMind();
+  await mind.setUp();
   const requested: string[] = [];
   for (const _org of ["a", "b"]) {
-    const nonce = await project.install();
-    await project.callback({ setup_action: "request", state: nonce });
+    const nonce = await mind.install();
+    await mind.callback({ setup_action: "request", state: nonce });
     requested.push(nonce);
   }
   const waiting = () =>
-    Object.keys(project.kv)
+    Object.keys(mind.kv)
       .filter((key) => key.startsWith("own-github/installations/request-"))
       .sort();
   const both = requested.map((nonce) => `own-github/installations/request-${nonce.slice(0, 16)}`);
   assert.deepEqual(waiting(), [...both].sort());
 
   // an installation no request asked for leaves both waiting
-  await project.callback({
+  await mind.callback({
     installation_id: "42",
     setup_action: "install",
-    state: await project.install(),
+    state: await mind.install(),
   });
   assert.deepEqual(waiting(), [...both].sort());
-  assert.ok(!project.registry().some((event) => event.payload.row === null));
+  assert.ok(!mind.registry().some((event) => event.payload.row === null));
 
   // the approval of the first takes its row; the second waits
-  project.github.accounts["77"] = "org-a";
-  await project.callback({ installation_id: "77", setup_action: "install", state: requested[0]! });
+  mind.github.accounts["77"] = "org-a";
+  await mind.callback({ installation_id: "77", setup_action: "install", state: requested[0]! });
   assert.deepEqual(waiting(), [both[1]]);
-  const nulls = project.registry().filter((event) => event.payload.row === null);
+  const nulls = mind.registry().filter((event) => event.payload.row === null);
   assert.deepEqual(
     nulls.map((event) => event.payload.connection),
     [`request-${requested[0]!.slice(0, 16)}`],
   );
   // Forget takes the second away by hand
-  await project.page("/disconnect", { form: { id: `request-${requested[1]!.slice(0, 16)}` } });
+  await mind.page("/disconnect", { form: { id: `request-${requested[1]!.slice(0, 16)}` } });
   assert.deepEqual(waiting(), []);
 });
 
 test("a proof GitHub refuses deletes the secret again, shows the error, and lists nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.github.refuse = 404;
-  const before = project.registry().length;
-  const res = await project.callback({
+  const mind = fakeMind();
+  await mind.setUp();
+  mind.github.refuse = 404;
+  const before = mind.registry().length;
+  const res = await mind.callback({
     installation_id: "42",
     setup_action: "install",
-    state: await project.install(),
+    state: await mind.install(),
   });
   assert.match(location(res), /error=GitHub refused installation 42 \(HTTP 404: Not Found\)/);
-  assert.equal(project.secrets["/secrets/own-github-42"], undefined);
-  assert.equal(project.secrets["/secrets/own-github-42-proof"], undefined);
-  assert.equal(project.kv["own-github/installations/42"], undefined);
-  assert.equal(project.registry().length, before);
-  const html = await (await project.page(`/${res.headers.get("location")!.slice(3)}`)).text();
+  assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+  assert.equal(mind.secrets["/secrets/own-github-42-proof"], undefined);
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
+  assert.equal(mind.registry().length, before);
+  const html = await (await mind.page(`/${res.headers.get("location")!.slice(3)}`)).text();
   assert.match(html, /class="error">GitHub refused installation 42/);
 });
 
 test("an update whose proof fails leaves the installation as it was: its App ID and its minted token", async () => {
-  const project = await connected();
+  const mind = await connected();
   // the installation is in use: the platform has minted its token
-  await project.itx.fetch(
+  await mind.itx.fetch(
     new Request("https://api.github.com/installation/repositories", {
       headers: {
         authorization: 'Bearer getSecret("/secrets/own-github-42", { field: "accessToken" })',
       },
     }),
   );
-  const kept = structuredClone(project.secrets["/secrets/own-github-42"]);
+  const kept = structuredClone(mind.secrets["/secrets/own-github-42"]);
   assert.match(kept!.material.accessToken, /^a-made-up-token-/);
 
   // GitHub is down, then a wrong App ID is saved: both updates fail, and neither touches it
-  project.github.refuse = 502;
-  const down = await project.callback({
+  mind.github.refuse = 502;
+  const down = await mind.callback({
     installation_id: "42",
     setup_action: "update",
-    state: await project.install(),
+    state: await mind.install(),
   });
   assert.match(location(down), /error=GitHub refused installation 42 \(HTTP 502/);
-  project.github.refuse = 0;
-  project.secrets["/secrets/own-github-app"] = structuredClone(APP_SECRET);
-  project.secrets["/secrets/own-github-app"].material.appId = "999999";
-  const wrong = await project.callback({
+  mind.github.refuse = 0;
+  mind.secrets["/secrets/own-github-app"] = structuredClone(APP_SECRET);
+  mind.secrets["/secrets/own-github-app"].material.appId = "999999";
+  const wrong = await mind.callback({
     installation_id: "42",
     setup_action: "update",
-    state: await project.install(),
+    state: await mind.install(),
   });
   assert.match(location(wrong), /error=GitHub refused installation 42 \(HTTP 401/);
-  assert.deepEqual(project.secrets["/secrets/own-github-42"], kept);
-  assert.equal(project.secrets["/secrets/own-github-42-proof"], undefined);
-  assert.equal(JSON.parse(project.kv["own-github/installations/42"]!).account, "acme");
+  assert.deepEqual(mind.secrets["/secrets/own-github-42"], kept);
+  assert.equal(mind.secrets["/secrets/own-github-42-proof"], undefined);
+  assert.equal(JSON.parse(mind.kv["own-github/installations/42"]!).account, "acme");
 });
 
 test("an update that passes its proof replaces the installation's secret, and the proof's secret goes", async () => {
-  const project = await connected();
-  await project.itx.fetch(
+  const mind = await connected();
+  await mind.itx.fetch(
     new Request("https://api.github.com/installation/repositories", {
       headers: {
         authorization: 'Bearer getSecret("/secrets/own-github-42", { field: "accessToken" })',
       },
     }),
   );
-  project.github.accounts["42"] = "acme-renamed";
-  const res = await project.callback({
+  mind.github.accounts["42"] = "acme-renamed";
+  const res = await mind.callback({
     installation_id: "42",
     setup_action: "update",
-    state: await project.install(),
+    state: await mind.install(),
   });
   assert.equal(res.headers.get("location"), "../?connected=acme-renamed");
   // set again from the proof's material: the platform mints a fresh token at the next use
-  assert.deepEqual(project.secrets["/secrets/own-github-42"]!.material, {
+  assert.deepEqual(mind.secrets["/secrets/own-github-42"]!.material, {
     appId: APP_ID,
     privateKey: 'getSecret("/secrets/own-github-app", { field: "privateKey" })',
   });
-  assert.equal(project.secrets["/secrets/own-github-42-proof"], undefined);
-  assert.equal(JSON.parse(project.kv["own-github/installations/42"]!).account, "acme-renamed");
+  assert.equal(mind.secrets["/secrets/own-github-42-proof"], undefined);
+  assert.equal(JSON.parse(mind.kv["own-github/installations/42"]!).account, "acme-renamed");
 });
 
 test("an existing installation connected by its id is proved and listed; a bad id is refused", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   assert.match(
-    location(await project.page("/connect", { form: { id: "77" } })),
+    location(await mind.page("/connect", { form: { id: "77" } })),
     /error=Save the App first/,
   );
-  await project.setUp();
-  const html = await (await project.page("/")).text();
+  await mind.setUp();
+  const html = await (await mind.page("/")).text();
   assert.ok(html.includes('<form method="post" action="connect" class="block">'));
   assert.ok(html.includes('pattern="\\d{1,20}"'));
   assert.match(html, /github\.com\/settings\/installations\/&lt;id&gt;/);
 
   // GitHub came back for no install: the installation exists, and the page is given its ID
-  project.github.accounts["77"] = "acme-org";
-  const before = project.registry().length;
-  const res = await project.page("/connect", { form: { id: " 77 " } });
+  mind.github.accounts["77"] = "acme-org";
+  const before = mind.registry().length;
+  const res = await mind.page("/connect", { form: { id: " 77 " } });
   assert.equal(res.headers.get("location"), "./?connected=acme-org");
   // proved through the App's key, on a secret of its own, before the installation's is set
   assert.deepEqual(
-    project.calls.map((call) => call.headers.authorization),
+    mind.calls.map((call) => call.headers.authorization),
     ['Bearer getSecret("/secrets/own-github-77-proof", { field: "accessToken" })'],
   );
-  assert.equal(project.secrets["/secrets/own-github-77-proof"], undefined);
-  assert.deepEqual(project.secrets["/secrets/own-github-77"]!.material, {
+  assert.equal(mind.secrets["/secrets/own-github-77-proof"], undefined);
+  assert.deepEqual(mind.secrets["/secrets/own-github-77"]!.material, {
     appId: APP_ID,
     privateKey: 'getSecret("/secrets/own-github-app", { field: "privateKey" })',
   });
-  assert.equal(JSON.parse(project.kv["own-github/installations/77"]!).account, "acme-org");
+  assert.equal(JSON.parse(mind.kv["own-github/installations/77"]!).account, "acme-org");
   // the card first: a row stands under its card alone
-  assert.deepEqual(project.registry().slice(before), [
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "github", card: READY } },
     {
       type: CONNECTION_CONFIGURED,
@@ -793,38 +793,38 @@ test("an existing installation connected by its id is proved and listed; a bad i
     },
   ]);
   // its deliveries land now
-  await project.deliver({ action: "opened", installation: { id: 77 } });
-  assert.ok(project.appended.some((a) => a.path === "/integrations/own-github/77"));
+  await mind.deliver({ action: "opened", installation: { id: 77 } });
+  assert.ok(mind.appended.some((a) => a.path === "/integrations/own-github/77"));
 
   // a bad ID, and one GitHub refuses (another App's installation), write nothing
-  const kv = structuredClone(project.kv);
-  const registered = project.registry().length;
+  const kv = structuredClone(mind.kv);
+  const registered = mind.registry().length;
   for (const id of ["", "abc", "12 34", "1".repeat(21), "../42"])
     assert.match(
-      location(await project.page("/connect", { form: { id } })),
+      location(await mind.page("/connect", { form: { id } })),
       /error=The installation ID is a number/,
       id,
     );
-  project.github.refuse = 404;
+  mind.github.refuse = 404;
   assert.match(
-    location(await project.page("/connect", { form: { id: "78" } })),
+    location(await mind.page("/connect", { form: { id: "78" } })),
     /error=GitHub refused installation 78 \(HTTP 404/,
   );
-  assert.equal(project.secrets["/secrets/own-github-78"], undefined);
-  assert.equal(project.secrets["/secrets/own-github-78-proof"], undefined);
-  assert.deepEqual(project.kv, kv);
-  assert.equal(project.registry().length, registered);
+  assert.equal(mind.secrets["/secrets/own-github-78"], undefined);
+  assert.equal(mind.secrets["/secrets/own-github-78-proof"], undefined);
+  assert.deepEqual(mind.kv, kv);
+  assert.equal(mind.registry().length, registered);
 });
 
 test("Install forgets the nonces of installs that never came back, after an hour", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const stale = await project.install();
-  project.kv[`own-github/pending/${stale}`] = JSON.stringify({ at: Date.now() - 61 * 60 * 1000 });
-  const fresh = await project.install();
-  const next = await project.install();
+  const mind = fakeMind();
+  await mind.setUp();
+  const stale = await mind.install();
+  mind.kv[`own-github/pending/${stale}`] = JSON.stringify({ at: Date.now() - 61 * 60 * 1000 });
+  const fresh = await mind.install();
+  const next = await mind.install();
   assert.deepEqual(
-    Object.keys(project.kv)
+    Object.keys(mind.kv)
       .filter((key) => key.startsWith("own-github/pending/"))
       .sort(),
     [`own-github/pending/${fresh}`, `own-github/pending/${next}`].sort(),
@@ -834,15 +834,15 @@ test("Install forgets the nonces of installs that never came back, after an hour
 // ---------------------------------------------------------------- the webhook
 
 test("a signed delivery lands once on its installation's stream, keyed by its delivery id: a redelivery adds nothing", async () => {
-  const project = await connected();
+  const mind = await connected();
   const body = { action: "opened", installation: { id: 42 }, issue: { number: 7 } };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await project.deliver(body);
+    const res = await mind.deliver(body);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { ok: true });
   }
   assert.deepEqual(
-    project.appended.filter((a) => a.path.startsWith("/integrations/own-github/")),
+    mind.appended.filter((a) => a.path.startsWith("/integrations/own-github/")),
     [
       {
         path: "/integrations/own-github/42",
@@ -861,32 +861,32 @@ test("a signed delivery lands once on its installation's stream, keyed by its de
 });
 
 test("an unsigned or wrongly signed delivery is 401 and stores nothing; a GET is 405", async () => {
-  const project = await connected();
+  const mind = await connected();
   const body = { action: "opened", installation: { id: 42 } };
-  assert.equal((await project.deliver(body, { secret: null })).status, 401);
-  assert.equal((await project.deliver(body, { secret: "another" })).status, 401);
-  assert.equal((await project.page("/webhook")).status, 405);
+  assert.equal((await mind.deliver(body, { secret: null })).status, 401);
+  assert.equal((await mind.deliver(body, { secret: "another" })).status, 401);
+  assert.equal((await mind.page("/webhook")).status, 405);
   assert.equal(
-    project.appended.filter((a) => a.path.startsWith("/integrations/own-github/")).length,
+    mind.appended.filter((a) => a.path.startsWith("/integrations/own-github/")).length,
     0,
   );
   // before the App's secrets are saved, nothing can be checked, so nothing is taken
-  const fresh = fakeProject();
+  const fresh = fakeMind();
   assert.equal((await fresh.deliver(body)).status, 401);
 });
 
 test("a delivery for an installation the page did not connect, or for none, is acknowledged and dropped", async () => {
-  const project = await connected();
+  const mind = await connected();
   for (const body of [
     { action: "opened", installation: { id: 7 } },
     { zen: "Speak like a human." },
   ]) {
-    const res = await project.deliver(body);
+    const res = await mind.deliver(body);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { ok: true, ignored: "unknown-installation" });
   }
   assert.equal(
-    project.appended.filter((a) => a.path.startsWith("/integrations/own-github/")).length,
+    mind.appended.filter((a) => a.path.startsWith("/integrations/own-github/")).length,
     0,
   );
 });
@@ -894,82 +894,82 @@ test("a delivery for an installation the page did not connect, or for none, is a
 // --------------------------------------------------------------- disconnect
 
 test("disconnect deletes the installation's secret and kv entry, takes its row away and registers the card; the App stays installed at GitHub", async () => {
-  const project = await connected();
-  const before = project.registry().length;
-  const res = await project.page("/disconnect", { form: { id: "42" } });
+  const mind = await connected();
+  const before = mind.registry().length;
+  const res = await mind.page("/disconnect", { form: { id: "42" } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.secrets["/secrets/own-github-42"], undefined);
-  assert.ok(project.secrets["/secrets/own-github-app"], "the App's own secret stays");
-  assert.equal(project.kv["own-github/installations/42"], undefined);
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+  assert.ok(mind.secrets["/secrets/own-github-app"], "the App's own secret stays");
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "github", connection: "42", row: null },
     },
     { type: CONFIGURED, payload: { integration: "github", card: READY } },
   ]);
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /The App stays installed at GitHub/);
   assert.match(html, /None yet/);
   // a delivery for it is dropped now
-  const dropped = await project.deliver({ installation: { id: 42 } });
+  const dropped = await mind.deliver({ installation: { id: 42 } });
   assert.deepEqual(await dropped.json(), { ok: true, ignored: "unknown-installation" });
   // and an unknown one changes nothing
   assert.match(
-    location(await project.page("/disconnect", { form: { id: "43" } })),
+    location(await mind.page("/disconnect", { form: { id: "43" } })),
     /Unknown installation/,
   );
 });
 
 test("a Disconnect whose secret cannot be deleted says so, and keeps the installation and its row for another try", async () => {
-  const project = await connected();
-  const before = project.registry().length;
-  project.faults.deletes = true;
-  const res = await project.page("/disconnect", { form: { id: "42" } });
+  const mind = await connected();
+  const before = mind.registry().length;
+  mind.faults.deletes = true;
+  const res = await mind.page("/disconnect", { form: { id: "42" } });
   assert.match(location(res), /error=the secret store is unavailable/);
-  assert.ok(project.secrets["/secrets/own-github-42"], "the token stays, and says so");
-  assert.ok(project.kv["own-github/installations/42"]);
-  assert.equal(project.kv["own-github/removed/42"], undefined);
-  assert.equal(project.registry().length, before, "no row is taken away");
-  project.faults.deletes = false;
+  assert.ok(mind.secrets["/secrets/own-github-42"], "the token stays, and says so");
+  assert.ok(mind.kv["own-github/installations/42"]);
+  assert.equal(mind.kv["own-github/removed/42"], undefined);
+  assert.equal(mind.registry().length, before, "no row is taken away");
+  mind.faults.deletes = false;
   assert.equal(
-    (await project.page("/disconnect", { form: { id: "42" } })).headers.get("location"),
+    (await mind.page("/disconnect", { form: { id: "42" } })).headers.get("location"),
     "./",
   );
-  assert.equal(project.secrets["/secrets/own-github-42"], undefined);
-  assert.equal(project.kv["own-github/installations/42"], undefined);
+  assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
 });
 
 test("a Disconnect whose secret is already gone finishes", async () => {
-  const project = await connected();
-  delete project.secrets["/secrets/own-github-42"];
-  const res = await project.page("/disconnect", { form: { id: "42" } });
+  const mind = await connected();
+  delete mind.secrets["/secrets/own-github-42"];
+  const res = await mind.page("/disconnect", { form: { id: "42" } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.kv["own-github/installations/42"], undefined);
-  assert.equal(project.registry().at(-2)!.payload.row, null);
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
+  assert.equal(mind.registry().at(-2)!.payload.row, null);
 });
 
 test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
   for (const finish of ["disconnect", "publish"] as const) {
-    const project = await connected();
-    project.faults.registry = 1;
-    const failed = await project.page("/disconnect", { form: { id: "42" } });
+    const mind = await connected();
+    mind.faults.registry = 1;
+    const failed = await mind.page("/disconnect", { form: { id: "42" } });
     assert.match(location(failed), /error=the registry is unavailable/, finish);
-    assert.equal(project.secrets["/secrets/own-github-42"], undefined);
-    assert.equal(project.kv["own-github/installations/42"], undefined);
-    assert.ok(project.kv["own-github/removed/42"], "the tombstone stands until the null row lands");
-    assert.ok(!project.registry().some((event) => event.payload.row === null));
+    assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+    assert.equal(mind.kv["own-github/installations/42"], undefined);
+    assert.ok(mind.kv["own-github/removed/42"], "the tombstone stands until the null row lands");
+    assert.ok(!mind.registry().some((event) => event.payload.row === null));
     if (finish === "disconnect") {
-      const again = await project.page("/disconnect", { form: { id: "42" } });
+      const again = await mind.page("/disconnect", { form: { id: "42" } });
       assert.equal(again.headers.get("location"), "./", "not Unknown installation");
-      assert.deepEqual(project.registry().at(-2), {
+      assert.deepEqual(mind.registry().at(-2), {
         type: CONNECTION_CONFIGURED,
         payload: { integration: "github", connection: "42", row: null },
       });
     } else {
-      await project.publish(9);
+      await mind.publish(9);
       assert.deepEqual(
-        project
+        mind
           .registry()
           .filter((event) => event.payload.connection === "42")
           .at(-1),
@@ -980,24 +980,24 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
         },
       );
     }
-    assert.equal(project.kv["own-github/removed/42"], undefined, finish);
+    assert.equal(mind.kv["own-github/removed/42"], undefined, finish);
   }
 });
 
 test("an installation connected again after a Disconnect that did not finish keeps its row at the next publish", async () => {
-  const project = await connected();
-  project.faults.registry = 1;
-  await project.page("/disconnect", { form: { id: "42" } });
-  assert.ok(project.kv["own-github/removed/42"]);
-  await project.callback({
+  const mind = await connected();
+  mind.faults.registry = 1;
+  await mind.page("/disconnect", { form: { id: "42" } });
+  assert.ok(mind.kv["own-github/removed/42"]);
+  await mind.callback({
     installation_id: "42",
     setup_action: "install",
-    state: await project.install(),
+    state: await mind.install(),
   });
-  assert.equal(project.kv["own-github/removed/42"], undefined);
-  await project.publish(9);
+  assert.equal(mind.kv["own-github/removed/42"], undefined);
+  await mind.publish(9);
   assert.deepEqual(
-    project
+    mind
       .registry()
       .filter((event) => event.payload.connection === "42")
       .at(-1)!.payload.row,
@@ -1008,9 +1008,9 @@ test("an installation connected again after a Disconnect that did not finish kee
 // --------------------------------------------- the Dash's Integrations page
 
 test("the install hook registers the card and a row per installation it knows, keyed by the event's path and offset: a retry appends nothing new", async () => {
-  const project = fakeProject();
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind();
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "github:registry:/@5",
@@ -1018,16 +1018,16 @@ test("the install hook registers the card and a row per installation it knows, k
     },
   ]);
 
-  await project.setUp();
-  await project.callback({
+  await mind.setUp();
+  await mind.callback({
     installation_id: "42",
     setup_action: "install",
-    state: await project.install(),
+    state: await mind.install(),
   });
-  await project.publish(5); // the same event again, now set up: its key is spent, and that is fine
-  const before = project.registry().length;
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(9);
-  assert.deepEqual(project.registry().slice(before), [
+  await mind.publish(5); // the same event again, now set up: its key is spent, and that is fine
+  const before = mind.registry().length;
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(9);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONFIGURED,
       idempotencyKey: "github:registry:/@9",
@@ -1042,13 +1042,13 @@ test("the install hook registers the card and a row per installation it knows, k
 });
 
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
-  const project = fakeProject({ slug: "gh" });
-  await project.publish(1);
+  const mind = fakeMind({ slug: "gh" });
+  await mind.publish(1);
   assert.deepEqual(
-    project.registry()[0]!.payload.card,
+    mind.registry()[0]!.payload.card,
     card({ kind: "attention", text: "Create a GitHub App and paste its secrets" }, "Connect", "gh"),
   );
-  const count = project.appended.length;
+  const count = mind.appended.length;
   for (const event of [
     { type: "github/delivery-received", path: "/integrations/own-github/42" },
     // another secret's fact, the App's own on its secret's path, and a fact with no payload
@@ -1064,27 +1064,27 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
     },
     { type: "events.iterate.com/secret/deleted", path: "/" },
   ])
-    await project.integration.processEvent!({ event: { ...event, offset: 2 }, itx: project.itx });
-  assert.equal(project.appended.length, count);
+    await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
+  assert.equal(mind.appended.length, count);
 });
 
 test("the App saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
-    project.integration.processEvent!({
+    mind.integration.processEvent!({
       event: { type, path: "/", offset, payload },
-      itx: project.itx,
+      itx: mind.itx,
     });
-  await project.setUp();
+  await mind.setUp();
   for (let attempt = 0; attempt < 2; attempt++)
     await fact("events.iterate.com/secret/set", 7, {
       path: "/secrets/own-github-app",
       urls: PIN,
       public: { appId: APP_ID, slug: "iterate-acme" },
     });
-  delete project.secrets["/secrets/own-github-app"];
+  delete mind.secrets["/secrets/own-github-app"];
   await fact("events.iterate.com/secret/deleted", 8, { path: "/secrets/own-github-app" });
-  assert.deepEqual(project.registry(), [
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "github:registry:/@7",

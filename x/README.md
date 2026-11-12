@@ -1,15 +1,15 @@
 # X
 
-A project's own X app, with a **Connect X** page of its own. Each X account connected there is a
-secret of the project, and the project's code and agents call X's API as that account (read posts,
+A mind's own X app, with a **Connect X** page of its own. Each X account connected there is a
+secret of the mind, and the mind's code and agents call X's API as that account (read posts,
 post, search, bookmarks: what its scopes allow). The platform refreshes each account's token: the
 agent only ever sends a placeholder naming the account's secret, and iterate's egress swaps the
 token in.
 
-It is project code: one element, `x()`, in the `integrations` array of the project's config worker,
-which hands it the requests on the project's `x` routing slug, and every event.
+It is mind code: one element, `x()`, in the `integrations` array of the mind's config worker,
+which hands it the requests on the mind's `x` routing slug, and every event.
 
-- **The page** (members only, at the project's `x` address, `/`): the callback URL (iterate's own)
+- **The page** (members only, at the mind's `x` address, `/`): the callback URL (iterate's own)
   and the website URL to paste into the app's settings at X, a link that collects the client (its ID and its secret, on one
   form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
   Disconnect buttons.
@@ -17,31 +17,31 @@ which hands it the requests on the project's `x` routing slug, and every event.
   iterate's own callback, which stores the tokens in the browser that opened the Connect link and
   then sends them here; the page reads what X granted (`itx.secrets.oauthResult`) and lists the
   account.
-- **The Dash:** the project's Integrations page shows an X card ("Create an OAuth client and paste
+- **The Dash:** the mind's Integrations page shows an X card ("Create an OAuth client and paste
   its secret" until the client is saved, then "Connect an account") and a row per account: its
   @username, its scopes, and buttons to the page and to the account on X. The card changes when the
   client is saved or deleted: the package registers it again on that secret's
   `events.iterate.com/secret/set` and `secret/deleted` facts.
 
 The deployment's own X app (iterate's, on the Dash's Connect sheet) is another thing: it is shared
-by every project, and the platform keeps it. This package is for an app the project owns, with its
+by every mind, and the platform keeps it. This package is for an app the mind owns, with its
 own developer account at X and its own scopes.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `x()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-x";
 const IMPORT = 'import { x } from "iterate-x";';
 const ELEMENT = "x()";
@@ -53,7 +53,7 @@ If `worker.ts` already has a name `x`, import it under another:
 `const IMPORT = 'import { x as xApp } from "iterate-x";';` and `const ELEMENT = "xApp()";`.
 
 Every account is asked for `tweet.read users.read offline.access`, which name it and bring its
-refresh token. Ask the person what the project should do (read, post, read bookmarks or DMs) and
+refresh token. Ask the person what the mind should do (read, post, read bookmarks or DMs) and
 name the scopes for it, from X's
 [list of scopes](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code):
 `x({ scopes: ["tweet.write"] })` asks for more. The tokens may go to `api.x.com`; an API on another
@@ -77,7 +77,7 @@ async (itx) => itx.url({ routingSlug: "x", path: "/" });
 ```
 
 Say: "Open this, sign in, and follow the steps." The page walks them through it (`<address>` is the
-project's `x` address; the page shows each URL with a Copy button):
+mind's `x` address; the page shows each URL with a Copy button):
 
 1. **Set up the app** in X's developer console, <https://console.x.com>: the app's **Settings**,
    **User authentication settings**, **Set up** (or **Edit**):
@@ -94,19 +94,19 @@ project's `x` address; the page shows each URL with a Copy button):
 2. **Save the client** through the page's link: a page of iterate's Dash, made by
    `itx.secrets.collectFromUser`, asks for the client ID and the client secret on one form, and
    keeps them as one secret, `/secrets/own-x-app`, pinned to `api.x.com`. The client ID is a public
-   field of that secret: the form shows it as plain text and checks its shape, and the project
-   reads it from its list of secrets. The client secret never passes through the project's code.
+   field of that secret: the form shows it as plain text and checks its shape, and the mind
+   reads it from its list of secrets. The client secret never passes through the mind's code.
 3. **Connect an account**: X asks the account signed in at x.com to authorize the app, then sends
    them back to the page, which shows the account. To connect another account, sign in to X as that
    account, then connect again.
 
-Then write the accounts, their secrets and where the page is into the project's `AGENTS.md`.
+Then write the accounts, their secrets and where the page is into the mind's `AGENTS.md`.
 
 ## What the agent gets
 
 Each account is a secret, `/secrets/own-x-<connection>`, whose `accessToken` the platform refreshes
 when X answers 401 (an X access token lasts two hours). Send it as a placeholder in a plain `fetch`:
-the project's egress swaps the token in, and only towards the origins the secret is pinned to. To
+the mind's egress swaps the token in, and only towards the origins the secret is pinned to. To
 read the account itself:
 
 ```js
@@ -146,7 +146,7 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 ## Good to know
 
 - **The callback URI is iterate's own**, `<platform origin>/.secrets/oauth/callback`, the same for
-  every project on the deployment, so a rename or a claimed hostname changes nothing at X. X refuses
+  every mind on the deployment, so a rename or a claimed hostname changes nothing at X. X refuses
   a callback that is not registered exactly, to the trailing slash. iterate completes a sign-in only
   in the browser that opened the Connect link, and only for a member; the page never receives a
   code. An app registered with an older version of this package's own `/oauth2/callback` needs
@@ -186,9 +186,9 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
   and delete `/secrets/own-x-app`. Once that commit is live, take the card off with its null, which
   takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "x", card: null } })`.
-  Then delete the app at X, or keep it for another project.
+  Then delete the app at X, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-x`: the secrets
   `/secrets/own-x-app` and `/secrets/own-x-<connection>`, and the kv keys `own-x/…`. iterate's
   shared X app owns every `/secrets/x-<connection>` and `/integrations/x/<connection>`, for any
-  connection name a member or an agent chooses, so a project can use both. The routing slug and the
+  connection name a member or an agent chooses, so a mind can use both. The routing slug and the
   card on the Dash stay `x`.

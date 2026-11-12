@@ -1,6 +1,6 @@
 import { servePage } from "./page.js";
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type MonzoItx = {
   secrets: {
     list(): Promise<{ path: string }[]>;
@@ -21,10 +21,10 @@ export type IntegrationHost = {
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -36,7 +36,7 @@ export type Integration = {
  *  It is also the account's connection on the Dash's Integrations page. */
 const ACCOUNT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** The sign-in zero-trust-mcp keeps for the project (the recipe's step 1). */
+/** The sign-in zero-trust-mcp keeps for the mind (the recipe's step 1). */
 const SIGN_IN = "/secrets/monzo";
 
 /** Each account's webhook secret is this and the account's name (the recipe's step 4). */
@@ -44,7 +44,7 @@ const WEBHOOK_SECRETS = "/secrets/monzo-webhook-";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const SLUG = "monzo";
 const TITLE = "Monzo";
@@ -129,12 +129,12 @@ async function receive(request: Request, itx: MonzoItx): Promise<Response> {
   return Response.json({ ok: true });
 }
 
-/** A project's Monzo receiver, as an integration its worker hosts:
+/** A mind's Monzo receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [monzo()];`
  *
  *  On the `monzo` routing slug it answers Monzo's webhook at `/webhook/<account name>/<secret>` and,
  *  for members only, its page at `/`; any other path is a 404. Its install hook
- *  (`project/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
+ *  (`mind/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
  *  appended by the recipe's script that registers the account's webhook. */
 export function monzo(): Integration {
   return {

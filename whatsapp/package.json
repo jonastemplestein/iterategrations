@@ -2,7 +2,7 @@
   "name": "iterate-whatsapp",
   "private": true,
   "version": "0.0.0",
-  "description": "Your WhatsApp, lent to an iterate project from your own computer with `iterate provide`",
+  "description": "Your WhatsApp, lent to an iterate mind from your own computer with `iterate provide`",
   "type": "module",
   "scripts": {
     "test": "vp test"

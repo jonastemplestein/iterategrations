@@ -52,8 +52,8 @@ export type PageView = {
  *  webhook, so there is no URL to paste. It writes nothing, so it has no form. */
 export function servePage(view: PageView): Response {
   const status = view.saved
-    ? `<p class="ok">Set up. The project has the Waitrose account <code>${esc(view.secret)}</code>.</p>`
-    : `<p class="warn">Set up by your coding agent: see the recipe. The project has no Waitrose account <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(`Set up ${view.title} in my iterate project. Follow the recipe at ${view.recipe}`)}`;
+    ? `<p class="ok">Set up. The mind has the Waitrose account <code>${esc(view.secret)}</code>.</p>`
+    : `<p class="warn">Set up by your coding agent: see the recipe. The mind has no Waitrose account <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(`Set up ${view.title} in my iterate mind. Follow the recipe at ${view.recipe}`)}`;
   const body = `<p>${esc(view.description)}</p>
     <section><h2>Status</h2>${status}</section>
     <p><a href="${esc(view.recipe)}">The recipe</a> on GitHub has every step, and every call to Waitrose.</p>`;

@@ -1,4 +1,4 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: a token secret compared
+// Runs against dist, the package as shipped. `fakeMind` is a mind: a token secret compared
 // as the platform's verifyEquals does, files, kv, Workers AI (a fake Whisper that records what it
 // was sent), and streams that refuse a key used twice for another event (as the platform does; the
 // same event again is a no-op). `host` is the worker hosting the package: a scope per `getItx`,
@@ -15,7 +15,7 @@ const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/ip
 const AUDIO = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 77, 52, 65, 32]);
 const ID = createHash("sha256").update(AUDIO).digest("hex").slice(0, 32);
 
-function fakeProject(
+function fakeMind(
   secrets: Record<string, string> = { "/secrets/iphone-voice-notes": TOKEN },
   options: {
     member?: boolean;
@@ -114,10 +114,10 @@ function fakeProject(
       event: { ...appended[offset]!.event, path: appended[offset]!.path, offset },
       itx,
     });
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
@@ -162,28 +162,25 @@ function upload(
 }
 
 test("it answers the iphone-voice-notes routing slug, or the one it is given; a webhook is public, and each request opens one scope and releases it", async () => {
-  const project = fakeProject();
-  assert.equal(project.integration.routingSlug, "iphone-voice-notes");
-  assert.equal(
-    fakeProject({}, { integration: { slug: "voice" } }).integration.routingSlug,
-    "voice",
-  );
-  assert.equal((await project.serve(upload())).status, 200);
-  assert.equal((await project.serve(upload({ method: "GET" }))).status, 405);
-  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+  const mind = fakeMind();
+  assert.equal(mind.integration.routingSlug, "iphone-voice-notes");
+  assert.equal(fakeMind({}, { integration: { slug: "voice" } }).integration.routingSlug, "voice");
+  assert.equal((await mind.serve(upload())).status, 200);
+  assert.equal((await mind.serve(upload({ method: "GET" }))).status, 405);
+  assert.deepEqual(mind.scopes, { opened: 2, disposed: 2 });
 });
 
 test("an upload with the token stores its audio under its hash and lands once as recording-received on /iphone-voice-notes", async () => {
-  const project = fakeProject();
-  const first = await project.serve(upload({ contentType: "audio/x-m4a" }));
+  const mind = fakeMind();
+  const first = await mind.serve(upload({ contentType: "audio/x-m4a" }));
   assert.deepEqual(await first.json(), { ok: true, recordingId: ID });
-  const again = await project.serve(upload({ contentType: "audio/x-m4a" }));
+  const again = await mind.serve(upload({ contentType: "audio/x-m4a" }));
   assert.deepEqual(await again.json(), { ok: true, recordingId: ID });
-  assert.deepEqual(project.files[`/iphone-voice-notes/${ID}.m4a`], {
+  assert.deepEqual(mind.files[`/iphone-voice-notes/${ID}.m4a`], {
     contentType: "audio/x-m4a",
     data: AUDIO,
   });
-  const notes = project.notes();
+  const notes = mind.notes();
   assert.equal(notes.length, 1);
   assert.equal(notes[0].type, "iphone-voice-notes/recording-received");
   assert.equal(notes[0].idempotencyKey, `iphone-voice-notes:${ID}`);
@@ -199,44 +196,44 @@ test("an upload with the token stores its audio under its hash and lands once as
 });
 
 test("a body with no audio content type is taken for M4A; an MP3 keeps its own; a test upload is flagged", async () => {
-  const project = fakeProject();
-  await project.serve(upload({ contentType: "application/octet-stream" }));
-  assert.equal(project.files[`/iphone-voice-notes/${ID}.m4a`]!.contentType, "audio/mp4");
+  const mind = fakeMind();
+  await mind.serve(upload({ contentType: "application/octet-stream" }));
+  assert.equal(mind.files[`/iphone-voice-notes/${ID}.m4a`]!.contentType, "audio/mp4");
   const mp3 = new Uint8Array([73, 68, 51]);
-  await project.serve(upload({ body: mp3, contentType: "audio/mpeg", test: true }));
+  await mind.serve(upload({ body: mp3, contentType: "audio/mpeg", test: true }));
   const id = createHash("sha256").update(mp3).digest("hex").slice(0, 32);
-  assert.equal(project.files[`/iphone-voice-notes/${id}.mp3`]!.contentType, "audio/mpeg");
-  assert.equal(project.notes()[1].payload.test, true);
+  assert.equal(mind.files[`/iphone-voice-notes/${id}.mp3`]!.contentType, "audio/mpeg");
+  assert.equal(mind.notes()[1].payload.test, true);
 });
 
 test("a missing or wrong token is 401, as is any token before the secret exists, an empty body 400, and nothing is stored", async () => {
-  const project = fakeProject();
-  assert.equal((await project.serve(upload({ token: null }))).status, 401);
-  assert.equal((await project.serve(upload({ token: "another" }))).status, 401);
-  assert.equal((await fakeProject({}).serve(upload())).status, 401);
-  assert.equal((await project.serve(upload({ body: new Uint8Array() }))).status, 400);
-  assert.deepEqual(project.appended, []);
-  assert.deepEqual(project.files, {});
+  const mind = fakeMind();
+  assert.equal((await mind.serve(upload({ token: null }))).status, 401);
+  assert.equal((await mind.serve(upload({ token: "another" }))).status, 401);
+  assert.equal((await fakeMind({}).serve(upload())).status, 401);
+  assert.equal((await mind.serve(upload({ body: new Uint8Array() }))).status, 400);
+  assert.deepEqual(mind.appended, []);
+  assert.deepEqual(mind.files, {});
 });
 
 test("an upload over 25 MiB is 413 and stores nothing", async () => {
-  const project = fakeProject();
-  const res = await project.serve(upload({ body: new Uint8Array(25 * 1024 * 1024 + 1) }));
+  const mind = fakeMind();
+  const res = await mind.serve(upload({ body: new Uint8Array(25 * 1024 * 1024 + 1) }));
   assert.equal(res.status, 413);
-  assert.deepEqual(project.files, {});
+  assert.deepEqual(mind.files, {});
 });
 
 // ------------------------------------------------------------- the transcript
 
 test("the hook transcribes a received recording with Whisper, primed from kv, and lands recording-transcribed once", async () => {
-  const project = fakeProject(undefined, {
+  const mind = fakeMind(undefined, {
     kv: { "household/vocabulary": "Priya, Tomasz, Oakfield Road" },
     integration: { vocabularyKey: "household/vocabulary" },
   });
-  await project.serve(upload({ test: true }));
-  for (let retry = 0; retry < 2; retry++) await project.deliver(0);
-  assert.equal(project.whispered.length, 2);
-  assert.deepEqual(project.whispered[0], {
+  await mind.serve(upload({ test: true }));
+  for (let retry = 0; retry < 2; retry++) await mind.deliver(0);
+  assert.equal(mind.whispered.length, 2);
+  assert.deepEqual(mind.whispered[0], {
     model: "@cf/openai/whisper-large-v3-turbo",
     body: {
       audio: Buffer.from(AUDIO).toString("base64"),
@@ -244,7 +241,7 @@ test("the hook transcribes a received recording with Whisper, primed from kv, an
       initial_prompt: "Priya, Tomasz, Oakfield Road",
     },
   });
-  const [received, transcribed, ...more] = project.notes();
+  const [received, transcribed, ...more] = mind.notes();
   assert.deepEqual(more, []);
   assert.deepEqual(transcribed, {
     type: "iphone-voice-notes/recording-transcribed",
@@ -262,17 +259,17 @@ test("the hook transcribes a received recording with Whisper, primed from kv, an
 });
 
 test("a transcription that fails still lands, with no transcript and the error", async () => {
-  const project = fakeProject(undefined, {
+  const mind = fakeMind(undefined, {
     whisper: async () => {
       throw new Error("AiError: 3010: Invalid or incomplete input");
     },
   });
-  await project.serve(upload());
-  await project.deliver(0);
-  const { transcript, error } = project.notes()[1].payload;
+  await mind.serve(upload());
+  await mind.deliver(0);
+  const { transcript, error } = mind.notes()[1].payload;
   assert.equal(transcript, null);
   assert.match(error, /Invalid or incomplete input/);
-  assert.equal("initial_prompt" in project.whispered[0]!.body, false);
+  assert.equal("initial_prompt" in mind.whispered[0]!.body, false);
 });
 
 // --------------------------------------------- the Dash's Integrations page
@@ -290,9 +287,9 @@ const card = (status: object) => ({
 });
 
 test("the install hook registers the card, keyed by the event's path and offset: attention until the token exists, ok after", async () => {
-  const project = fakeProject({});
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind({});
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "iphone-voice-notes:registry:/@5",
@@ -302,19 +299,19 @@ test("the install hook registers the card, keyed by the event's path and offset:
       },
     },
   ]);
-  project.secrets["/secrets/iphone-voice-notes"] = TOKEN;
-  await project.publish(5); // the same event again, now set up: its key is spent, and that is fine
-  await project.publish(6);
-  assert.deepEqual(project.registry()[1], {
+  mind.secrets["/secrets/iphone-voice-notes"] = TOKEN;
+  await mind.publish(5); // the same event again, now set up: its key is spent, and that is fine
+  await mind.publish(6);
+  assert.deepEqual(mind.registry()[1], {
     type: CONFIGURED,
     idempotencyKey: "iphone-voice-notes:registry:/@6",
     payload: { integration: "iphone-voice-notes", card: card({ kind: "ok" }) },
   });
-  assert.equal(project.registry().length, 2);
+  assert.equal(mind.registry().length, 2);
 });
 
 test("the hook ignores every other event, and a recording-received on another path", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const event of [
     { type: "pebble/recording-created", path: "/pebble", offset: 1 },
     {
@@ -324,39 +321,39 @@ test("the hook ignores every other event, and a recording-received on another pa
       payload: { recordingId: ID, audioPath: "/x.m4a" },
     },
   ])
-    await project.integration.processEvent!({ event, itx: {} as any });
-  assert.deepEqual(project.appended, []);
+    await mind.integration.processEvent!({ event, itx: {} as any });
+  assert.deepEqual(mind.appended, []);
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/", "/nope"]) {
-    const res = await project.page(path);
+    const res = await mind.page(path);
     assert.equal(res.status, 401, path);
     assert.equal(await res.text(), "Sign in\n");
   }
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });
 
 test("the page shows the status with a link to set the token, every step of the shortcut with the URL and header to copy, under the base path a paths ingress strips", async () => {
-  const project = fakeProject({}, { member: true });
-  let res = await project.page("/");
+  const mind = fakeMind({}, { member: true });
+  let res = await mind.page("/");
   let html = await res.text();
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
   assert.match(html, /<h1>iPhone voice notes<\/h1>/);
-  assert.match(html, /Not set up yet: the project has no token/);
+  assert.match(html, /Not set up yet: the mind has no token/);
   assert.ok(
     html.includes(
       `<a class="button" href="https://dash.iterate.example/collect-secret?path=/secrets/iphone-voice-notes&amp;a=1">Set the token</a>`,
     ),
   );
-  assert.deepEqual(project.collected[0].path, "/secrets/iphone-voice-notes");
-  assert.deepEqual(project.collected[0].egress, { urls: ["https://iphone-voice-notes.invalid"] });
+  assert.deepEqual(mind.collected[0].path, "/secrets/iphone-voice-notes");
+  assert.deepEqual(mind.collected[0].egress, { urls: ["https://iphone-voice-notes.invalid"] });
   // the form sends the person back to this page once the token is saved
-  assert.equal(project.collected[0].redirectUrl, `${ORIGIN}/`);
+  assert.equal(mind.collected[0].redirectUrl, `${ORIGIN}/`);
   assert.ok(html.includes(`data-copy="${ORIGIN}/webhook"`));
   assert.ok(html.includes(`data-copy="x-voice-note-token"`));
   for (const step of [
@@ -371,38 +368,35 @@ test("the page shows the status with a link to set the token, every step of the 
   assert.match(html, /No notes yet/);
   assert.ok(html.includes(`href="${RECIPE}"`));
 
-  project.secrets["/secrets/iphone-voice-notes"] = TOKEN;
-  res = await project.page("/", "/projects/iterate/iphone-voice-notes");
+  mind.secrets["/secrets/iphone-voice-notes"] = TOKEN;
+  res = await mind.page("/", "/minds/iterate/iphone-voice-notes");
   html = await res.text();
   assert.equal(
-    project.collected[1].redirectUrl,
-    "https://os.iterate.example/projects/iterate/iphone-voice-notes/",
+    mind.collected[1].redirectUrl,
+    "https://os.iterate.example/minds/iterate/iphone-voice-notes/",
   );
-  assert.match(
-    html,
-    /Set up\. The project has the token <code>\/secrets\/iphone-voice-notes<\/code>/,
-  );
+  assert.match(html, /Set up\. The mind has the token <code>\/secrets\/iphone-voice-notes<\/code>/);
   assert.match(html, />Change the token</);
   assert.ok(
     html.includes(
-      `data-copy="https://os.iterate.example/projects/iterate/iphone-voice-notes/webhook"`,
+      `data-copy="https://os.iterate.example/minds/iterate/iphone-voice-notes/webhook"`,
     ),
   );
   assert.ok(!html.includes(TOKEN));
-  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+  assert.deepEqual(mind.scopes, { opened: 2, disposed: 2 });
 });
 
 test("the page lists the newest transcribed notes, newest first, across pages of the stream, at most five", async () => {
   let n = 0;
-  const project = fakeProject(undefined, {
+  const mind = fakeMind(undefined, {
     member: true,
     whisper: async () => (n++ === 0 ? { text: "" } : { text: `note <${n}>` }),
   });
   for (let i = 0; i < 7; i++) {
-    await project.serve(upload({ body: new Uint8Array([i + 1]), test: i === 6 }));
-    await project.deliver(project.appended.length - 1);
+    await mind.serve(upload({ body: new Uint8Array([i + 1]), test: i === 6 }));
+    await mind.deliver(mind.appended.length - 1);
   }
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   const shown = [
     ...html.matchAll(/<div class="note"><small>[^<]*?( · test)?<\/small>(.*?)<\/div>/g),
   ].map((m) => `${m[2]}${m[1] ?? ""}`);
@@ -416,22 +410,22 @@ test("the page lists the newest transcribed notes, newest first, across pages of
 });
 
 test("a note that failed shows its error, and with no link to be had the page still shows", async () => {
-  const project = fakeProject(undefined, {
+  const mind = fakeMind(undefined, {
     member: true,
     collectFails: true,
     whisper: async () => {
       throw new Error("AiError: 3010");
     },
   });
-  await project.serve(upload());
-  await project.deliver(0);
-  const html = await (await project.page("/")).text();
+  await mind.serve(upload());
+  await mind.deliver(0);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /<i>Not transcribed: Error: AiError: 3010<\/i>/);
   assert.doesNotMatch(html, /class="button"/);
 });
 
 test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
-  const res = await fakeProject({}, { member: true }).page("/");
+  const res = await fakeMind({}, { member: true }).page("/");
   const html = await res.text();
   const csp = res.headers.get("content-security-policy")!;
   assert.match(csp, /default-src 'none'/);
@@ -446,10 +440,10 @@ test("the page sends a CSP with its one nonce'd script, no form, and no frame, a
 });
 
 test("a member's stray path is a 404 that reads nothing", async () => {
-  const project = fakeProject({}, { member: true });
+  const mind = fakeMind({}, { member: true });
   for (const path of ["/nope", "/webhook/x", "/oauth2/callback"])
-    assert.equal((await project.page(path)).status, 404, path);
-  const post = await project.serve(new Request(`${ORIGIN}/`, { method: "POST" }));
+    assert.equal((await mind.page(path)).status, 404, path);
+  const post = await mind.serve(new Request(`${ORIGIN}/`, { method: "POST" }));
   assert.equal(post.status, 404);
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });

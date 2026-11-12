@@ -59,8 +59,8 @@ export function servePage(request: Request, view: PageView): Response {
   // the URL Monzo is given keeps the base path a paths ingress strips
   const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
   const status = view.signedIn
-    ? `<p class="ok">Signed in. The project has the sign-in secret <code>${esc(view.signIn)}</code>.</p>`
-    : `<p class="warn">Set up by your coding agent: see the recipe. The project has no sign-in secret <code>${esc(view.signIn)}</code> yet. Paste this into your coding agent:</p>${copyRow(`Set up ${view.title} in my iterate project. Follow the recipe at ${view.recipe}`)}`;
+    ? `<p class="ok">Signed in. The mind has the sign-in secret <code>${esc(view.signIn)}</code>.</p>`
+    : `<p class="warn">Set up by your coding agent: see the recipe. The mind has no sign-in secret <code>${esc(view.signIn)}</code> yet. Paste this into your coding agent:</p>${copyRow(`Set up ${view.title} in my iterate mind. Follow the recipe at ${view.recipe}`)}`;
   const accounts = view.accounts.length
     ? `<ul>${view.accounts.map((name) => `<li><b>${esc(name)}</b> <span class="muted">events on <code>/monzo/${esc(name)}</code></span></li>`).join("")}</ul>`
     : `<p class="muted">None yet.</p>`;

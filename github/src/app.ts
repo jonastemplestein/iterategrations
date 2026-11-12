@@ -5,13 +5,13 @@ export type InstallationRefresh = {
   kind: "github-app-installation";
   apiOrigin: string;
   installationId: string;
-  client: { project: "github" };
+  client: { mind: "github" };
 };
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type GithubItx = {
   fetch(request: Request): Promise<Response>;
-  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  /** The mind's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<unknown>;
@@ -61,8 +61,8 @@ export type GithubItx = {
 /** EVERY NAME THE PACKAGE KEEPS STARTS WITH `own-github`: its secrets, its streams, its kv keys
  *  and its claims. The platform's shared GitHub App owns every `/secrets/github-<connection>` and
  *  `/integrations/github/<connection>`, for any connection name a member or an agent chooses
- *  (`app`, digits), so a project that uses both would collide on any `github-` name. Its routing
- *  slug and its card on the Dash stay `github`: the shared App has no project host, and the
+ *  (`app`, digits), so a mind that uses both would collide on any `github-` name. Its routing
+ *  slug and its card on the Dash stay `github`: the shared App has no mind host, and the
  *  registry is the packages' own. */
 
 /** The App, one secret: `appId` and `slug`, public fields, and `privateKey` (the PEM GitHub
@@ -136,7 +136,7 @@ export async function readApp(itx: Pick<GithubItx, "secrets">): Promise<App | nu
   return appId && slug ? { appId, slug } : null;
 }
 
-/** Whether the project has a secret at `APP_SECRET`, an App or not. */
+/** Whether the mind has a secret at `APP_SECRET`, an App or not. */
 export async function hasAppSecret(itx: Pick<GithubItx, "secrets">): Promise<boolean> {
   return (await itx.secrets.list()).some((secret) => secret.path === APP_SECRET);
 }
@@ -245,7 +245,7 @@ async function prove(itx: GithubItx, path: string, installationId: string): Prom
  *
  *  The secret holds the App ID and a placeholder for the App's key, which the platform reads from
  *  `/secrets/own-github-app` at each mint: one App secret serves every installation. No proof that
- *  the person administers the account is needed: the project owns the App and holds its key, so it
+ *  the person administers the account is needed: the mind owns the App and holds its key, so it
  *  can mint for any installation of its App already. */
 export async function connectInstallation(itx: GithubItx, installationId: string): Promise<string> {
   const app = await readApp(itx);
@@ -260,7 +260,7 @@ export async function connectInstallation(itx: GithubItx, installationId: string
       kind: "github-app-installation" as const,
       apiOrigin: API,
       installationId,
-      client: { project: "github" as const },
+      client: { mind: "github" as const },
     },
   };
   const proof = `${secretOf(installationId)}-proof`;

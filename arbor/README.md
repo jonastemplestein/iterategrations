@@ -1,34 +1,34 @@
 # Arbor
 
 [Arbor](https://arbor-education.com) is the MIS many UK schools use. This package gives an iterate
-project the parent's view of it: the children, school meals (menus, choices, balance), messages to
+mind the parent's view of it: the children, school meals (menus, choices, balance), messages to
 and from the school, the calendar, attendance, payments and balances, clubs and trips, assignments,
 behaviour and report cards. It logs in with the parent's own Arbor account. There is no client to
-install: a run script, the project's own code and an agent call Arbor with plain `fetch`. Arbor
+install: a run script, the mind's own code and an agent call Arbor with plain `fetch`. Arbor
 publishes no API for parents, so [Calling Arbor](#calling-arbor) is the doc. It is unofficial and
 not affiliated with Arbor Education.
 
-The project never holds the password or the token: they live in a secret, and iterate's egress
+The mind never holds the password or the token: they live in a secret, and iterate's egress
 swaps the token into each request and logs in again when Arbor answers 401.
 
 It is the package `iterate-arbor`. `arborFetch` and `arborGet` add what every call needs, and
 `readForm` and the other readers take apart Arbor's pages. `submitForm`, `chooseMeals` and
 `removeMealChoices` change things at the school, and `checkoutBasket` is the one call that can spend
 money, with its guards ([Booking meals](#booking-meals)). The login is the secret's refresh. `arbor()` is one element in the
-`integrations` array of the project's config worker, with a page of its own for the project's
-members: the status. The project's Integrations page in the Dash shows an Arbor card ("Set up by
+`integrations` array of the mind's config worker, with a page of its own for the mind's
+members: the status. The mind's Integrations page in the Dash shows an Arbor card ("Set up by
 your coding agent" until the account's secret exists), with an **Open** button to the page and a
 **Recipe** button to this recipe.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 1. The account, as a secret
 
 Each school has its own Arbor site, such as `https://example-primary.uk.arbor.education`. The
 account logs in centrally, and the token works on the site of each of the account's schools. The
-secret keeps the site as a public field, so the project's code can read it.
+secret keeps the site as a public field, so the mind's code can read it.
 
 ```js
 async (itx) =>
@@ -123,14 +123,14 @@ The login checks the site: when it is not one of the account's schools, the firs
 with a text that names the account's school sites. Then run the script above again with
 `const site = "<the right address>";` as its second line and `{ site }` in place of `{}`.
 
-## 2. The package, in the project's config repo
+## 2. The package, in the mind's config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and the element to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-arbor";
 const IMPORT = 'import { arbor } from "iterate-arbor";';
 const ELEMENT = "arbor()";
@@ -138,15 +138,15 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`arbor()` answers the project's `arbor` host. Its page at `/` is for the project's members: it shows
+`arbor()` answers the mind's `arbor` host. Its page at `/` is for the mind's members: it shows
 the status (whether the account's secret exists, and for which school site). It has no webhook, so
-there is no URL to paste. Its install hook (`project/worker-updated`, and the account's secret set
-or deleted) puts the Arbor card on the Dash. With the package in `package.json`, the project's code
+there is no URL to paste. Its install hook (`mind/worker-updated`, and the account's secret set
+or deleted) puts the Arbor card on the Dash. With the package in `package.json`, the mind's code
 can import the helpers.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+By hand: [add-to-a-mind.md](../add-to-a-mind.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/index.ts`](src/index.ts) (`arbor()` and the exports),
 [`src/page.ts`](src/page.ts) (its page), [`src/fetch.ts`](src/fetch.ts) (`arborFetch`, `arborGet`,
 `arborUrl` and `submitForm`), [`src/tree.ts`](src/tree.ts) (the readers),
@@ -160,7 +160,7 @@ Run the script in [The helpers in a script](#the-helpers-in-a-script) as it is. 
 settings of the logged-in parent. A `userId` and `logged_in: true` back is the proof. The first call
 logs in by the secret's refresh, so it takes a moment.
 
-Then write into the project's `AGENTS.md` that agents call Arbor with `fetch` and the token's
+Then write into the mind's `AGENTS.md` that agents call Arbor with `fetch` and the token's
 placeholder, with a link to this README's
 [Calling Arbor](https://github.com/jonastemplestein/iterategrations/tree/main/arbor#calling-arbor).
 
@@ -170,8 +170,8 @@ Read this before the first call. This is the API of Arbor's Android parent app (
 found in the app and checked against one parent account. Each item below says which: **live** is a
 call made to a real school's site with a real parent account (read-only calls only); **linked** is
 a path a live page links to, never called; **code** is seen in the app's code and never called. Every call is plain `fetch`. In every worker the platform
-loads (the project's config worker, a run script), the global `fetch` is the project's egress, so a
-run script, the project's code and an agent all call Arbor the same way.
+loads (the mind's config worker, a run script), the global `fetch` is the mind's egress, so a
+run script, the mind's code and an agent all call Arbor the same way.
 
 - **The placeholder:**
   `authorization: 'Bearer getSecret("/secrets/arbor", { field: "accessToken" })'`, on every
@@ -197,7 +197,7 @@ run script, the project's code and an agent all call Arbor the same way.
 
 ### The helpers
 
-The project's code imports them:
+The mind's code imports them:
 
 ```ts
 import {
@@ -312,7 +312,7 @@ async (itx) => {
 ```
 
 Each example below is a task: keep everything above `// The task`, and put the example in place of
-the rest. The project's code writes the same lines, with the helpers imported and `site` as their
+the rest. The mind's code writes the same lines, with the helpers imported and `site` as their
 first argument.
 
 ### How Arbor answers
@@ -758,7 +758,7 @@ choices before anything else, and never check out again blindly. Any other HTTP 
 `success: false` (with Arbor's reasons from `validation_errors`), is "Arbor rejected the checkout":
 nothing was booked. Egress sends a request again only after a 401, when Arbor refused the token.
 
-A run script cannot import these helpers. To let the project's agents book meals, give the
+A run script cannot import these helpers. To let the mind's agents book meals, give the
 worker's class methods that call them: an agent's script calls each as `itx.config.<method>(…)`.
 Keep choosing and paying apart, so the person sees the basket's total between the two. For
 example, as the recipe's `MEMBER`, with `chooseMeals`, `readBasket` and `checkoutBasket` added to

@@ -1,4 +1,4 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: a kv, secrets, appends
+// Runs against dist, the package as shipped. `fakeMind` is a mind: a kv, secrets, appends
 // that refuse a key used twice for another event (as the platform does; the same event again is a
 // no-op), and an egress to a pretend OpenAI (its token endpoint and its API), which record every
 // request. `host` is the worker hosting the package: a scope per `getItx`, counted.
@@ -18,7 +18,7 @@ const SCOPE = "openid profile email offline_access resource.invoke chatgpt.token
 
 type Call = { url: string; method: string; headers: Headers; body: string };
 
-function fakeProject(options: { scope?: string; apiStatus?: number; slug?: string } = {}) {
+function fakeMind(options: { scope?: string; apiStatus?: number; slug?: string } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const calls: Call[] = [];
@@ -108,10 +108,10 @@ function fakeProject(options: { scope?: string; apiStatus?: number; slug?: strin
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ callback: address }).toString(),
     });
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   /** What was registered on `/integrations` for the Dash, in order. */
@@ -135,28 +135,28 @@ function callbackFor(html: string, extra: Record<string, string> = {}): string {
 test("it answers its own routing slug, chatgpt unless another is given; a non-member is refused and opens no scope", async () => {
   assert.equal(chatgpt().routingSlug, "chatgpt");
   assert.equal(chatgpt({ slug: "openai" }).routingSlug, "openai");
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const [path, method] of [
     ["/", "GET"],
     ["/start", "POST"],
   ] as const) {
-    const refused = await project.page(
+    const refused = await mind.page(
       path,
       { method },
       () => new Response("sign in", { status: 401 }),
     );
     assert.equal(refused.status, 401);
   }
-  assert.deepEqual(project.calls, []);
-  assert.deepEqual(project.kv, {});
-  assert.equal(project.scopes.opened, 0);
-  await project.page("/");
-  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
+  assert.deepEqual(mind.calls, []);
+  assert.deepEqual(mind.kv, {});
+  assert.equal(mind.scopes.opened, 0);
+  await mind.page("/");
+  assert.deepEqual(mind.scopes, { opened: 1, disposed: 1 });
 });
 
 test("the page offers Connect, then the consent link and a paste box, then the account", async () => {
-  const project = fakeProject();
-  let res = await project.page("/");
+  const mind = fakeMind();
+  let res = await mind.page("/");
   let html = await res.text();
   assert.match(html, /Connect ChatGPT/);
   assert.match(res.headers.get("content-security-policy")!, /default-src 'none'/);
@@ -164,9 +164,9 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   assert.match(res.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
   assert.equal(res.headers.get("x-frame-options"), "DENY");
 
-  res = await project.page("/start", { method: "POST" });
+  res = await mind.page("/start", { method: "POST" });
   assert.equal(res.status, 303);
-  html = await (await project.page("/")).text();
+  html = await (await mind.page("/")).text();
   assert.match(html, /Open ChatGPT sign-in/);
   assert.match(html, /name="callback"/);
 
@@ -179,14 +179,14 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   assert.equal(query.get("code_challenge_method"), "S256");
   assert.match(query.get("ext_agent_host_id")!, /^urn:uuid:[0-9a-f-]{36}$/);
   assert.ok(query.get("scope")!.split(" ").includes("chatgpt.tokens.use.direct"));
-  assert.deepEqual(project.secrets, {});
-  assert.deepEqual(project.calls, [], "nothing is sent to OpenAI before the person pastes");
+  assert.deepEqual(mind.secrets, {});
+  assert.deepEqual(mind.calls, [], "nothing is sent to OpenAI before the person pastes");
 
-  res = await project.paste(callbackFor(html));
+  res = await mind.paste(callbackFor(html));
   assert.equal(res.status, 303);
   assert.doesNotMatch(res.headers.get("location")!, /error/);
 
-  const secret = project.secrets["/secrets/chatgpt"]!;
+  const secret = mind.secrets["/secrets/chatgpt"]!;
   assert.deepEqual(secret.material, {
     accessToken: "access-1",
     refreshToken: "refresh-1",
@@ -194,10 +194,10 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   });
   assert.deepEqual(secret.options.urls, ["https://api.openai.com", "https://auth.openai.com"]);
   assert.equal(secret.options.refresh.kind, "worker");
-  assert.equal(project.kv["chatgpt/pending"], undefined, "the sign-in is spent");
+  assert.equal(mind.kv["chatgpt/pending"], undefined, "the sign-in is spent");
 
   // the exchange names OpenAI's issued client, the verifier kept here, and the resource
-  const exchange = (project.calls as Call[]).find((c) => c.url.endsWith("/oauth/token"))!;
+  const exchange = (mind.calls as Call[]).find((c) => c.url.endsWith("/oauth/token"))!;
   const form = new URLSearchParams(exchange.body);
   assert.equal(form.get("grant_type"), "authorization_code");
   assert.equal(form.get("client_id"), "oaiapp_issued");
@@ -206,16 +206,16 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   assert.equal(form.get("redirect_uri"), "http://127.0.0.1:1455/auth/callback");
   assert.ok(form.get("code_verifier")!.length >= 43);
 
-  html = await (await project.page("/")).text();
+  html = await (await mind.page("/")).text();
   assert.match(html, /jonas@example\.com/);
   assert.match(html, /pro/);
   assert.doesNotMatch(html, /access-1|refresh-1/, "no token is ever shown");
 });
 
 test("a bad paste is shown on the page, and the sign-in survives it", async () => {
-  const project = fakeProject();
-  await project.page("/start", { method: "POST" });
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  await mind.page("/start", { method: "POST" });
+  const html = await (await mind.page("/")).text();
   const good = callbackFor(html);
 
   for (const [bad, message] of [
@@ -224,37 +224,35 @@ test("a bad paste is shown on the page, and the sign-in survives it", async () =
     [good.replace(/state=[^&]*/, "state=other"), /another sign-in/],
     [callbackFor(html, { error: "access_denied" }), /did not connect: access_denied/],
   ] as const) {
-    const res = await project.paste(bad);
+    const res = await mind.paste(bad);
     assert.match(decodeURIComponent(res.headers.get("location")!), message);
   }
-  assert.deepEqual(project.calls, []);
-  assert.ok(project.kv["chatgpt/pending"], "still waiting for a good address");
+  assert.deepEqual(mind.calls, []);
+  assert.ok(mind.kv["chatgpt/pending"], "still waiting for a good address");
 
   const shown = await (
-    await project.page((await project.paste("nope")).headers.get("location")!.replace("./", "/"))
+    await mind.page((await mind.paste("nope")).headers.get("location")!.replace("./", "/"))
   ).text();
   assert.match(shown, /class="error"/);
 });
 
 test("a sign-in without the plan's scope is refused and keeps no secret", async () => {
-  const project = fakeProject({ scope: "openid profile email" });
-  await project.page("/start", { method: "POST" });
-  const res = await project.paste(callbackFor(await (await project.page("/")).text()));
+  const mind = fakeMind({ scope: "openid profile email" });
+  await mind.page("/start", { method: "POST" });
+  const res = await mind.paste(callbackFor(await (await mind.page("/")).text()));
   assert.match(decodeURIComponent(res.headers.get("location")!), /Plus or Pro/);
-  assert.deepEqual(project.secrets, {});
-  assert.equal(project.kv["chatgpt/pending"], undefined, "the code is spent either way");
+  assert.deepEqual(mind.secrets, {});
+  assert.equal(mind.kv["chatgpt/pending"], undefined, "the code is spent either way");
 });
 
 test("test it asks OpenAI, and disconnect forgets everything", async () => {
-  const project = fakeProject();
-  await project.page("/start", { method: "POST" });
-  await project.paste(callbackFor(await (await project.page("/")).text()));
+  const mind = fakeMind();
+  await mind.page("/start", { method: "POST" });
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
 
-  const tested = await project.page("/test", { method: "POST" });
+  const tested = await mind.page("/test", { method: "POST" });
   assert.match(decodeURIComponent(tested.headers.get("location")!), /gpt-6\.1-sol: ready/);
-  const sent = (project.calls as Call[]).find(
-    (c) => c.url === "https://api.openai.com/v1/responses",
-  )!;
+  const sent = (mind.calls as Call[]).find((c) => c.url === "https://api.openai.com/v1/responses")!;
   assert.equal(sent.method, "POST");
   // the token is a placeholder, and the body is one a plan's token takes
   assert.equal(
@@ -267,7 +265,7 @@ test("test it asks OpenAI, and disconnect forgets everything", async () => {
   assert.ok(Array.isArray(body.input));
 
   // a refusal is shown with what OpenAI said
-  const refused = fakeProject({ apiStatus: 429 });
+  const refused = fakeMind({ apiStatus: 429 });
   await refused.page("/start", { method: "POST" });
   await refused.paste(callbackFor(await (await refused.page("/")).text()));
   const failed = await refused.page("/test", { method: "POST" });
@@ -276,20 +274,20 @@ test("test it asks OpenAI, and disconnect forgets everything", async () => {
     /error=OpenAI answered 429: nope/,
   );
 
-  await project.page("/disconnect", { method: "POST" });
-  assert.deepEqual(project.secrets, {});
-  assert.equal(project.kv["chatgpt/account"], undefined);
-  assert.match(await (await project.page("/")).text(), /Connect ChatGPT/);
-  assert.equal((await project.page("/anything-else", { method: "POST" })).status, 404);
+  await mind.page("/disconnect", { method: "POST" });
+  assert.deepEqual(mind.secrets, {});
+  assert.equal(mind.kv["chatgpt/account"], undefined);
+  assert.match(await (await mind.page("/")).text(), /Connect ChatGPT/);
+  assert.equal((await mind.page("/anything-else", { method: "POST" })).status, 404);
 });
 
 // The exchange code the page keeps with the secret, run as the platform runs it: an ES module
 // whose `exchange(material, fetch)` returns the next material.
 async function runExchange(material: any, fetch: (url: string, init: any) => Promise<Response>) {
-  const project = fakeProject();
-  await project.page("/start", { method: "POST" });
-  await project.paste(callbackFor(await (await project.page("/")).text()));
-  const source: string = project.secrets["/secrets/chatgpt"]!.options.refresh.source;
+  const mind = fakeMind();
+  await mind.page("/start", { method: "POST" });
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
+  const source: string = mind.secrets["/secrets/chatgpt"]!.options.refresh.source;
   const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
   const { exchange } = await import(url);
   return exchange(material, fetch);
@@ -359,9 +357,9 @@ const CONFIGURED = "events.iterate.com/integration/configured";
 const CONNECTION_CONFIGURED = "events.iterate.com/integration/connection-configured";
 
 test("the install hook registers the card and the connection's row, or takes the row away, keyed by the event's path and offset", async () => {
-  const project = fakeProject();
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind();
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "chatgpt:registry:/@5",
@@ -377,13 +375,13 @@ test("the install hook registers the card and the connection's row, or takes the
     },
   ]);
 
-  await project.page("/start", { method: "POST" });
-  await project.paste(callbackFor(await (await project.page("/")).text()));
-  const before = project.registry().length;
-  await project.publish(5); // the same event again, now connected: its keys are spent
-  assert.equal(project.registry().length, before);
-  await project.publish(9);
-  assert.deepEqual(project.registry().slice(before), [
+  await mind.page("/start", { method: "POST" });
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
+  const before = mind.registry().length;
+  await mind.publish(5); // the same event again, now connected: its keys are spent
+  assert.equal(mind.registry().length, before);
+  await mind.publish(9);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONFIGURED,
       idempotencyKey: "chatgpt:registry:/@9",
@@ -398,11 +396,11 @@ test("the install hook registers the card and the connection's row, or takes the
 });
 
 test("connecting registers the card and the account's row; disconnecting takes the row away; the buttons lead to the slug it answers on", async () => {
-  const project = fakeProject({ slug: "openai" });
-  await project.page("/start", { method: "POST" });
-  assert.deepEqual(project.registry(), [], "starting a sign-in registers nothing");
-  await project.paste(callbackFor(await (await project.page("/")).text()));
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind({ slug: "openai" });
+  await mind.page("/start", { method: "POST" });
+  assert.deepEqual(mind.registry(), [], "starting a sign-in registers nothing");
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       payload: { integration: "chatgpt", card: card({ kind: "ok" }, "Manage", "openai") },
@@ -413,8 +411,8 @@ test("connecting registers the card and the account's row; disconnecting takes t
     },
   ]);
 
-  await project.page("/disconnect", { method: "POST" });
-  assert.deepEqual(project.registry().slice(2), [
+  await mind.page("/disconnect", { method: "POST" });
+  assert.deepEqual(mind.registry().slice(2), [
     {
       type: CONFIGURED,
       payload: {
@@ -427,33 +425,33 @@ test("connecting registers the card and the account's row; disconnecting takes t
       payload: { integration: "chatgpt", connection: "account", row: null },
     },
   ]);
-  const count = project.registry().length;
-  await project.integration.processEvent!({
+  const count = mind.registry().length;
+  await mind.integration.processEvent!({
     event: { type: "events.iterate.com/secret/set", path: "/secrets/chatgpt", offset: 3 },
-    itx: project.itx,
+    itx: mind.itx,
   });
-  assert.equal(project.registry().length, count, "the hook ignores every other event");
+  assert.equal(mind.registry().length, count, "the hook ignores every other event");
 });
 
 test("a Disconnect whose secret cannot be deleted says so, and ChatGPT stays connected for another try", async () => {
-  const project = fakeProject();
-  await project.page("/start", { method: "POST" });
-  await project.paste(callbackFor(await (await project.page("/")).text()));
-  const before = project.registry().length;
-  project.faults.deletes = true;
-  const failed = await project.page("/disconnect", { method: "POST" });
+  const mind = fakeMind();
+  await mind.page("/start", { method: "POST" });
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
+  const before = mind.registry().length;
+  mind.faults.deletes = true;
+  const failed = await mind.page("/disconnect", { method: "POST" });
   assert.match(
     decodeURIComponent(failed.headers.get("location")!),
     /error=the secret store is unavailable/,
   );
-  assert.ok(project.secrets["/secrets/chatgpt"], "the tokens stay, and say so");
-  assert.ok(project.kv["chatgpt/account"]);
-  assert.equal(project.registry().length, before, "no row is taken away");
-  assert.match(await (await project.page("/")).text(), /jonas@example\.com/);
-  project.faults.deletes = false;
-  await project.page("/disconnect", { method: "POST" });
-  assert.deepEqual(project.secrets, {});
+  assert.ok(mind.secrets["/secrets/chatgpt"], "the tokens stay, and say so");
+  assert.ok(mind.kv["chatgpt/account"]);
+  assert.equal(mind.registry().length, before, "no row is taken away");
+  assert.match(await (await mind.page("/")).text(), /jonas@example\.com/);
+  mind.faults.deletes = false;
+  await mind.page("/disconnect", { method: "POST" });
+  assert.deepEqual(mind.secrets, {});
   // and a sign-in cancelled before it held any secret is fine
-  await project.page("/start", { method: "POST" });
-  assert.equal((await project.page("/cancel", { method: "POST" })).headers.get("location"), "./");
+  await mind.page("/start", { method: "POST" });
+  assert.equal((await mind.page("/cancel", { method: "POST" })).headers.get("location"), "./");
 });

@@ -23,7 +23,7 @@ request, so `node:net` is the whole client.
   as it sounds: one `events.subscribe` connection, no queue, no replay. Herdr keeps only its last 512
   events, a handoff (`herdr update --handoff`) interrupts subscriptions, and its docs say events
   cannot be replayed over a snapshot. So when Herdr's connection ends the bridge dials again and
-  appends a fresh `herdr/snapshot`, and so does a project that reconnects: what happened while one
+  appends a fresh `herdr/snapshot`, and so does a mind that reconnects: what happened while one
   side was away is lost, and the snapshot says where things stand.
 
 - **Panes.** Herdr's `pane.agent_status_changed` needs a pane, so the connection subscribes to the panes
@@ -41,7 +41,7 @@ async (itx) => {
 ```
 
 **Everything it lends is Herdr's whole API**, `pane.send_text` and `server.stop` included: it is
-control of the computer's terminals. Share it only with a project you trust.
+control of the computer's terminals. Share it only with a mind you trust.
 
 ## The agents in its panes, in the mind's list of agents
 
@@ -123,7 +123,7 @@ not signed in or whose sign-in has ended, and a key that waits for a member. The
 most once in 12 hours for a mind.
 
 - **`targets`**: one line a mind, its address, the capability's name, and `key` or nothing. A file
-  from before minds (`<iterate config> <project> [name]`) is refused line by line, with a
+  from before minds (`<iterate config> <mind> [name]`) is refused line by line, with a
   notification.
 - **The sign-in** is the CLI's own, kept by the CLI (`iterate login <address>`). A running lend
   renews it.
@@ -152,7 +152,7 @@ most once in 12 hours for a mind.
   lends (`a rewrite rule's description is one line`). The test checks it.
 - **Node.** `iterate`'s pnpm shim runs pnpm's own Node (22.14 here), which cannot load a `.ts` file.
   `plugin/bridge.sh` runs the CLI's entry point with a Node that can (`NODE`).
-- **Offline.** While the computer sleeps or Herdr is down, the project's calls fail and no events
+- **Offline.** While the computer sleeps or Herdr is down, the mind's calls fail and no events
   land; a `herdr/snapshot` marks every reconnection.
 - **The docs link** in the description is Herdr's `socket-api.mdx` at the tag of the installed version
   (v0.9.3): a model can fetch it as markdown. Change the tag in `description` when Herdr updates.

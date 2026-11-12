@@ -1,6 +1,6 @@
 # Monzo
 
-Every Monzo transaction lands in an iterate project as a `monzo/transaction-created` event, the
+Every Monzo transaction lands in an iterate mind as a `monzo/transaction-created` event, the
 transaction (amount, merchant, category, …) exactly as Monzo sends it, on a stream per account:
 `/monzo/<account name>`, with names the person picks (`joint-account`, `jonas-personal`). One
 sign-in covers all of a person's accounts, each has its own webhook, and every MCP tool
@@ -13,14 +13,14 @@ its webhooks, so the recipe puts an unguessable secret in each webhook's URL and
 the person: they never see or type it.
 
 The receiver is the package `iterate-monzo`: one element, `monzo()`, in the `integrations` array of
-the project's config worker. It has a page of its own, for the project's members: the status, the
-accounts, and the shape of an account's webhook URL. The project's Integrations page in the Dash
+the mind's config worker. It has a page of its own, for the mind's members: the status, the
+accounts, and the shape of an account's webhook URL. The mind's Integrations page in the Dash
 shows a Monzo card ("Set up by your coding agent" until the sign-in exists), with an **Open** button
 to the page and a **Recipe** button to this recipe, and a row per account whose webhook step 4
 registered.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a Monzo developer client
@@ -51,14 +51,14 @@ zero-trust-mcp's `main`.)
 Monzo approves API access in the Monzo app. Until the person taps **Approve** there, calls fail with
 a permissions error; ask them to open the app and approve, then try again.
 
-## 2. Add the receiver to the project's config repo
+## 2. Add the receiver to the mind's config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `monzo()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it:
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-monzo";
 const IMPORT = 'import { monzo } from "iterate-monzo";';
 const ELEMENT = "monzo()";
@@ -66,15 +66,15 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`monzo()` answers the project's `monzo` host: the worker hands it every request there, and every
+`monzo()` answers the mind's `monzo` host: the worker hands it every request there, and every
 event. `/webhook/<account name>/<secret>` takes Monzo's deliveries. The page at `/` is for the
-project's members: it shows the status (whether the sign-in exists), the accounts whose webhook
+mind's members: it shows the status (whether the sign-in exists), the accounts whose webhook
 secret exists, and the shape of an account's webhook URL, with a **Copy** button. It never shows a
-secret. Its install hook (`project/worker-updated`) puts the Monzo card on the Dash.
+secret. Its install hook (`mind/worker-updated`) puts the Monzo card on the Dash.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+By hand: [add-to-a-mind.md](../add-to-a-mind.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/monzo.ts`](src/monzo.ts) and [`src/page.ts`](src/page.ts)
 (no other imports) and commit them to `/repos/config` under `monzo/`; the import then reads
 `from "./monzo/monzo.ts"`. You own the copy.
@@ -120,7 +120,7 @@ One script per account does it all: it makes the secret, stores it as
 `/secrets/monzo-webhook-<name>` (which the receiver checks with `itx.secrets.verifyEquals`), puts
 it in the URL `…/webhook/<name>/<secret>`, registers that URL with Monzo, and lists the account under the
 Monzo card on the Dash. The secret is never returned, so it never reaches the chat. Run it once per
-account, and again to rotate: it deletes this project's earlier webhook for that account first, so
+account, and again to rotate: it deletes this mind's earlier webhook for that account first, so
 the old URL stops.
 
 ```js
@@ -160,7 +160,7 @@ async (itx) => {
 ```
 
 Each URL is now a password: anyone who has it can post fake transactions to that account's stream.
-It is held by the project's secret store and by Monzo, and it is in the request log of this one
+It is held by the mind's secret store and by Monzo, and it is in the request log of this one
 script. Keep it out of chat. One account's URL cannot write to another's stream: each name has its
 own secret. The page lists each account whose secret exists, by name, and never the secret.
 
@@ -190,7 +190,7 @@ async (itx) => {
 
 If it gives up, end your turn and wait for the person to say they've paid. Monzo shows the
 transaction in the app a moment before the webhook fires. Then write the accounts, their names and
-how to reach the API into the project's `AGENTS.md`.
+how to reach the API into the mind's `AGENTS.md`.
 
 ## The event
 
@@ -231,5 +231,5 @@ On the stream `/monzo/<account name>`:
 - To remove the package: stop each account, take `monzo()` and its import out of `worker.ts`, and
   once that commit is live take the card off with its null, which takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "monzo", card: null } })`. Delete the sign-in,
-  `/secrets/monzo`, with `itx.secrets.delete("/secrets/monzo")` unless the project's agents still use
+  `/secrets/monzo`, with `itx.secrets.delete("/secrets/monzo")` unless the mind's agents still use
   Monzo's MCP tools.

@@ -1,13 +1,13 @@
-// calls.ts — real PHONE CALLS for an iterate project, on its own phone number, both ways:
+// calls.ts — real PHONE CALLS for an iterate mind, on its own phone number, both ways:
 //
-//   iterate provide phone-calls/calls.ts --name phoneCalls --project <slug>
+//   iterate provide phone-calls/calls.ts --name phoneCalls --mind <address>
 //
 // A copy of whatsapp-calls/calls.ts with a phone line in place of WhatsApp: the same calls, the
 // same voice, the same records, so the two lends can be merged into one core later. OUT: the
-// project calls `itx.phoneCalls.call({ to, opening, brief, reportTo })` and the person's phone
-// rings, from the project's number. IN: a person this lend answers (PHONE_CALLS_ALLOWED) rings the
+// mind calls `itx.phoneCalls.call({ to, opening, brief, reportTo })` and the person's phone
+// rings, from the mind's number. IN: a person this lend answers (PHONE_CALLS_ALLOWED) rings the
 // number and the call is picked up; anyone else is turned away, to the number's own fallback
-// (voicemail, or nothing). Either way the call is a voice call like any other the project has, a
+// (voicemail, or nothing). Either way the call is a voice call like any other the mind has, a
 // press on the person's own voice device, `phone-<the other person's digits>`, provisioned once
 // (for a person it answers, when the lend starts) and kept: its relay at `/voice/phone-<digits>`
 // and its agent at `/agents/voice/phone-<digits>`, which keeps every call with that person. The
@@ -23,7 +23,7 @@
 // deleting or messages to other people (that yes is asked for on WhatsApp). A caller the line
 // itself marks untrusted (a free internet call, its number with a "?") never counts as anyone.
 //
-// The project can leave a note for a caller's next call in its kv, at
+// The mind can leave a note for a caller's next call in its kv, at
 // `phone-calls/answer/<the caller's digits>`, or WhatsApp's `whatsapp-calls/answer/<digits>`: JSON
 // `{ opening?, brief?, until? }`, as on WhatsApp.
 //
@@ -90,8 +90,8 @@ const RECORDING_NOTICE = (process.env.PHONE_CALLS_RECORDING_NOTICE || "").trim()
 /** Where this lend's call in progress is kept, for the other call lends. */
 const BUSY_KEY = "calls/busy";
 
-/** The project, as `iterate provide` hands it over: the parts this file uses. */
-type Project = Parameters<typeof connectVoiceDevice>[0] & {
+/** The mind, as `iterate provide` hands it over: the parts this file uses. */
+type Mind = Parameters<typeof connectVoiceDevice>[0] & {
   agents: { get(path: string): { message(text: string): Promise<unknown> } };
   kv: {
     get(key: string): Promise<string | null>;
@@ -123,11 +123,11 @@ type CallMetrics = {
   voiceEnds: string[];
   /** The bridge's own count: frames (20 ms) played and heard, gaps in an answer, the deepest queue. */
   bridge: Record<string, number> | null;
-  /** Times the lend's link to the project was lost mid-call and the call carried over to the new one. */
+  /** Times the lend's link to the mind was lost mid-call and the call carried over to the new one. */
   linkMoves: number;
 };
 
-/** A context of the project's, as much of it as a voice device uses. */
+/** A context of the mind's, as much of it as a voice device uses. */
 type VoiceContext = ReturnType<Parameters<typeof connectVoiceDevice>[0]["cd"]>;
 /** The call's agent, as `keepAgentReady` uses it. */
 type AgentContext = {
@@ -139,7 +139,7 @@ type AgentContext = {
 type Placed = { callId: string; ringing: true; streamPath: string };
 
 type ActiveCall = {
-  /** "out": the project rang the person. "in": the person rang the number. */
+  /** "out": the mind rang the person. "in": the person rang the number. */
   direction: "out" | "in";
   callId: string;
   /** The other person's number, digits with country code ("" for a test caller). */
@@ -193,17 +193,17 @@ type BridgeEvent = {
   group?: boolean;
 };
 
-let itx: Project | undefined;
+let itx: Mind | undefined;
 let active: ActiveCall | null = null;
 
 /** Each caller's voice device, provisioned once (`itx.voice.ensureVoiceDevice`) and kept: a press
  *  on it is one append. A refused provisioning is asked again on the next call, or on the next
  *  reconnection for a caller this lend answers (provisionAnswered). */
 const devices = new Map<string, Promise<VoiceDevice<VoiceContext>>>();
-function deviceFor(project: Project, client: string): Promise<VoiceDevice<VoiceContext>> {
+function deviceFor(mind: Mind, client: string): Promise<VoiceDevice<VoiceContext>> {
   let device = devices.get(client);
   if (!device) {
-    const connected = connectVoiceDevice(project, { client });
+    const connected = connectVoiceDevice(mind, { client });
     device = connected;
     devices.set(client, connected);
     connected.catch(() => {
@@ -215,11 +215,11 @@ function deviceFor(project: Project, client: string): Promise<VoiceDevice<VoiceC
 const clientFor = (current: ActiveCall) => `phone-${current.number || "test"}`;
 /** The device of each caller this lend answers is provisioned when the lend starts, not on that
  *  caller's first call: provisioning took about 4 s, which the caller heard as ringing. */
-function provisionAnswered(project: Project): void {
+function provisionAnswered(mind: Mind): void {
   for (const number of ALLOWED) {
     const client = `phone-${number}`;
     if (devices.has(client)) continue;
-    deviceFor(project, client).catch((error: unknown) =>
+    deviceFor(mind, client).catch((error: unknown) =>
       console.error(`phone-calls: ${client} could not be provisioned: ${String(error)}`),
     );
   }
@@ -278,8 +278,8 @@ function bridgeConnected(): Promise<void> {
 
 /** Whether a call is in progress on another call lend: WhatsApp's own status, or another lend's
  *  `calls/busy`. A lend that does not answer within two seconds counts as free. */
-async function busyElsewhere(project: Project): Promise<string | null> {
-  const whatsapp = (project as unknown as { whatsappCalls?: { status(): Promise<unknown> } })
+async function busyElsewhere(mind: Mind): Promise<string | null> {
+  const whatsapp = (mind as unknown as { whatsappCalls?: { status(): Promise<unknown> } })
     .whatsappCalls;
   const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000));
   const status = await Promise.race([
@@ -291,7 +291,7 @@ async function busyElsewhere(project: Project): Promise<string | null> {
   if (status && typeof status === "object")
     return `a WhatsApp call is in progress (with ${String((status as { with?: unknown }).with)})`;
   try {
-    const stored = await project.kv.get(BUSY_KEY);
+    const stored = await mind.kv.get(BUSY_KEY);
     const busy = stored
       ? (JSON.parse(stored) as { lend?: string; with?: string; until?: string })
       : null;
@@ -304,8 +304,8 @@ async function busyElsewhere(project: Project): Promise<string | null> {
 }
 
 /** Keep this lend's call in kv `calls/busy` while it lasts (an hour at most, if this process dies). */
-function markBusy(project: Project, current: ActiveCall): void {
-  void project.kv
+function markBusy(mind: Mind, current: ActiveCall): void {
+  void mind.kv
     .put(
       BUSY_KEY,
       JSON.stringify({
@@ -319,12 +319,12 @@ function markBusy(project: Project, current: ActiveCall): void {
     .catch(() => undefined);
 }
 
-function clearBusy(project: Project): void {
-  void project.kv
+function clearBusy(mind: Mind): void {
+  void mind.kv
     .get(BUSY_KEY)
     .then((stored) => {
       if (stored && (JSON.parse(stored) as { lend?: string }).lend === "phoneCalls")
-        return project.kv.delete(BUSY_KEY);
+        return mind.kv.delete(BUSY_KEY);
     })
     .catch(() => undefined);
 }
@@ -373,15 +373,15 @@ const newCall = (
   endedAfterGoodbyes: false,
 });
 
-/** The project's note for this caller's next call: the phone's own key, else WhatsApp's. */
-async function takeNote(project: Project, current: ActiveCall): Promise<void> {
+/** The mind's note for this caller's next call: the phone's own key, else WhatsApp's. */
+async function takeNote(mind: Mind, current: ActiveCall): Promise<void> {
   if (!current.number) return;
   for (const key of [
     `phone-calls/answer/${current.number}`,
     `whatsapp-calls/answer/${current.number}`,
   ]) {
     try {
-      const stored = await project.kv.get(key);
+      const stored = await mind.kv.get(key);
       if (!stored) continue;
       const note = JSON.parse(stored) as { opening?: unknown; brief?: unknown; until?: unknown };
       if (typeof note.until === "string" && Date.parse(note.until) < Date.now()) continue;
@@ -436,10 +436,10 @@ function soundLevel(pcm: string): number {
   return bytes.length >= 2 ? sum / (bytes.length / 2) : 0;
 }
 
-/** The lend's link to the project was lost and `iterate provide` reconnected: each caller's device
+/** The lend's link to the mind was lost and `iterate provide` reconnected: each caller's device
  *  moves to the new link, the call in progress with it, so it does not go silent. Jeeves's links are
  *  dropped every few minutes (the platform Worker's isolate is shed, 2026-10-07). */
-function carryOver(project: Project): void {
+function carryOver(mind: Mind): void {
   const current = active;
   if (current?.voice && !current.over) {
     current.metrics.linkMoves += 1;
@@ -450,7 +450,7 @@ function carryOver(project: Project): void {
   for (const [client, device] of devices) {
     // a call placed meanwhile waits for the move
     const moved = device.then(async (ready) => {
-      await ready.moveTo(project);
+      await ready.moveTo(mind);
       return ready;
     });
     devices.set(client, moved);
@@ -474,20 +474,16 @@ const addStats = (current: ActiveCall, ended: VoiceCall) => {
   current.metrics.speakerMs += Math.round(ended.stats.spkMsReceived);
 };
 
-/** A voice call of the project's for this phone call, answered once the live model is on the line.
+/** A voice call of the mind's for this phone call, answered once the live model is on the line.
  *  `resumed`: the one before it failed mid-call, and this one is told what was said. */
-async function connectVoice(
-  project: Project,
-  current: ActiveCall,
-  resumed: boolean,
-): Promise<void> {
+async function connectVoice(mind: Mind, current: ActiveCall, resumed: boolean): Promise<void> {
   const pressedAt = Date.now();
-  const device = await deviceFor(project, clientFor(current));
+  const device = await deviceFor(mind, clientFor(current));
   current.agentPath = device.agentPath;
   await current.noted;
   // the brief goes before the press: the agent reads it before the call's first hand-over. Over
   // the newest link: the device may have waited for a move to it
-  await (itx ?? project).cd(device.agentPath).append({
+  await (itx ?? mind).cd(device.agentPath).append({
     type: "events.iterate.com/agent/context-added",
     payload: {
       role: "user",
@@ -552,7 +548,7 @@ async function connectVoice(
       }
       console.error(`phone-calls: the voice ended (${reason}); reconnecting it`);
       // the newest link: the one this voice started on may have been replaced since
-      connectVoice(itx ?? project, current, true).catch((error: unknown) => {
+      connectVoice(itx ?? mind, current, true).catch((error: unknown) => {
         console.error(`phone-calls: the voice could not be reconnected: ${String(error)}`);
         tell({ hangup: true });
       });
@@ -711,8 +707,8 @@ async function keepAgentReady(current: ActiveCall): Promise<void> {
 /** Ring `input.to`. The voice is connected FIRST, and only then does the phone ring. Answers once
  *  the phone is ringing; the rest is recorded on LOG_PATH and, with `reportTo`, told to that agent. */
 async function call(input: CallInput): Promise<Placed> {
-  const project = itx;
-  if (!project) throw new Error("Phone calls are not connected to the project yet.");
+  const mind = itx;
+  if (!mind) throw new Error("Phone calls are not connected to the mind yet.");
   const digits = String(input?.to ?? "").replace(/\D/g, "");
   if (digits.length < 8)
     throw new Error(
@@ -722,7 +718,7 @@ async function call(input: CallInput): Promise<Placed> {
   // the agents' rules (calls.md); PHONE_CALLS_ALLOWED says only who is answered.
   if (active)
     throw new Error(`A call is already in progress (with ${active.who}): one call at a time.`);
-  const elsewhere = await busyElsewhere(project);
+  const elsewhere = await busyElsewhere(mind);
   if (elsewhere) throw new Error(`Not now: ${elsewhere}. One call at a time.`);
   // a call may have come in while WhatsApp was asked
   const meanwhile = active as ActiveCall | null;
@@ -744,9 +740,9 @@ async function call(input: CallInput): Promise<Placed> {
   }
   current.reportTo = input.reportTo;
   active = current;
-  markBusy(project, current);
+  markBusy(mind, current);
   try {
-    await connectVoice(project, current, false);
+    await connectVoice(mind, current, false);
   } catch (error) {
     await finished(
       current,
@@ -766,11 +762,11 @@ async function call(input: CallInput): Promise<Placed> {
   return await current.placed.promise;
 }
 
-/** Someone is ringing the number. A caller this lend answers gets a voice call of the project's
+/** Someone is ringing the number. A caller this lend answers gets a voice call of the mind's
  *  first, and is picked up once the live model is on the line; anyone else is turned away, to the
  *  number's own fallback. */
 async function incoming(event: BridgeEvent): Promise<void> {
-  const project = itx;
+  const mind = itx;
   const callId = event.callId ?? "";
   const digits = event.number ?? "";
   const test = Boolean(TEST_FROM) && event.from === TEST_FROM;
@@ -786,7 +782,7 @@ async function incoming(event: BridgeEvent): Promise<void> {
       reason,
     });
   };
-  if (!project) return tell({ reject: callId });
+  if (!mind) return tell({ reject: callId });
   if (!test && (event.untrusted || !digits))
     return turnAway("the line does not vouch for the caller's number");
   if (!test && !ALLOWED.has(digits)) return turnAway("not a number this lend answers");
@@ -795,18 +791,18 @@ async function incoming(event: BridgeEvent): Promise<void> {
   current.callId = callId;
   current.ringingAt = Date.now();
   active = current; // before any await: a second call is turned away
-  const elsewhere = await busyElsewhere(project);
+  const elsewhere = await busyElsewhere(mind);
   if (elsewhere) {
     active = null;
     return turnAway(elsewhere);
   }
-  markBusy(project, current);
+  markBusy(mind, current);
   current.opening =
     (test ? ANSWER_WITH.test : ANSWER_WITH[digits]) ?? ANSWER_WITH.default ?? "Hello.";
-  current.noted = takeNote(project, current);
+  current.noted = takeNote(mind, current);
   void record("call-received", { callId, from: who, ...(test && { test: true }), answering: true });
   try {
-    await connectVoice(project, current, false);
+    await connectVoice(mind, current, false);
   } catch (error) {
     tell({ reject: callId });
     await finished(
@@ -919,7 +915,7 @@ function startBridge(): void {
   });
 }
 
-export default async function provide(connection: { itx: Project }) {
+export default async function provide(connection: { itx: Mind }) {
   const reconnected = itx !== undefined;
   itx = connection.itx;
   if (reconnected) carryOver(connection.itx);
@@ -949,7 +945,7 @@ export default async function provide(connection: { itx: Project }) {
         : null;
     },
     __describe: () => ({
-      instructions: `Phone calls on the agents' own number${ownNumber ? ` (${ownNumber})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this project: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
+      instructions: `Phone calls on the agents' own number${ownNumber ? ` (${ownNumber})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this mind: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
       functions: ["call", "hangup", "status"],
     }),
   };

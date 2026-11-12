@@ -1,8 +1,8 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// Runs against dist, the package as shipped. `fakeMind` is a mind: secrets (a catalog that
 // answers the public fields a set named and never a secret one, a delete of a missing secret
 // refused as SECRET_NOT_SET, and any delete ending the OAuth attempt in flight, as the platform's
 // do), a collection link to a pretend Dash, `beginOAuth`, its callback and `oauthResult` as the
-// platform runs them for a client of the project's own (a start link, a signed state, the redirect
+// platform runs them for a client of the mind's own (a start link, a signed state, the redirect
 // URI its own callback, the client secret's placeholder refused unless its secret is pinned to the
 // token endpoint, the account named at `account`'s endpoint (a pretend Google's userinfo, called
 // with the new token) and another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names
@@ -70,7 +70,7 @@ const pendingKey = (connection: string) => `own-google/pending/${connection}`;
 const PLATFORM = "https://os.example";
 const CALLBACK = `${PLATFORM}/.secrets/oauth/callback`;
 
-function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
+function fakeMind(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
@@ -243,7 +243,7 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
     }
     return page(attempt.options.next.path);
   };
-  /** The project's egress, a loaded worker's global `fetch`: the platform names every account, so
+  /** The mind's egress, a loaded worker's global `fetch`: the platform names every account, so
    *  the package calls no service, and each call is recorded and refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -300,11 +300,11 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   };
   /** The connection of the last attempt begun. */
   const lastConnection = () => begun.at(-1)!.path.slice("/secrets/own-google-".length);
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) => {
     globalThis.fetch = egress as typeof fetch;
     return integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   };
@@ -395,7 +395,7 @@ const location = (res: Response) => decodeURIComponent(res.headers.get("location
 const card = (status: object, label: string, routingSlug = "google") => ({
   title: "Google",
   description:
-    "The project's own Google OAuth client: Google's APIs (Gmail, Calendar, Drive and the rest) as each connected account, with tokens the platform refreshes.",
+    "The mind's own Google OAuth client: Google's APIs (Gmail, Calendar, Drive and the rest) as each connected account, with tokens the platform refreshes.",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });
@@ -415,47 +415,47 @@ const NO_CLIENT = card(
 );
 const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
 
-/** A project with Ada connected through the page, and her connection. */
+/** A mind with Ada connected through the page, and her connection. */
 async function connected() {
-  const project = fakeProject();
-  await project.setUp();
-  await project.connect(ADA);
-  return { project, connection: project.lastConnection() };
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.connect(ADA);
+  return { mind, connection: mind.lastConnection() };
 }
 
 // ------------------------------------------------------------- the integration
 
 test("every name the package keeps is its own: no secret or kv key the platform's shared Google client could own", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  await project.connect(ADA, connection);
-  await project.connect(ADA); // the same account again: the older connection goes
-  project.faults.registry = 1; // leaves a tombstone behind, for a while
-  await project.page("/disconnect", { form: { id: project.lastConnection() } });
-  await project.publish(3);
-  assert.equal(project.written.secrets.size, 3);
-  for (const path of project.written.secrets)
+  const { mind, connection } = await connected();
+  await mind.connect(GRACE);
+  await mind.connect(ADA, connection);
+  await mind.connect(ADA); // the same account again: the older connection goes
+  mind.faults.registry = 1; // leaves a tombstone behind, for a while
+  await mind.page("/disconnect", { form: { id: mind.lastConnection() } });
+  await mind.publish(3);
+  assert.equal(mind.written.secrets.size, 3);
+  for (const path of mind.written.secrets)
     assert.match(path, /^\/secrets\/own-google-[0-9a-f]{8}$/);
-  assert.ok(project.written.kv.size >= 6, [...project.written.kv].join(" "));
-  for (const key of project.written.kv) assert.match(key, /^own-google\//);
-  for (const { path } of project.appended) assert.equal(path, "/integrations");
+  assert.ok(mind.written.kv.size >= 6, [...mind.written.kv].join(" "));
+  for (const key of mind.written.kv) assert.match(key, /^own-google\//);
+  for (const { path } of mind.appended) assert.equal(path, "/integrations");
 });
 
 test("it answers its own routing slug, google unless another is given; anything but its page and its landing is a 404", async () => {
   assert.equal(google().routingSlug, "google");
   assert.equal(google({ slug: "gmail" }).routingSlug, "gmail");
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/nope", "/oauth2/callback", "/connectedx", "/webhook", "/oauth2"])
-    assert.equal((await project.page(path)).status, 404, path);
-  assert.equal((await project.page("/nope", { form: {} })).status, 404);
-  assert.equal((await project.page("/connected", { form: {} })).status, 405);
-  // a member's stray path opens the project's scope and releases it, and writes nothing
-  assert.equal(project.scopes.opened, project.scopes.disposed);
-  assert.deepEqual(project.kv, {});
+    assert.equal((await mind.page(path)).status, 404, path);
+  assert.equal((await mind.page("/nope", { form: {} })).status, 404);
+  assert.equal((await mind.page("/connected", { form: {} })).status, 405);
+  // a member's stray path opens the mind's scope and releases it, and writes nothing
+  assert.equal(mind.scopes.opened, mind.scopes.disposed);
+  assert.deepEqual(mind.kv, {});
 });
 
 test("the page and the landing are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
@@ -463,28 +463,28 @@ test("the page and the landing are for members: whatever auth.require answers is
     ["/disconnect", { id: "0a1b2c3d" }],
     ["/connected?id=0a1b2c3d", undefined],
   ] as const)
-    assert.equal((await project.page(path, { form }, refused)).status, 401, path);
-  assert.deepEqual(project.kv, {});
-  assert.deepEqual(project.secrets, {});
-  assert.deepEqual(project.begun, []);
-  assert.deepEqual(project.calls, []);
-  assert.equal(project.scopes.opened, 0);
+    assert.equal((await mind.page(path, { form }, refused)).status, 401, path);
+  assert.deepEqual(mind.kv, {});
+  assert.deepEqual(mind.secrets, {});
+  assert.deepEqual(mind.begun, []);
+  assert.deepEqual(mind.calls, []);
+  assert.equal(mind.scopes.opened, 0);
 });
 
 test("each request opens one scope and releases it", async () => {
-  const { project } = await connected();
-  const before = { ...project.scopes };
-  await project.page("/");
-  await project.page("/connected?id=ffffffff");
-  assert.deepEqual(project.scopes, { opened: before.opened + 2, disposed: before.disposed + 2 });
+  const { mind } = await connected();
+  const before = { ...mind.scopes };
+  await mind.page("/");
+  await mind.page("/connected?id=ffffffff");
+  assert.deepEqual(mind.scopes, { opened: before.opened + 2, disposed: before.disposed + 2 });
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page shows the redirect URI to register at Google, iterate's own callback whatever address serves the page, with a Copy button; a form may lead only here, to iterate's start link and to Google", async () => {
-  const project = fakeProject();
-  const res = await project.page("/", {
-    headers: { "x-iterate-base-path": "/projects/iterate/google" },
+  const mind = fakeMind();
+  const res = await mind.page("/", {
+    headers: { "x-iterate-base-path": "/minds/iterate/google" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
@@ -505,13 +505,13 @@ test("the page shows the redirect URI to register at Google, iterate's own callb
 });
 
 test("the page links to the Dash's one form for the client, its ID public beside its secret, which never passes through this code; the form checks the ID's shape as the browser does", async () => {
-  const project = fakeProject();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  const html = await (await mind.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
   assert.match(html, />Save the client</);
-  assert.match(project.collected[0]!.description, /GOCSPX-/);
+  assert.match(mind.collected[0]!.description, /GOCSPX-/);
   assert.deepEqual(
-    project.collected.map((input) => ({ ...input, description: undefined })),
+    mind.collected.map((input) => ({ ...input, description: undefined })),
     [
       {
         path: "/secrets/own-google-app",
@@ -536,43 +536,40 @@ test("the page links to the Dash's one form for the client, its ID public beside
   for (const id of [CLIENT_ID, "1234-abc.apps.googleusercontent.com"]) assert.match(id, shape);
   for (const value of ["GOCSPX-a-made-up-secret", "1234-fake.apps.example.com", ""])
     assert.doesNotMatch(value, shape);
-  await project.setUp();
-  assert.match(await (await project.page("/")).text(), />Replace it</);
+  await mind.setUp();
+  assert.match(await (await mind.page("/")).text(), />Replace it</);
 });
 
 test("the client is read from the catalog's public field: the page shows its ID, Connect sends it, and the kv keeps no copy", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  await mind.setUp();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /Client ID 1234-fake\.apps\.googleusercontent\.com/);
   assert.doesNotMatch(html, /has no public client ID/);
-  await project.start();
-  assert.equal(project.begun[0]!.options.clientId, CLIENT_ID);
-  assert.ok(!Object.values(project.kv).some((value) => value.includes(CLIENT_ID)));
+  await mind.start();
+  assert.equal(mind.begun[0]!.options.clientId, CLIENT_ID);
+  assert.ok(!Object.values(mind.kv).some((value) => value.includes(CLIENT_ID)));
 });
 
 test("a secret without the public field is not set up: the page asks to save the client again, and Connect is refused", async () => {
-  const project = fakeProject();
-  project.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  mind.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /has no public client ID\. Save the client again/);
   assert.match(html, />Save the client</);
   assert.doesNotMatch(html, /Client ID 1234/);
   assert.doesNotMatch(html, /action="connect"/);
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client first/,
-  );
-  assert.deepEqual(project.begun, []);
+  assert.match(location(await mind.page("/connect", { form: {} })), /error=Save the client first/);
+  assert.deepEqual(mind.begun, []);
 });
 
 test("no other site can frame the page's answers or the landing's", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   const answers = [
-    await project.page("/connect", { form: {} }),
-    await project.page("/disconnect", { form: { id: "ffffffff" } }),
-    await project.page("/connected?id=ffffffff"),
-    await project.connect(ADA, connection),
+    await mind.page("/connect", { form: {} }),
+    await mind.page("/disconnect", { form: { id: "ffffffff" } }),
+    await mind.page("/connected?id=ffffffff"),
+    await mind.connect(ADA, connection),
   ];
   for (const res of answers) {
     assert.equal(res.headers.get("x-frame-options"), "DENY", res.headers.get("location")!);
@@ -583,21 +580,18 @@ test("no other site can frame the page's answers or the landing's", async () => 
 // ------------------------------------------------------------------ connect
 
 test("Connect needs the client; then it begins OAuth with Google's endpoints, the landing, the scopes, offline access, the client secret's placeholder and the userinfo endpoint that names the account, sends the person to iterate's start link, and keeps the attempt by its connection", async () => {
-  const project = fakeProject();
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client first/,
-  );
-  assert.deepEqual(project.begun, []);
-  await project.setUp();
-  const res = await project.page("/connect", { form: {} });
+  const mind = fakeMind();
+  assert.match(location(await mind.page("/connect", { form: {} })), /error=Save the client first/);
+  assert.deepEqual(mind.begun, []);
+  await mind.setUp();
+  const res = await mind.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
   assert.equal(to.origin, PLATFORM);
   assert.match(to.pathname, /^\/\.secrets\/oauth\/start\//);
-  const connection = project.lastConnection();
+  const connection = mind.lastConnection();
   assert.match(connection, /^[0-9a-f]{8}$/);
-  assert.deepEqual(project.begun, [
+  assert.deepEqual(mind.begun, [
     {
       path: `/secrets/own-google-${connection}`,
       options: {
@@ -613,19 +607,16 @@ test("Connect needs the client; then it begins OAuth with Google's endpoints, th
       },
     },
   ]);
-  const attempt = JSON.parse(project.kv[pendingKey(connection)]!);
+  const attempt = JSON.parse(mind.kv[pendingKey(connection)]!);
   assert.equal(attempt.connection, connection);
-  assert.equal(
-    attempt.nonce,
-    project.platform.attempts[`/secrets/own-google-${connection}`]!.nonce,
-  );
+  assert.equal(attempt.nonce, mind.platform.attempts[`/secrets/own-google-${connection}`]!.nonce);
   assert.ok(Math.abs(Date.now() - attempt.at) < 5000);
   // nothing is listed until Google comes back
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
     0,
   );
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /<form method="post" action="connect">/);
   assert.match(
     html,
@@ -634,66 +625,66 @@ test("Connect needs the client; then it begins OAuth with Google's endpoints, th
 });
 
 test("scopes and urls ask for more, beside the package's own; the page lists every scope it asks for", async () => {
-  const project = fakeProject({
+  const mind = fakeMind({
     scopes: ["https://www.googleapis.com/auth/gmail.readonly", "openid"],
     urls: ["https://sheets.googleapis.com", "https://www.googleapis.com"],
   });
-  await project.setUp();
-  await project.start();
-  const { options } = project.begun[0]!;
+  await mind.setUp();
+  await mind.start();
+  const { options } = mind.begun[0]!;
   assert.equal(
     options.scope,
     "openid email profile https://www.googleapis.com/auth/gmail.readonly",
   );
   assert.deepEqual(options.urls, [...URLS, "https://sheets.googleapis.com"]);
   assert.match(
-    await (await project.page("/")).text(),
+    await (await mind.page("/")).text(),
     /<code>https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly<\/code>/,
   );
 });
 
 test("Connect forgets the attempts that never came back, after an hour, and a new connection's pending secret with them", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  await project.start();
-  const stale = project.lastConnection();
-  project.kv[pendingKey(stale)] = JSON.stringify({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.start();
+  const stale = mind.lastConnection();
+  mind.kv[pendingKey(stale)] = JSON.stringify({
     connection: stale,
     nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  await project.start();
-  const fresh = project.lastConnection();
-  await project.start();
-  const next = project.lastConnection();
+  await mind.start();
+  const fresh = mind.lastConnection();
+  await mind.start();
+  const next = mind.lastConnection();
   assert.deepEqual(
-    Object.keys(project.kv)
+    Object.keys(mind.kv)
       .filter((key) => key.startsWith("own-google/pending/"))
       .sort(),
     [pendingKey(fresh), pendingKey(next)].sort(),
   );
   // its delete ended the platform's attempt
-  assert.equal(project.platform.attempts[`/secrets/own-google-${stale}`], undefined);
+  assert.equal(mind.platform.attempts[`/secrets/own-google-${stale}`], undefined);
 });
 
 // --------------------------------------------------------------- the landing
 
 test("iterate's callback completes the attempt and sends the person to the landing, which keeps the account the platform named, registers the card then the row, and shows the page; the package calls no service of its own", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const connection = project.lastConnection();
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const connection = mind.lastConnection();
   const path = `/secrets/own-google-${connection}`;
-  project.google.codes["a-made-up-code"] = ADA;
-  const before = project.registry().length;
-  const res = await project.callback({ code: "a-made-up-code", state });
+  mind.google.codes["a-made-up-code"] = ADA;
+  const before = mind.registry().length;
+  const res = await mind.callback({ code: "a-made-up-code", state });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
+  assert.deepEqual(mind.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   // the tokens went no further than the pin the package asked for
-  assert.deepEqual(project.secrets[path]!.options.urls, URLS);
-  assert.deepEqual(project.calls, []);
-  const account = JSON.parse(project.kv[`own-google/accounts/${connection}`]!);
+  assert.deepEqual(mind.secrets[path]!.options.urls, URLS);
+  assert.deepEqual(mind.calls, []);
+  const account = JSON.parse(mind.kv[`own-google/accounts/${connection}`]!);
   assert.deepEqual(
     { ...account, at: undefined },
     {
@@ -704,13 +695,13 @@ test("iterate's callback completes the attempt and sends the person to the landi
     },
   );
   assert.ok(Math.abs(Date.now() - Date.parse(account.at)) < 5000);
-  assert.equal(project.kv[pendingKey(connection)], undefined);
+  assert.equal(mind.kv[pendingKey(connection)], undefined);
   // the card first: a row stands under its card alone
-  assert.deepEqual(project.registry().slice(before), [
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "google", card: READY } },
     { type: CONNECTION_CONFIGURED, payload: { integration: "google", connection, row: row() } },
   ]);
-  const html = await (await project.page("/?connected=ada%40example.com")).text();
+  const html = await (await mind.page("/?connected=ada%40example.com")).text();
   assert.match(html, /Connected ada@example\.com\./);
   assert.ok(html.includes(`<b>ada@example.com</b> <span class="muted"><code>${path}</code>`));
   assert.match(html, /openid userinfo\.email userinfo\.profile/);
@@ -719,114 +710,114 @@ test("iterate's callback completes the attempt and sends the person to the landi
 });
 
 test("a landing with an unknown, missing or hour-old attempt is refused and writes nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  await project.start();
-  const old = project.lastConnection();
-  project.kv[pendingKey(old)] = JSON.stringify({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.start();
+  const old = mind.lastConnection();
+  mind.kv[pendingKey(old)] = JSON.stringify({
     connection: old,
     nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  const kv = structuredClone(project.kv);
-  const secrets = structuredClone(project.secrets);
-  const before = project.registry().length;
+  const kv = structuredClone(mind.kv);
+  const secrets = structuredClone(mind.secrets);
+  const before = mind.registry().length;
   for (const query of ["?id=ffffffff", "?id=", "", "?id=not-a-connection", `?id=${old}`]) {
-    const res = await project.page(`/connected${query}`);
+    const res = await mind.page(`/connected${query}`);
     assert.match(
       location(res),
       /error=iterate came back from a sign-in this page did not start, or that is over an hour old/,
       query,
     );
   }
-  assert.deepEqual(project.kv, kv);
-  assert.deepEqual(project.secrets, secrets);
-  assert.equal(project.registry().length, before);
+  assert.deepEqual(mind.kv, kv);
+  assert.deepEqual(mind.secrets, secrets);
+  assert.equal(mind.registry().length, before);
 });
 
 test("a landing before the platform finished says so and keeps the attempt; the same link finishes it", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const connection = project.lastConnection();
-  const early = await project.page(`/connected?id=${connection}`);
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const connection = mind.lastConnection();
+  const early = await mind.page(`/connected?id=${connection}`);
   assert.match(location(early), /error=Google's sign-in has not finished yet/);
-  assert.ok(project.kv[pendingKey(connection)]);
-  project.google.codes["a-made-up-code"] = ADA;
-  const res = await project.callback({ code: "a-made-up-code", state });
+  assert.ok(mind.kv[pendingKey(connection)]);
+  mind.google.codes["a-made-up-code"] = ADA;
+  const res = await mind.callback({ code: "a-made-up-code", state });
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
 });
 
 test("Google's no is iterate's callback's to show: the landing is never reached, nothing is connected, and the attempt goes with the next Connect after an hour", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const before = project.registry().length;
-  const res = await project.callback({ error: "access_denied", state });
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const before = mind.registry().length;
+  const res = await mind.callback({ error: "access_denied", state });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /The provider declined: access_denied/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-google-app"]);
-  assert.deepEqual(project.completed, []);
-  assert.equal(project.registry().length, before);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-google-app"]);
+  assert.deepEqual(mind.completed, []);
+  assert.equal(mind.registry().length, before);
 });
 
 test("an exchange that fails is iterate's callback's to show: nothing is stored, the landing is never reached, and nothing is listed", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const before = project.registry().length;
-  const res = await project.callback({ code: "a-code-google-never-issued", state });
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const before = mind.registry().length;
+  const res = await mind.callback({ code: "a-code-google-never-issued", state });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /the token endpoint answered 400 \(invalid_grant\)/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-google-app"]);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-google-app"]);
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
     0,
   );
-  assert.equal(project.registry().length, before);
-  assert.match(await (await project.page("/")).text(), /None yet/);
+  assert.equal(mind.registry().length, before);
+  assert.match(await (await mind.page("/")).text(), /None yet/);
 });
 
 test("a platform that names no account (one older than the account endpoint) connects nothing: the new connection's secret goes", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.platform.lookups = false;
-  const before = project.registry().length;
-  const res = await project.connect(ADA);
+  const mind = fakeMind();
+  await mind.setUp();
+  mind.platform.lookups = false;
+  const before = mind.registry().length;
+  const res = await mind.connect(ADA);
   assert.match(location(res), /error=The platform named no account for these tokens/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-google-app"]);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-google-app"]);
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
     0,
   );
-  assert.equal(project.registry().length, before);
+  assert.equal(mind.registry().length, before);
 });
 
 test("an account the userinfo endpoint names no address for is listed by its id", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const res = await project.connect({ id: "1004", email: "" });
+  const mind = fakeMind();
+  await mind.setUp();
+  const res = await mind.connect({ id: "1004", email: "" });
   assert.equal(res.headers.get("location"), "./?connected=1004");
-  const connection = project.lastConnection();
-  assert.equal(JSON.parse(project.kv[`own-google/accounts/${connection}`]!).account, "1004");
-  assert.equal(project.registry().at(-1)!.payload.row.account, "1004");
+  const connection = mind.lastConnection();
+  assert.equal(JSON.parse(mind.kv[`own-google/accounts/${connection}`]!).account, "1004");
+  assert.equal(mind.registry().at(-1)!.payload.row.account, "1004");
 });
 
 test("the same account connected twice keeps one row: the older connection's secret and row go", async () => {
-  const { project, connection: older } = await connected();
-  await project.connect(GRACE);
-  const grace = project.lastConnection();
-  const before = project.registry().length;
-  const res = await project.connect(ADA);
-  const newer = project.lastConnection();
+  const { mind, connection: older } = await connected();
+  await mind.connect(GRACE);
+  const grace = mind.lastConnection();
+  const before = mind.registry().length;
+  const res = await mind.connect(ADA);
+  const newer = mind.lastConnection();
   assert.notEqual(newer, older);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.equal(project.secrets[`/secrets/own-google-${older}`], undefined);
-  assert.equal(project.kv[`own-google/accounts/${older}`], undefined);
-  assert.equal(project.kv[`own-google/removed/${older}`], undefined, "its null row landed");
-  assert.ok(project.secrets[`/secrets/own-google-${newer}`]);
-  assert.ok(project.secrets[`/secrets/own-google-${grace}`], "another account stays");
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets[`/secrets/own-google-${older}`], undefined);
+  assert.equal(mind.kv[`own-google/accounts/${older}`], undefined);
+  assert.equal(mind.kv[`own-google/removed/${older}`], undefined, "its null row landed");
+  assert.ok(mind.secrets[`/secrets/own-google-${newer}`]);
+  assert.ok(mind.secrets[`/secrets/own-google-${grace}`], "another account stays");
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "google", connection: older, row: null },
@@ -837,7 +828,7 @@ test("the same account connected twice keeps one row: the older connection's sec
       payload: { integration: "google", connection: newer, row: row() },
     },
   ]);
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.equal(html.match(/<b>ada@example\.com<\/b>/g)!.length, 1);
   assert.match(html, /<b>grace@example\.com<\/b>/);
 });
@@ -845,13 +836,13 @@ test("the same account connected twice keeps one row: the older connection's sec
 // --------------------------------------------------------------- reconnect
 
 test("Reconnect begins OAuth again on the same connection, held to its account (expectAccount) and hinted to Google; the callback keeps the connection", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   const path = `/secrets/own-google-${connection}`;
-  const token = project.secrets[path]!.material.accessToken;
-  const res = await project.connect(ADA, connection);
+  const token = mind.secrets[path]!.material.accessToken;
+  const res = await mind.connect(ADA, connection);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.equal(project.lastConnection(), connection);
-  assert.deepEqual(project.begun.at(-1), {
+  assert.equal(mind.lastConnection(), connection);
+  assert.deepEqual(mind.begun.at(-1), {
     path,
     options: {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -866,59 +857,59 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
       expectAccount: "1001",
     },
   });
-  assert.notEqual(project.secrets[path]!.material.accessToken, token, "new tokens");
+  assert.notEqual(mind.secrets[path]!.material.accessToken, token, "new tokens");
   assert.equal(
-    JSON.parse(project.kv[`own-google/accounts/${connection}`]!).account,
+    JSON.parse(mind.kv[`own-google/accounts/${connection}`]!).account,
     "ada@example.com",
   );
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-google/accounts/")).length,
     1,
   );
-  assert.deepEqual(project.registry().at(-1), {
+  assert.deepEqual(mind.registry().at(-1), {
     type: CONNECTION_CONFIGURED,
     payload: { integration: "google", connection, row: row() },
   });
   // an unknown connection is refused before Google is asked
-  const begun = project.begun.length;
+  const begun = mind.begun.length;
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/connect", { form: { id } })),
+      location(await mind.page("/connect", { form: { id } })),
       /error=Unknown account/,
       id,
     );
-  assert.equal(project.begun.length, begun);
+  assert.equal(mind.begun.length, begun);
 });
 
 test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: its callback shows it, and nothing changes", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  const secrets = structuredClone(project.secrets);
-  const before = project.registry().length;
-  const res = await project.connect(GRACE, connection);
+  const { mind, connection } = await connected();
+  await mind.connect(GRACE);
+  const secrets = structuredClone(mind.secrets);
+  const before = mind.registry().length;
+  const res = await mind.connect(GRACE, connection);
   assert.equal(res.status, 400);
   assert.match(
     await res.text(),
     /the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
-  assert.deepEqual(project.secrets, secrets);
-  assert.equal(project.registry().length, before);
-  const html = await (await project.page("/")).text();
+  assert.deepEqual(mind.secrets, secrets);
+  assert.equal(mind.registry().length, before);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /<b>ada@example\.com<\/b>/);
   assert.match(html, /<b>grace@example\.com<\/b>/);
 });
 
 test("an account reconnected after a removal that did not finish keeps its row at the next publish", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   // a Disconnect that stopped after its tombstone: the secret gone, the account still listed
-  delete project.secrets[`/secrets/own-google-${connection}`];
-  project.kv[`own-google/removed/${connection}`] = JSON.stringify({ at: new Date().toISOString() });
-  await project.connect(ADA, connection);
-  assert.equal(project.kv[`own-google/removed/${connection}`], undefined);
-  await project.publish(9);
-  assert.ok(project.kv[`own-google/accounts/${connection}`]);
+  delete mind.secrets[`/secrets/own-google-${connection}`];
+  mind.kv[`own-google/removed/${connection}`] = JSON.stringify({ at: new Date().toISOString() });
+  await mind.connect(ADA, connection);
+  assert.equal(mind.kv[`own-google/removed/${connection}`], undefined);
+  await mind.publish(9);
+  assert.ok(mind.kv[`own-google/accounts/${connection}`]);
   assert.deepEqual(
-    project
+    mind
       .registry()
       .filter((event) => event.payload.connection === connection)
       .at(-1)!.payload.row,
@@ -929,80 +920,80 @@ test("an account reconnected after a removal that did not finish keeps its row a
 // --------------------------------------------------------------- disconnect
 
 test("Disconnect deletes the account's secret and kv entry, takes its row away and registers the card; the access stays granted at Google", async () => {
-  const { project, connection } = await connected();
-  const before = project.registry().length;
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  const before = mind.registry().length;
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.secrets[`/secrets/own-google-${connection}`], undefined);
-  assert.ok(project.secrets["/secrets/own-google-app"], "the client's secret stays");
-  assert.equal(project.kv[`own-google/accounts/${connection}`], undefined);
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets[`/secrets/own-google-${connection}`], undefined);
+  assert.ok(mind.secrets["/secrets/own-google-app"], "the client's secret stays");
+  assert.equal(mind.kv[`own-google/accounts/${connection}`], undefined);
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONNECTION_CONFIGURED, payload: { integration: "google", connection, row: null } },
     { type: CONFIGURED, payload: { integration: "google", card: NO_ACCOUNT } },
   ]);
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /The access stays granted at Google/);
   assert.match(html, /None yet/);
   // an unknown one changes nothing
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/disconnect", { form: { id } })),
+      location(await mind.page("/disconnect", { form: { id } })),
       /error=Unknown account/,
     );
 });
 
 test("a Disconnect whose secret cannot be deleted says so, and keeps the account and its row for another try", async () => {
-  const { project, connection } = await connected();
-  const before = project.registry().length;
-  project.faults.deletes = true;
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  const before = mind.registry().length;
+  mind.faults.deletes = true;
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.match(location(res), /error=the secret store is unavailable/);
-  assert.ok(project.secrets[`/secrets/own-google-${connection}`], "the tokens stay, and say so");
-  assert.ok(project.kv[`own-google/accounts/${connection}`]);
-  assert.equal(project.kv[`own-google/removed/${connection}`], undefined);
-  assert.equal(project.registry().length, before, "no row is taken away");
-  project.faults.deletes = false;
+  assert.ok(mind.secrets[`/secrets/own-google-${connection}`], "the tokens stay, and say so");
+  assert.ok(mind.kv[`own-google/accounts/${connection}`]);
+  assert.equal(mind.kv[`own-google/removed/${connection}`], undefined);
+  assert.equal(mind.registry().length, before, "no row is taken away");
+  mind.faults.deletes = false;
   assert.equal(
-    (await project.page("/disconnect", { form: { id: connection } })).headers.get("location"),
+    (await mind.page("/disconnect", { form: { id: connection } })).headers.get("location"),
     "./",
   );
-  assert.equal(project.secrets[`/secrets/own-google-${connection}`], undefined);
-  assert.equal(project.kv[`own-google/accounts/${connection}`], undefined);
+  assert.equal(mind.secrets[`/secrets/own-google-${connection}`], undefined);
+  assert.equal(mind.kv[`own-google/accounts/${connection}`], undefined);
 });
 
 test("a Disconnect whose secret is already gone finishes", async () => {
-  const { project, connection } = await connected();
-  delete project.secrets[`/secrets/own-google-${connection}`];
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  delete mind.secrets[`/secrets/own-google-${connection}`];
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.kv[`own-google/accounts/${connection}`], undefined);
-  assert.equal(project.registry().at(-2)!.payload.row, null);
+  assert.equal(mind.kv[`own-google/accounts/${connection}`], undefined);
+  assert.equal(mind.registry().at(-2)!.payload.row, null);
 });
 
 test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
   for (const finish of ["disconnect", "publish"] as const) {
-    const { project, connection } = await connected();
-    project.faults.registry = 1;
-    const failed = await project.page("/disconnect", { form: { id: connection } });
+    const { mind, connection } = await connected();
+    mind.faults.registry = 1;
+    const failed = await mind.page("/disconnect", { form: { id: connection } });
     assert.match(location(failed), /error=the registry is unavailable/, finish);
-    assert.equal(project.secrets[`/secrets/own-google-${connection}`], undefined);
-    assert.equal(project.kv[`own-google/accounts/${connection}`], undefined);
+    assert.equal(mind.secrets[`/secrets/own-google-${connection}`], undefined);
+    assert.equal(mind.kv[`own-google/accounts/${connection}`], undefined);
     assert.ok(
-      project.kv[`own-google/removed/${connection}`],
+      mind.kv[`own-google/removed/${connection}`],
       "the tombstone stands until the null row lands",
     );
-    assert.ok(!project.registry().some((event) => event.payload.row === null));
+    assert.ok(!mind.registry().some((event) => event.payload.row === null));
     if (finish === "disconnect") {
-      const again = await project.page("/disconnect", { form: { id: connection } });
+      const again = await mind.page("/disconnect", { form: { id: connection } });
       assert.equal(again.headers.get("location"), "./", "not Unknown account");
-      assert.deepEqual(project.registry().at(-2), {
+      assert.deepEqual(mind.registry().at(-2), {
         type: CONNECTION_CONFIGURED,
         payload: { integration: "google", connection, row: null },
       });
     } else {
-      await project.publish(9);
+      await mind.publish(9);
       assert.deepEqual(
-        project
+        mind
           .registry()
           .filter((event) => event.payload.connection === connection)
           .at(-1),
@@ -1013,16 +1004,16 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
         },
       );
     }
-    assert.equal(project.kv[`own-google/removed/${connection}`], undefined, finish);
+    assert.equal(mind.kv[`own-google/removed/${connection}`], undefined, finish);
   }
 });
 
 // --------------------------------------------- the Dash's Integrations page
 
 test("the install hook registers the card and a row per account, keyed by the event's path and offset: a retry appends nothing new", async () => {
-  const project = fakeProject();
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind();
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "google:registry:/@5",
@@ -1030,13 +1021,13 @@ test("the install hook registers the card and a row per account, keyed by the ev
     },
   ]);
 
-  await project.setUp();
-  await project.connect(ADA);
-  const connection = project.lastConnection();
-  await project.publish(5); // the same event again, now set up: its key is spent, and that is fine
-  const before = project.registry().length;
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(9);
-  assert.deepEqual(project.registry().slice(before), [
+  await mind.setUp();
+  await mind.connect(ADA);
+  const connection = mind.lastConnection();
+  await mind.publish(5); // the same event again, now set up: its key is spent, and that is fine
+  const before = mind.registry().length;
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(9);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONFIGURED,
       idempotencyKey: "google:registry:/@9",
@@ -1051,47 +1042,46 @@ test("the install hook registers the card and a row per account, keyed by the ev
 });
 
 test("the card asks for the client, then for an account, then is ok", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const cardAt = async (offset: number) => {
-    await project.publish(offset);
-    return project.registry().at(-1)!.payload.card;
+    await mind.publish(offset);
+    return mind.registry().at(-1)!.payload.card;
   };
   assert.deepEqual(await cardAt(1), NO_CLIENT);
-  project.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
+  mind.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
   assert.deepEqual(
     await cardAt(2),
     NO_CLIENT,
     "the secret without its public client ID is no client",
   );
-  await project.setUp();
+  await mind.setUp();
   assert.deepEqual(await cardAt(3), NO_ACCOUNT);
-  await project.connect(ADA);
-  await project.publish(4);
+  await mind.connect(ADA);
+  await mind.publish(4);
   assert.deepEqual(
-    project.registry().find((event) => event.idempotencyKey === "google:registry:/@4")!.payload
-      .card,
+    mind.registry().find((event) => event.idempotencyKey === "google:registry:/@4")!.payload.card,
     READY,
   );
 });
 
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
-  const project = fakeProject({ slug: "gmail" });
-  await project.publish(1);
+  const mind = fakeMind({ slug: "gmail" });
+  await mind.publish(1);
   assert.deepEqual(
-    project.registry()[0]!.payload.card,
+    mind.registry()[0]!.payload.card,
     card(
       { kind: "attention", text: "Create an OAuth client and paste its secret" },
       "Connect",
       "gmail",
     ),
   );
-  await project.setUp();
-  await project.start();
-  assert.deepEqual(project.begun[0]!.options.next, {
+  await mind.setUp();
+  await mind.start();
+  assert.deepEqual(mind.begun[0]!.options.next, {
     routingSlug: "gmail",
-    path: `/connected?id=${project.lastConnection()}`,
+    path: `/connected?id=${mind.lastConnection()}`,
   });
-  const count = project.appended.length;
+  const count = mind.appended.length;
   for (const event of [
     // another secret's fact, the client's own on its secret's path, and a fact with no payload
     { type: "events.iterate.com/secret/set", path: "/", payload: { path: "/secrets/other" } },
@@ -1103,27 +1093,27 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
     { type: "events.iterate.com/secret/deleted", path: "/" },
     { type: "events.iterate.com/integration/configured", path: "/integrations" },
   ])
-    await project.integration.processEvent!({ event: { ...event, offset: 2 }, itx: project.itx });
-  assert.equal(project.appended.length, count);
+    await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
+  assert.equal(mind.appended.length, count);
 });
 
 test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
-    project.integration.processEvent!({
+    mind.integration.processEvent!({
       event: { type, path: "/", offset, payload },
-      itx: project.itx,
+      itx: mind.itx,
     });
-  await project.setUp();
+  await mind.setUp();
   for (let attempt = 0; attempt < 2; attempt++)
     await fact("events.iterate.com/secret/set", 7, {
       path: "/secrets/own-google-app",
       urls: ["https://oauth2.googleapis.com"],
       public: { clientId: CLIENT_ID },
     });
-  delete project.secrets["/secrets/own-google-app"];
+  delete mind.secrets["/secrets/own-google-app"];
   await fact("events.iterate.com/secret/deleted", 8, { path: "/secrets/own-google-app" });
-  assert.deepEqual(project.registry(), [
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "google:registry:/@7",
@@ -1139,15 +1129,15 @@ test("the client saved or deleted on the Dash registers the card again, keyed by
 
 test("a long address and many scopes are cut to the registry's limits", async () => {
   const long = { id: "1003", email: `${"a".repeat(240)}@example.com` };
-  const project = fakeProject({
+  const mind = fakeMind({
     scopes: Array.from(
       { length: 12 },
       (_, at) => `https://www.googleapis.com/auth/scope-${at}.readonly`,
     ),
   });
-  await project.setUp();
-  await project.connect(long);
-  const { row: registered } = project.registry().at(-1)!.payload;
+  await mind.setUp();
+  await mind.connect(long);
+  const { row: registered } = mind.registry().at(-1)!.payload;
   assert.equal(registered.account.length, 200);
   assert.ok(registered.account.endsWith("…"));
   assert.equal(registered.details.Scopes.length, 200);

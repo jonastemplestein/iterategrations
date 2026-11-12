@@ -83,8 +83,8 @@ export function servePage(request: Request, view: PageView): Response {
   const collect = (label: string) =>
     view.collectUrl ? `<p><a class="button" href="${esc(view.collectUrl)}">${label}</a></p>` : "";
   const status = view.saved
-    ? `<p class="ok">Set up. The project has the token <code>${esc(view.secret)}</code>.</p>${collect("Change the token")}`
-    : `<p class="warn">Not set up yet: the project has no token <code>${esc(view.secret)}</code>. Make one up (a long random password from your password manager is best), save it here, and put the same value in the shortcut.</p>${collect("Set the token")}`;
+    ? `<p class="ok">Set up. The mind has the token <code>${esc(view.secret)}</code>.</p>${collect("Change the token")}`
+    : `<p class="warn">Not set up yet: the mind has no token <code>${esc(view.secret)}</code>. Make one up (a long random password from your password manager is best), save it here, and put the same value in the shortcut.</p>${collect("Set the token")}`;
   const notes = view.notes.length
     ? view.notes.map(noteRow).join("")
     : "<p>No notes yet. Reload this page a few seconds after you record one.</p>";
@@ -97,14 +97,14 @@ export function servePage(request: Request, view: PageView): Response {
         <li>Tap <b>+</b> at the top right. Name the shortcut <b>Voice Note</b>.</li>
         <li>Add <b>Record Audio</b>. Tap its arrow and set <b>Audio Quality</b> to Normal, <b>Start Recording</b> to Immediately, and <b>Finish Recording</b> to On Tap.</li>
         <li>Add <b>Get Contents of URL</b>, and set its URL to:${copyRow(`${here}/webhook`)}</li>
-        <li>Tap its arrow. Set <b>Method</b> to POST. Under <b>Headers</b>, tap <b>Add new header</b>: the key is${copyRow(view.header)}and the value is the token. Do not use <code>Authorization</code>: the project's host answers that header itself, so the token never reaches this receiver.</li>
+        <li>Tap its arrow. Set <b>Method</b> to POST. Under <b>Headers</b>, tap <b>Add new header</b>: the key is${copyRow(view.header)}and the value is the token. Do not use <code>Authorization</code>: the mind's host answers that header itself, so the token never reaches this receiver.</li>
         <li>Set <b>Request Body</b> to File, tap the <b>File</b> field, and choose <b>Recorded Audio</b>.</li>
         <li>Optional: add <b>Vibrate Device</b> at the end, to feel a buzz when the upload is in. A failed upload shows an error banner.</li>
         <li>Tap the play button once, while the phone is unlocked, and choose <b>Always Allow</b> for the microphone and for this domain. Otherwise those questions come up on the lock screen and stop the shortcut.</li>
       </ol>
       <p>Then, in <b>Settings</b>, <b>Action Button</b>: swipe to <b>Shortcut</b>, tap <b>Choose a Shortcut</b>, and choose <b>Voice Note</b>.</p>
       <p>To use it: hold the Action Button until it buzzes, speak, and tap stop. iOS does not tell a shortcut when the button is released, so a tap ends the note.</p>
-      <p>Trying it out? Add a header <code>${esc(view.testHeader)}</code> with the value <code>true</code>: the note is stored and transcribed, and marked as a test, so a project that hands notes to its agents can skip it. Remove the header when it works.</p>
+      <p>Trying it out? Add a header <code>${esc(view.testHeader)}</code> with the value <code>true</code>: the note is stored and transcribed, and marked as a test, so a mind that hands notes to its agents can skip it. Remove the header when it works.</p>
     </section>
     <section><h2>3. The newest notes</h2>${notes}</section>
     <p><a href="${esc(view.recipe)}">The recipe</a> on GitHub has every step, for a coding agent.</p>`;

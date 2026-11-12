@@ -1,5 +1,5 @@
 // Runs against dist (the package as shipped): `pnpm test` builds first. The package is the Dash's
-// card and its page, so this is its install hook and its page against a pretend project.
+// card and its page, so this is its install hook and its page against a pretend mind.
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 import { jmap } from "../dist/index.js";
@@ -24,12 +24,12 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
   const integration = jmap();
   assert.equal(integration.routingSlug, "jmap");
   assert.equal(typeof integration.fetch, "function");
-  const publish = (offset: number, type = "events.iterate.com/project/worker-updated") =>
+  const publish = (offset: number, type = "events.iterate.com/mind/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
   const card = (status: object) => ({
     title: "Mailbox (JMAP)",
     description:
-      "The project's own Fastmail mailbox, over JMAP: agents send from it, search it, read whole threads and make Masked Email addresses, calling Fastmail's API with fetch and the token's placeholder.",
+      "The mind's own Fastmail mailbox, over JMAP: agents send from it, search it, read whole threads and make Masked Email addresses, calling Fastmail's API with fetch and the token's placeholder.",
     icon: "https://www.google.com/s2/favicons?domain=fastmail.com&sz=64",
     status,
     actions: [
@@ -68,7 +68,7 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
 
 // ------------------------------------------------------------------- the page
 
-/** The worker hosting the package, over a project with `secrets`: a scope per `getItx`, counted, and
+/** The worker hosting the package, over a mind with `secrets`: a scope per `getItx`, counted, and
  *  a member gate that refuses unless `member` is set. */
 function hosted(secrets: string[], options: { member?: boolean } = {}) {
   const scopes = { opened: 0, disposed: 0 };
@@ -89,13 +89,13 @@ function hosted(secrets: string[], options: { member?: boolean } = {}) {
 }
 
 test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
-  const project = hosted(["/secrets/fastmail"]);
+  const mind = hosted(["/secrets/fastmail"]);
   for (const path of ["/", "/nope"]) {
-    const res = await project.page(path);
+    const res = await mind.page(path);
     assert.equal(res.status, 401, path);
     assert.equal(await res.text(), "Sign in\n");
   }
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });
 
 test("the page shows the status: until the token exists, what to paste into a coding agent, with a Copy button", async () => {
@@ -105,19 +105,19 @@ test("the page shows the status: until the token exists, what to paste into a co
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
   assert.match(html, /<h1>Mailbox \(JMAP\)<\/h1>/);
   assert.match(html, /Set up by your coding agent: see the recipe/);
-  const hint = `Set up Mailbox (JMAP) in my iterate project. Follow the recipe at ${RECIPE}`;
+  const hint = `Set up Mailbox (JMAP) in my iterate mind. Follow the recipe at ${RECIPE}`;
   assert.ok(html.includes(`data-copy="${hint}"`), hint);
   assert.ok(html.includes(`href="${RECIPE}"`));
 
-  const project = hosted(["/secrets/fastmail"], { member: true });
-  res = await project.page("/");
+  const mind = hosted(["/secrets/fastmail"], { member: true });
+  res = await mind.page("/");
   html = await res.text();
   assert.match(
     html,
-    /Set up\. The project has the Fastmail API token <code>\/secrets\/fastmail<\/code>/,
+    /Set up\. The mind has the Fastmail API token <code>\/secrets\/fastmail<\/code>/,
   );
   assert.doesNotMatch(html, /coding agent|data-copy="/);
-  assert.deepEqual(project.scopes, { opened: 1, disposed: 1 });
+  assert.deepEqual(mind.scopes, { opened: 1, disposed: 1 });
 });
 
 test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
@@ -136,9 +136,9 @@ test("the page sends a CSP with its one nonce'd script, no form, and no frame, a
 });
 
 test("a member's stray path is a 404 that reads nothing", async () => {
-  const project = hosted(["/secrets/fastmail"], { member: true });
+  const mind = hosted(["/secrets/fastmail"], { member: true });
   for (const path of ["/nope", "/webhook", "/oauth2/callback"])
-    assert.equal((await project.page(path)).status, 404, path);
-  assert.equal((await project.serve(new Request(`${ORIGIN}/`, { method: "POST" }))).status, 404);
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+    assert.equal((await mind.page(path)).status, 404, path);
+  assert.equal((await mind.serve(new Request(`${ORIGIN}/`, { method: "POST" }))).status, 404);
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });

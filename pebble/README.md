@@ -1,16 +1,16 @@
 # Pebble Index 01
 
-Every recording you make with the ring lands in an iterate project: the transcript as a
+Every recording you make with the ring lands in an iterate mind: the transcript as a
 `pebble/recording-created` event on the `/pebble` stream, the audio as the file
 `/pebble/<recordingId>.m4a`.
 
 The receiver is the package `iterate-pebble`: one element, `pebble()`, in the `integrations` array
-of the project's config worker. It has a page of its own, for the project's members: the status and
-the webhook URL to paste in the Pebble app. The project's Integrations page in the Dash shows a
+of the mind's config worker. It has a page of its own, for the mind's members: the status and
+the webhook URL to paste in the Pebble app. The mind's Integrations page in the Dash shows a
 Pebble card ("Set up by your coding agent" until the signing secret exists), with an **Open** button
 to the page and a **Recipe** button to this recipe.
 
-A project with more than one ring hosts one receiver per ring, each with its own names: see
+A mind with more than one ring hosts one receiver per ring, each with its own names: see
 [Several rings](#several-rings-a-receiver-each). The steps below set up the default receiver,
 `pebble()`.
 
@@ -34,14 +34,14 @@ It sends every recording of that gesture to a URL of the person's choice, so not
 needs a Pebble account, key or approval. Nothing is configured there until step 4.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 1. The signing secret (the person makes it up)
 
 Nobody hands out this secret: the person invents it, and it only has to be the same in two places,
 iterate and the Pebble app's **Sign requests** field. The Pebble app uses it to sign each
-recording, and the project uses it to check the signature. A random one is best; tell them:
+recording, and the mind uses it to check the signature. A random one is best; tell them:
 
 > Open a terminal and run `openssl rand -hex 32`. That output is your signing secret. Keep it
 > handy: you'll paste it into a web page I'm about to send you, and again into the Pebble app in
@@ -60,14 +60,14 @@ async (itx) =>
 Send them the returned `url`, tell them to paste the secret there, and wait until they say it is
 saved. Check that `(await itx.secrets.list()).map((s) => s.path)` includes `/secrets/pebble-webhook`.
 
-## 2. Add the receiver to the project's config repo
+## 2. Add the receiver to the mind's config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `pebble()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it:
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-pebble";
 const IMPORT = 'import { pebble } from "iterate-pebble";';
 const ELEMENT = "pebble()";
@@ -75,14 +75,14 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`pebble()` answers the project's `pebble` host: the worker hands it every request there, and every
-event. `/webhook` takes the Pebble app's recordings. The page at `/` is for the project's members:
+`pebble()` answers the mind's `pebble` host: the worker hands it every request there, and every
+event. `/webhook` takes the Pebble app's recordings. The page at `/` is for the mind's members:
 it shows the status (whether the signing secret exists) and the webhook URL to paste, with a
-**Copy** button. Its install hook (`project/worker-updated`) puts the Pebble card on the Dash.
+**Copy** button. Its install hook (`mind/worker-updated`) puts the Pebble card on the Dash.
 
 ### By hand, or copy the source
 
-By hand: [add-to-a-project.md](../add-to-a-project.md#by-hand), with the import and the element above.
+By hand: [add-to-a-mind.md](../add-to-a-mind.md#by-hand), with the import and the element above.
 To copy the source instead, read [`src/pebble.ts`](src/pebble.ts) and [`src/page.ts`](src/page.ts)
 (no dependencies) and commit them to `/repos/config` under `pebble/`; the import then reads
 `from "./pebble/pebble.ts"`. You own the copy, so you can change it.
@@ -101,7 +101,7 @@ async (itx) => {
 Say: "Open this and sign in. It shows the webhook URL for the Pebble app, with a **Copy** button."
 The page says "Set up" once the signing secret from step 1 exists.
 
-## 4. Point the Pebble app at the project
+## 4. Point the Pebble app at the mind
 
 Give the person these taps, in the Pebble app:
 
@@ -112,13 +112,13 @@ Give the person these taps, in the Pebble app:
 4. Turn on **Sign requests** and paste the signing secret from step 1 (the same value, exactly).
 5. **Send:** choose **Both**, so you get the transcript and the audio ("Recording only" has no
    transcript; "Transcription only" has no audio file).
-6. Tap **Send test event.** Under **Recent runs** it should show as delivered. The project answers
+6. Tap **Send test event.** Under **Recent runs** it should show as delivered. The mind answers
    a verified test event with `200` and stores nothing.
 7. **Save.** A gesture only sends once it is saved with a URL. Repeat for the other gesture if they
    want both.
 
-Don't add an `Authorization` header: a project's host answers bearer tokens itself, before the
-project's code runs. If the test event fails: the secret differs between the two places (set it
+Don't add an `Authorization` header: a mind's host answers bearer tokens itself, before the
+mind's code runs. If the test event fails: the secret differs between the two places (set it
 again in both), or the phone's clock is more than five minutes off.
 
 ## 5. Prove it
@@ -148,7 +148,7 @@ with its own routing slug. Every other name follows from the slug unless you giv
 | `slug`          | `pebble`                                                          | The routing slug: the host the app posts to.        |
 | `signingSecret` | `/secrets/<slug>-webhook`                                         | The secret the receiver checks signatures with.     |
 | `stream`        | `/<slug>`                                                         | The stream its `pebble/recording-created` lands on. |
-| `audioDir`      | the `stream` path                                                 | The project-file folder its audio goes in.          |
+| `audioDir`      | the `stream` path                                                 | The mind-file folder its audio goes in.             |
 | `integration`   | the slug                                                          | Its card's key on the Dash's Integrations page.     |
 | `title`         | `Pebble Index 01`, or `Pebble Index 01 (<integration>)` otherwise | Its card's and its page's title.                    |
 
@@ -164,14 +164,14 @@ by its own `integration` (`<integration>:<deliveryId>`), and registers its own c
 from `worker.ts` alone: no request (its host, its headers) can make one receiver act as another.
 Give every receiver its own slug, secret, stream and integration; two that share one also share
 what it holds. `pebble()` throws on a name it cannot use, so the probe in
-[add-to-a-project.md](../add-to-a-project.md) refuses the commit.
+[add-to-a-mind.md](../add-to-a-mind.md) refuses the commit.
 
 The recipe is the same for each receiver, with its names: step 1 collects its `signingSecret`, step 3
 asks `itx.url` for its `slug`, and step 5 waits on its `stream`. Its page shows its own webhook URL.
 In step 2, `ELEMENT` may list several receivers (`'pebble({ slug: "pebble-kim" }), pebble({ slug:
 "pebble-sam" })'`). If `worker.ts` already lists `pebble(…)`, the script only pins the newer package
 (the options need it) and leaves the array alone: add the new element by hand next to the first, as
-[add-to-a-project.md](../add-to-a-project.md#by-hand) says, and commit it with the tip you read as
+[add-to-a-mind.md](../add-to-a-mind.md#by-hand) says, and commit it with the tip you read as
 `parent`.
 
 **Audio files.** A receiver with options names each file by its bytes:
@@ -180,7 +180,7 @@ neither a redelivery with other audio nor another recording with the same name r
 accepted. A delivery id that landed before with another recording is answered `409`, and the first
 recording stands; the other audio may stay behind as a file that no event names. `pebble()` with no
 options keeps the name the app gives the part, `/pebble/<recordingId>.m4a`, as it always has: there a
-later delivery with the same name replaces the file. A project that wants the byte names for its one
+later delivery with the same name replaces the file. A mind that wants the byte names for its one
 receiver can write `pebble({ slug: "pebble" })`: the same host, secret, stream and card, with new
 files named by their bytes.
 
@@ -209,4 +209,4 @@ of `worker.ts`, and delete `/secrets/pebble-webhook` (a receiver with options: i
 `signingSecret`, and its card by its `integration`). The Dash takes nothing away itself, so once
 that commit is live, take the card off with its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "pebble", card: null } })`. The recordings stay on `/pebble`
-and in the project's files.
+and in the mind's files.

@@ -8,7 +8,7 @@ export type OAuthOptions = {
    *  exchange and at every refresh, so it never passes through this code. */
   clientSecret: string;
   /** Where the platform's callback sends the person once it stored the tokens: a page of the
-   *  project's, which the platform composes. Every attempt comes back to the platform first. */
+   *  mind's, which the platform composes. Every attempt comes back to the platform first. */
   next: { routingSlug: string; path: string };
   clientAuth?: "client_secret_basic" | "client_secret_post";
   scope: string;
@@ -24,9 +24,9 @@ export type OAuthOptions = {
   expectAccount?: string;
 };
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type XItx = {
-  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  /** The mind's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<unknown>;
@@ -87,8 +87,8 @@ export type Settings = { slug: string; scopes: string[]; urls: string[] };
 
 /** EVERY NAME THE PACKAGE KEEPS STARTS WITH `own-x`: its secrets and its kv keys. The platform's
  *  shared X app owns every `/secrets/x-<connection>` and `/integrations/x/<connection>`, for any
- *  connection name a member or an agent chooses, so a project that uses both would collide on any
- *  `x-` name. Its routing slug and its card on the Dash stay `x`: the shared app has no project
+ *  connection name a member or an agent chooses, so a mind that uses both would collide on any
+ *  `x-` name. Its routing slug and its card on the Dash stay `x`: the shared app has no mind
  *  host, and the registry is the packages' own. */
 
 /** The OAuth client, one secret: `clientId`, a public field, and `clientSecret`. A person enters both
@@ -170,7 +170,7 @@ export async function readApp(itx: Pick<XItx, "secrets">): Promise<App | null> {
   return clientId ? { clientId } : null;
 }
 
-/** Whether the project has a secret at `APP_SECRET`, a client or not. */
+/** Whether the mind has a secret at `APP_SECRET`, a client or not. */
 export async function hasAppSecret(itx: Pick<XItx, "secrets">): Promise<boolean> {
   return (await itx.secrets.list()).some((secret) => secret.path === APP_SECRET);
 }
