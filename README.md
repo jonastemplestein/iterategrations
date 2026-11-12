@@ -11,6 +11,9 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`pebble/`](pebble)                         | `iterate-pebble`                           | Receive Pebble Index 01 ring recordings (transcript event + audio file).                                                                                                            |
 | [`iphone-voice-notes/`](iphone-voice-notes) | `iterate-iphone-voice-notes`               | Voice notes from an iPhone shortcut (the Action Button): the audio as a file, transcribed by Whisper on Workers AI as an event.                                                     |
 | [`waitrose/`](waitrose)                     | `iterate-waitrose`                         | The Waitrose grocery API with plain `fetch`: `waitroseFetch` adds the headers, `graphql` runs the app's operations, `placeOrder` guards the checkout.                               |
+| [`arbor/`](arbor)                           | `iterate-arbor`                            | Arbor, the school MIS, as a parent sees it, with plain `fetch`: children, meals, messages, calendar, attendance, payments; `submitForm` sends the school's forms.                   |
+| [`seesaw/`](seesaw)                         | `iterate-seesaw`                           | Seesaw parent API client and CLI: journals, classes, activities, notifications and messages.                                                                                        |
+| [`tapestry/`](tapestry)                     | `iterate-tapestry`                         | Tapestry Education Platform client and CLI: observations, messages and care diary pages.                                                                                            |
 | [`monzo/`](monzo)                           | `iterate-monzo`                            | Monzo transactions as events (a webhook with a generated secret in its URL), signed in through zero-trust-mcp.                                                                      |
 | [`yoto/`](yoto)                             | none                                       | Yoto players and library for a project's agents, connected through zero-trust-mcp.                                                                                                  |
 | [`sonos/`](sonos)                           | none                                       | A Sonos system for a project's agents, through Sonos's official MCP server.                                                                                                         |
@@ -26,6 +29,9 @@ CI and served by [pkg.pr.new](https://pkg.pr.new) (never npm): a project's confi
 | [`google/`](google)                         | `iterate-google`                           | A project's own Google OAuth client, with a Connect Google page: Google's APIs as each connected account, with tokens the platform refreshes.                                       |
 | [`x/`](x)                                   | `iterate-x`                                | A project's own X app, with a Connect X page: X's API as each connected account, with tokens the platform refreshes.                                                                |
 | [`cloudflare/`](cloudflare)                 | `iterate-cloudflare`                       | A project's own Cloudflare OAuth client, with a Connect Cloudflare page: Cloudflare's API as each connected person, on the account they picked, with tokens the platform refreshes. |
+
+Seesaw and Tapestry are standalone API clients and CLIs. Import their client classes directly;
+they do not register an integration card or worker route.
 
 ## Adding one to a project
 
