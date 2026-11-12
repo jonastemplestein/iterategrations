@@ -237,6 +237,10 @@ export function chatParts(name: string, data: unknown): Map<string, unknown> {
  *  many, the oldest dropped first (and said so). */
 const PENDING_LIMIT = 1_000;
 
+/** How many chats' streams are appended to at once. The project makes a stream at its first event,
+ *  which takes it a moment; more at once is more load on the project for little gain. */
+const CHAT_STREAMS_AT_ONCE = 8;
+
 /** The platform's refusal of a key that already names a different event (iterate's
  *  IDEMPOTENCY_CONFLICT): by its code where the error kept it, else by the platform's one message
  *  for it (iterate/stream/processor `idempotencyConflictMessage`). */
@@ -279,29 +283,47 @@ export function provideWhatsApp(input: {
     }
     pending.set(path, events);
   };
+  /** The connection the last append went over. */
+  let appendedOver: Itx | undefined;
+  /** Append the next events that wait for `path`, at most 50, over `project`. */
+  const appendNext = async (project: Itx, path: string): Promise<void> => {
+    const events = pending.get(path);
+    if (!events) return;
+    appendedOver = project;
+    const batch = events.slice(0, 50);
+    const log = project.cd(path);
+    await log.append(...batch).catch(async (error: unknown) => {
+      if (!isIdempotencyConflict(error)) throw error;
+      // A redelivery whose body differs from the event its key already names (an `append`
+      // after a `notify`, or fields WhatsApp filled in later): that message is recorded, and
+      // the refusal takes the whole batch, so the batch goes again one event at a time.
+      for (const event of batch)
+        await log.append(event).catch((single: unknown) => {
+          if (!isIdempotencyConflict(single)) throw single;
+        });
+    });
+    events.splice(0, batch.length);
+    if (events.length === 0) pending.delete(path);
+  };
   let flushing: Promise<void> | undefined;
   /** Append what waits, each stream's in order, over the newest connection, one flush at a time; a
-   *  failure leaves it waiting for the next connection. */
+   *  failure leaves it waiting for the next connection.
+   *
+   *  THE ACCOUNT'S OWN STREAM GOES FIRST, to its end, and again before each next few chats: it is
+   *  where a project hears of a message. The chats' streams follow, a few at once
+   *  (CHAT_STREAMS_AT_ONCE), each its next events. After a restart WhatsApp sends events for some
+   *  hundred chats, and each chat's first event makes its stream: one after the other, and with
+   *  the account's stream in turn among them, a new message waited more than a minute. */
   const flush = (): Promise<void> =>
     (flushing ??= (async () => {
       try {
         while (itx && waiting() > 0) {
-          for (const [path, events] of pending) {
-            const batch = events.slice(0, 50);
-            const log = itx.cd(path);
-            await log.append(...batch).catch(async (error: unknown) => {
-              if (!isIdempotencyConflict(error)) throw error;
-              // A redelivery whose body differs from the event its key already names (an `append`
-              // after a `notify`, or fields WhatsApp filled in later): that message is recorded, and
-              // the refusal takes the whole batch, so the batch goes again one event at a time.
-              for (const event of batch)
-                await log.append(event).catch((single: unknown) => {
-                  if (!isIdempotencyConflict(single)) throw single;
-                });
-            });
-            events.splice(0, batch.length);
-            if (events.length === 0) pending.delete(path);
-          }
+          while (pending.has(input.logPath)) await appendNext(itx, input.logPath);
+          const project = itx;
+          const chats = [...pending.keys()].slice(0, CHAT_STREAMS_AT_ONCE);
+          // every one of them answers before the next step: a stream never has two appends open
+          const answers = await Promise.allSettled(chats.map((path) => appendNext(project, path)));
+          for (const answer of answers) if (answer.status === "rejected") throw answer.reason;
         }
         return true;
       } catch (error) {
@@ -312,7 +334,9 @@ export function provideWhatsApp(input: {
       }
     })().then((appended) => {
       flushing = undefined;
-      if (appended && waiting() > 0) void flush(); // arrived as it finished
+      // arrived as it finished; or it failed over a connection that a newer one has replaced
+      // meanwhile, whose own flush was this one
+      if (waiting() > 0 && (appended || itx !== appendedOver)) void flush();
     }));
   /** A chat's own stream. A person's chat goes by their phone number's jid wherever WhatsApp has
    *  told this account the number behind a `…@lid` (the message's own `remoteJidAlt`, or Baileys'
