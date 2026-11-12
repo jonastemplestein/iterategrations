@@ -63,7 +63,31 @@ export function lendOnly(list: string | undefined): readonly string[] | undefine
 }
 const LEND = lendOnly(process.env.WHATSAPP_LEND);
 
-export const description = `${ACCOUNT}, as Baileys' socket (https://baileys.wiki): every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first.${LEND ? ` Only these functions are lent: ${LEND.join(", ") || "none"}.` : ""} Every event of the socket lands on the account's stream (${LOG_PATH}).`;
+/** A project keeps a lend's description as one line of at most this many characters, and refuses
+ *  a longer one: the lend then does not start. */
+const DESCRIPTION_LIMIT = 500;
+
+/** WHAT AN AGENT READS OF THIS LEND IN ITS CAPABILITY TREE: the account, what is lent of the
+ *  socket, and where its events land. One line within the project's limit, whatever the account's
+ *  text and however long the list: a list is said by its count, and its names are in
+ *  `__describe()`. The account's text is a person's own words, so it is what gives way. */
+export function describeLend(
+  account: string,
+  lend: readonly string[] | undefined,
+  logPath: string,
+): string {
+  const lent = lend
+    ? `it lends ${lend.length} named function${lend.length === 1 ? "" : "s"} of it and no other; call __describe() first for their names`
+    : "every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first";
+  const rest = `, as Baileys' socket (https://baileys.wiki): ${lent}. Every event of the socket lands on the account's stream (${logPath}).`;
+  const who = account.replace(/\s+/g, " ").trim();
+  const room = Math.max(1, DESCRIPTION_LIMIT - rest.length);
+  return `${who.length > room ? `${who.slice(0, room - 1)}…` : who}${rest}`
+    .replace(/\s+/g, " ")
+    .slice(0, DESCRIPTION_LIMIT);
+}
+
+export const description = describeLend(ACCOUNT, LEND, LOG_PATH);
 
 /** The project, as `iterate provide` hands it over: the part this file uses. */
 export type Itx = {
