@@ -24,6 +24,12 @@ the project as `itx.whatsapp`. Nothing runs on iterate that is not already there
   media, `user()` (the linked account), `getPNForLID(lid)` and `getLIDForPN(pn)`, and `__describe()`
   for an agent. The whole socket, `logout()` included: share only with a
   project you trust.
+- **Or lend only some of it**: `WHATSAPP_LEND=sendMessage,groupMetadata,downloadMedia` lends those
+  functions and `__describe()`, and nothing else of the socket. Use it when the project holds
+  `sendMessage` for a person's approval: such a rule holds a function by its name, and with the
+  whole socket lent, Baileys' `relayMessage` (which `sendMessage` calls), `sendNode` and `query`
+  send a message too, and `logout()` unlinks the device. With a list they are not there to call.
+  Unset, the whole socket is lent. `__describe()` names what is lent.
 - **Files**: send one with its URL, `sendMessage(jid, { image: { url: await itx.files.get(path).url() } })`
   (only `https:` and `data:` URLs: Baileys would read anything else from this computer), and keep a
   received one with `itx.files.get(path).put({ contentType, data: await itx.whatsapp.downloadMedia(message) })`.
