@@ -27,8 +27,9 @@ request, so `node:net` is the whole client.
   side was away is lost, and the snapshot says where things stand.
 
 - **Panes.** Herdr's `pane.agent_status_changed` needs a pane, so the connection subscribes to the panes
-  there are when it opens. A `pane_created`, `pane_closed` or `pane_exited` ends it, and the next
-  connection starts with the new set (and a snapshot).
+  there are when it opens. A `pane_created`, `pane_closed`, `pane_exited`, `tab_closed` or
+  `workspace_closed` ends it, and the next connection starts with the new set (and a snapshot):
+  Herdr closes a tab's panes without a `pane_closed` for each.
 
 ```js
 async (itx) => {
@@ -41,6 +42,25 @@ async (itx) => {
 
 **Everything it lends is Herdr's whole API**, `pane.send_text` and `server.stop` included: it is
 control of the computer's terminals. Share it only with a project you trust.
+
+## The agents in its panes, in the mind's list of agents
+
+[`agent-kinds/herdr.ts`](agent-kinds/herdr.ts) is an agent kind: copy it to the mind's config repo as
+`agent-kinds/herdr.ts` and name it in `worker.ts`'s `agentKinds`. It reads the events above and
+keeps one agent for each pane that runs a coding agent (Claude Code, Codex, opencode, …), at
+`/agents/herdr/<computer>/<pane>`. `<computer>` is the last part of the stream's path
+(`HERDR_LOG_PATH`), so give each computer a stream of its own.
+
+- Such an agent is in `itx.agents.list()` and in the Agents app with the other agents: kind
+  `herdr`, the computer as its `host`, the pane's title, what runs there and in which folder, and
+  `working`, `waiting` (Herdr's `blocked`), `idle` or `ended`. `lastActivityAt` is when Herdr last
+  said something about it.
+- An agent that appears between two snapshots says what it is (`claude in a pane`); its pane's
+  title and folder come with the next snapshot. A title that changes later is seen at the next
+  snapshot too: Herdr's `pane_updated` is ephemeral.
+- It lists; it does not message. Words sent to such an agent reach nobody yet. The way in is the
+  call above: `itx.jonas.herdr.call("agent.prompt", { target: "<pane id>", text })`.
+- The file has no imports, so a mind's worker and the Agents app's frame load it as it is.
 
 ## Run it
 

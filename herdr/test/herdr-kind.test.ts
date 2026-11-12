@@ -82,6 +82,25 @@ test("a status alone changes the status, and a closed pane ends an agent that is
     itx: mind.itx,
   });
   assert.deepEqual(mind.seen(path), { computer: "studio", pane: "w1:p1", status: "idle" });
+  // an agent that appears in a pane after the snapshot says what it is; its title comes later
+  await herdr.processEvent({
+    event: {
+      type: "herdr/pane_agent_detected",
+      path: STREAM,
+      offset: 12,
+      payload: { data: { pane_id: "w1:p3", agent: "codex", agent_status: "idle" } },
+    },
+    itx: mind.itx,
+  });
+  assert.deepEqual(mind.seen(agentPath("studio", "w1:p3")), {
+    computer: "studio",
+    pane: "w1:p3",
+    status: "idle",
+    title: "codex in a pane",
+    activity: "codex",
+    description:
+      "codex in the Herdr pane w1:p3 on studio. A person started it by hand; iterate lists it and does not run it.",
+  });
   const closed = (id: string, offset: number) => ({
     type: "herdr/pane_closed",
     path: STREAM,

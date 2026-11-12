@@ -11,7 +11,8 @@
 //   `herdr/snapshot` (every connection of the bridge: what is true now)
 //   → each agent pane not listed as it now is gets `herdr/agent-seen` on its own context;
 //     an agent listed for this computer whose pane is gone gets `herdr/agent-gone`
-//   `herdr/pane_agent_status_changed`, `herdr/pane_agent_detected` → `herdr/agent-seen`
+//   `herdr/pane_agent_detected` (an agent appears in a pane) → `herdr/agent-seen`, with what it is
+//   `herdr/pane_agent_status_changed` → `herdr/agent-seen`, the status alone
 //   `herdr/pane_closed`, `herdr/pane_exited`, an agent released → `herdr/agent-gone`
 //
 // Each agent's context has two rows that copy those two events to the catalog on `/agents`
@@ -206,8 +207,10 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
   }
   const said =
     event.type === "herdr/pane_agent_status_changed" || event.type === "herdr/pane_agent_detected";
-  // a status alone: the title and the folder are the last snapshot's
-  if (said && str(data.agent)) await see(data, {});
+  if (!said || !str(data.agent)) return;
+  // An agent that appears in a pane says what it is, and no more: a pane's title and folder come
+  // with the next snapshot. A status alone changes the status.
+  await see(data, event.type === "herdr/pane_agent_detected" ? describe(computer, data) : {});
 }
 
 /** What a list shows of an agent pane besides its status: the pane's title, and one line and a
