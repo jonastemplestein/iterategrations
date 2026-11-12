@@ -94,8 +94,9 @@ export const CATALOG_ROWS = [
 const PEOPLE = "/agents/people";
 
 /** The folder name of the member who wrote `event`: the start of their sign-in address, in lower
- *  case, with `-` for what is no letter or digit. `null` when no member wrote it (a bridge on a
- *  key, the mind's own code). */
+ *  case, with `-` for what is no letter or digit, 40 characters at most, and no `-` at either
+ *  end. The Agents app's New agent names a member's folder by the same rule. `null` when no
+ *  member wrote it (a bridge on a key, the mind's own code). */
 export function personOf(event: Pick<Event, "source">): string | null {
   const email = event.source?.principal?.email || event.source?.onBehalfOf?.principal?.email || "";
   const name = email
@@ -103,7 +104,9 @@ export function personOf(event: Pick<Event, "source">): string | null {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+    .slice(0, 40)
+    // the cut can leave a `-` at the end
+    .replace(/-+$/, "");
   return name || null;
 }
 
