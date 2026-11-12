@@ -8,7 +8,11 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "vite-plus/test";
 import provideDummy from "../src/dummy.ts";
-import provideWhatsApp, { description, provideWhatsApp as lendOver } from "../src/whatsapp.ts";
+import provideWhatsApp, {
+  description,
+  lendOnly,
+  provideWhatsApp as lendOver,
+} from "../src/whatsapp.ts";
 import { chatParts, eventPayloads } from "../src/whatsapp.ts";
 import type { Itx, WhatsAppEvent } from "../src/whatsapp.ts";
 
@@ -227,6 +231,61 @@ test("every other event of the socket lands as whatsapp/<its Baileys name>, and 
   assert.deepEqual(await lent.user(), socket.user);
   assert.equal(await lent.getPNForLID("222@lid"), "447700900002@s.whatsapp.net");
   assert.ok((await lent.__describe()).functions.includes("user"));
+});
+
+test("with a list, only the functions it names are lent: the other ways to send, and logout, are not there to call", async () => {
+  const called: string[] = [];
+  const socket = {
+    ev: Object.assign(new EventEmitter(), { process: () => {} }),
+    user: { id: "447700900001:1@s.whatsapp.net" },
+    sendMessage: async () => void called.push("sendMessage"),
+    // Baileys' `sendMessage` calls `relayMessage`: a project that holds one by name must not get the other
+    relayMessage: async () => void called.push("relayMessage"),
+    sendNode: async () => void called.push("sendNode"),
+    groupMetadata: async (jid: string) => ({ id: jid, subject: "The group" }),
+    logout: async () => void called.push("logout"),
+  };
+  const lendWith = async (only?: readonly string[]) =>
+    (await lendOver({
+      logPath: "/integrations/whatsapp",
+      only,
+      connect: async (onSocket) => onSocket(socket as unknown as Parameters<typeof onSocket>[0]),
+      downloadMedia: async () => new Uint8Array([1]),
+    })({ itx: pretendProject().itx })) as Lent;
+
+  const lent = await lendWith(["sendMessage", "groupMetadata", "downloadMedia", "noSuchFunction"]);
+  const names = ["__describe", "downloadMedia", "groupMetadata", "sendMessage"];
+  assert.deepEqual(Object.keys(lent).sort(), names);
+  for (const name of ["relayMessage", "sendNode", "logout", "user", "getPNForLID", "getLIDForPN"])
+    assert.equal(lent[name], undefined, `${name} is lent`);
+  // what an agent reads names the same functions, and says that the rest is not lent
+  const described = lent.__describe!() as unknown as { instructions: string; functions: string[] };
+  assert.deepEqual(described.functions, names);
+  assert.match(described.instructions, /Only the functions listed under `functions` are lent/);
+  // a listed function still reaches the socket
+  await lent.sendMessage!("447700900002@s.whatsapp.net", { text: "hi" });
+  assert.deepEqual(called, ["sendMessage"]);
+
+  // with no list, the whole socket, as before
+  const whole = await lendWith(undefined);
+  for (const name of ["sendMessage", "relayMessage", "sendNode", "logout", "user", "downloadMedia"])
+    assert.equal(typeof whole[name], "function", `${name} is not lent`);
+  assert.doesNotMatch(
+    (whole.__describe!() as unknown as { instructions: string }).instructions,
+    /Only the functions listed/,
+  );
+  // a list that names nothing lends nothing but the description
+  assert.deepEqual(Object.keys(await lendWith([])), ["__describe"]);
+});
+
+test("WHATSAPP_LEND is names with commas between them; unset is the whole socket, and empty is no function", () => {
+  assert.equal(lendOnly(undefined), undefined);
+  assert.deepEqual(lendOnly("sendMessage, groupMetadata ,downloadMedia,"), [
+    "sendMessage",
+    "groupMetadata",
+    "downloadMedia",
+  ]);
+  assert.deepEqual(lendOnly(""), []);
 });
 
 test("what must stay on this computer is held back from an event: the QR code, a history sync's rows; a long list is appended in parts", () => {
