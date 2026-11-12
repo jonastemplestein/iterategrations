@@ -166,6 +166,8 @@ test("a person's folder is the start of their address; code that wrote for a mem
     personOf({ source: { onBehalfOf: { principal: { email: "grace@example.com" } } } }),
     "grace",
   );
+  // cut at 40, and a `-` that the cut leaves at the end goes too
+  assert.equal(personOf(by(`${"a".repeat(39)}.b@example.com`)), "a".repeat(39));
   for (const nobody of [{}, { source: {} }, by(""), by("@example.com")])
     assert.equal(personOf(nobody), null);
 });
