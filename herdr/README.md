@@ -48,6 +48,9 @@ control of the computer's terminals. Share it only with a mind you trust.
 [`agent-kinds/herdr.ts`](agent-kinds/herdr.ts) is an agent kind: copy it to the mind's config repo as
 `agent-kinds/herdr.ts` and name it in `worker.ts`'s `agentKinds`. It reads the events above and
 keeps one agent for each pane that runs a coding agent (Claude Code, Codex, opencode, …), at
+`/agents/<person>/herdr/<computer>/<pane>`. `<person>` is the member whose sign-in the bridge runs
+on, by the start of their address (`sam@example.com` is `sam`), so each member's agents are in a
+folder of their own. A bridge on a key has no person: its agents are at
 `/agents/herdr/<computer>/<pane>`. `<computer>` is the last part of the stream's path
 (`HERDR_LOG_PATH`), so give each computer a stream of its own.
 
@@ -55,6 +58,8 @@ keeps one agent for each pane that runs a coding agent (Claude Code, Codex, open
   `herdr`, the computer as its `host`, the pane's title, what runs there and in which folder, and
   `working`, `waiting` (Herdr's `blocked`), `idle` or `ended`. `lastActivityAt` is when Herdr last
   said something about it.
+- An agent that was listed before its person had a folder ends at the bridge's next connection
+  and is listed again in the folder. Its old context stays where it was, with what Herdr said.
 - An agent that appears between two snapshots says what it is (`claude in a pane`); its pane's
   title and folder come with the next snapshot. A title that changes later is seen at the next
   snapshot too: Herdr's `pane_updated` is ephemeral.

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "vite-plus/test";
-import herdr, { agentPath, CATALOG_ROWS, eventsToRows } from "../agent-kinds/herdr.ts";
+import herdr, { agentPath, CATALOG_ROWS, eventsToRows, personOf } from "../agent-kinds/herdr.ts";
 
 const STREAM = "/integrations/herdr/studio";
 const pane = (id: string, more: Record<string, unknown> = {}) => ({
@@ -112,6 +112,62 @@ test("a status alone changes the status, and a closed pane ends an agent that is
   assert.equal(mind.rows.has(agentPath("studio", "w1:p9")), false);
   await herdr.processEvent({ event: closed("w1:p1", 10), itx: mind.itx });
   assert.equal(mind.appended.at(-1)!.event.type, "herdr/agent-gone");
+});
+
+/** As the mind stamps an event that a member's sign-in wrote. */
+const by = (email: string) => ({ source: { principal: { actor: "u1", email } } });
+
+test("a bridge on a member's sign-in lists its agents in that member's folder, and an agent listed before the folders ends there and goes on here", async () => {
+  const mind = pretendMind();
+  // listed before: the bridge's events said no member, so the agent is at the kind's own folder
+  await herdr.processEvent({ event: snapshot(7, [pane("w1:p1")]), itx: mind.itx });
+  const before = agentPath("studio", "w1:p1");
+  assert.equal(mind.rows.get(before)!.status, "working");
+
+  // the same pane, in a snapshot that Ada's sign-in wrote
+  await herdr.processEvent({
+    event: { ...snapshot(9, [pane("w1:p1")]), ...by("Ada.Lovelace@example.com") },
+    itx: mind.itx,
+  });
+  const mine = agentPath("studio", "w1:p1", "ada-lovelace");
+  assert.equal(mine, "/agents/ada-lovelace/herdr/studio/w1-p1");
+  assert.equal(mind.seen(mine)!.title, "Fix the build");
+  // the listing before is ended, and its context stays where it was
+  assert.equal(mind.rows.get(before)!.status, "ended");
+
+  // a status and a close find the agent in her folder
+  const status = (offset: number, event: string, data: Record<string, unknown>) => ({
+    type: `herdr/${event}`,
+    path: STREAM,
+    offset,
+    payload: { event, data },
+    ...by("ada.lovelace@example.com"),
+  });
+  await herdr.processEvent({
+    event: status(10, "pane_agent_status_changed", {
+      pane_id: "w1:p1",
+      agent: "claude",
+      agent_status: "idle",
+    }),
+    itx: mind.itx,
+  });
+  assert.equal(mind.rows.get(mine)!.status, "idle");
+  await herdr.processEvent({
+    event: status(11, "pane_closed", { pane_id: "w1:p1" }),
+    itx: mind.itx,
+  });
+  assert.equal(mind.rows.get(mine)!.status, "ended");
+});
+
+test("a person's folder is the start of their address; code that wrote for a member counts; nobody is no folder", () => {
+  assert.equal(personOf(by("sam@example.com")), "sam");
+  assert.equal(personOf(by("Sam.O'Neil+work@example.org")), "sam-o-neil-work");
+  assert.equal(
+    personOf({ source: { onBehalfOf: { principal: { email: "grace@example.com" } } } }),
+    "grace",
+  );
+  for (const nobody of [{}, { source: {} }, by(""), by("@example.com")])
+    assert.equal(personOf(nobody), null);
 });
 
 test("events that are not a computer's Herdr stream make nothing", async () => {
