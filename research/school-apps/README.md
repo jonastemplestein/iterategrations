@@ -6,7 +6,7 @@ sessions, school identities, or child records. Tests use synthetic fixtures.
 
 ## Artifacts
 
-APKs and local analysis are in `~/.cache/school-apps/` on Beelink. Private account samples are in
+APKs and local analysis are in `~/.cache/school-apps/` on the computer that did the analysis. Private account samples are in
 its `private/` directory (mode `0700`; files mode `0600`). They are not test fixtures.
 
 | Artifact       | Android package                    | Version  | Code    | SHA-256                                                            |

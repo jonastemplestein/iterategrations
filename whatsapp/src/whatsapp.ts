@@ -9,7 +9,8 @@
 //     `sendMessage(jid, content, options)`, `groupMetadata(jid)`, `updateProfilePicture(jid, { url })`
 //     and the rest. Three are added for what is not a socket function: `downloadMedia(message)`,
 //     `user()` (the linked account, Baileys' `sock.user`), and `getPNForLID(lid)` / `getLIDForPN(pn)`
-//     (Baileys' `sock.signalRepository.lidMapping`).
+//     (Baileys' `sock.signalRepository.lidMapping`). WHATSAPP_LEND names the functions to lend,
+//     and nothing else is lent then (`lendOnly`).
 //   - EVENTS: every event the socket emits lands on the project as `whatsapp/<Baileys' event name>`
 //     (`whatsapp/messages.upsert`, `whatsapp/messages.update`, `whatsapp/group-participants.update`,
 //     `whatsapp/presence.update`, `whatsapp/call`, …) with `payload.data` Baileys' own data. A
@@ -42,12 +43,51 @@ import qrcode from "qrcode-terminal";
 const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
 
 /** Whose account this is, in the words an agent reads in its capability tree: WHATSAPP_ACCOUNT
- *  ("The agents' own WhatsApp account, +44 7700 900000", "Jonas's own personal WhatsApp account,
- *  +44 7700 900123: writing from it is writing as Jonas"). Two accounts lent from one file are
+ *  ("The agents' own WhatsApp account, +44 7700 900000", "Sam's own personal WhatsApp account,
+ *  +44 7700 900123: writing from it is writing as Sam"). Two accounts lent from one file are
  *  otherwise told apart by nothing but their name. */
 const ACCOUNT = process.env.WHATSAPP_ACCOUNT || "A WhatsApp account";
 
-export const description = `${ACCOUNT}, as Baileys' socket (https://baileys.wiki): every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first. Every event of the socket lands on the account's stream (${LOG_PATH}).`;
+/** THE FUNCTIONS THIS LEND HAS, when it is not the whole socket: WHATSAPP_LEND, names with commas
+ *  between them (`sendMessage,groupMetadata,downloadMedia`). The project can call nothing else
+ *  then: not `relayMessage` or `sendNode`, which send a message as `sendMessage` does, and not
+ *  `logout`, which unlinks the device. Unset, the whole socket is lent. A project that holds
+ *  `sendMessage` for a person's approval holds a name: with the whole socket lent, the other ways
+ *  to send stay free, so give such a project a list. Set and empty, it lends no function. */
+export function lendOnly(list: string | undefined): readonly string[] | undefined {
+  if (list === undefined) return undefined;
+  return list
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+const LEND = lendOnly(process.env.WHATSAPP_LEND);
+
+/** A project keeps a lend's description as one line of at most this many characters, and refuses
+ *  a longer one: the lend then does not start. */
+const DESCRIPTION_LIMIT = 500;
+
+/** WHAT AN AGENT READS OF THIS LEND IN ITS CAPABILITY TREE: the account, what is lent of the
+ *  socket, and where its events land. One line within the project's limit, whatever the account's
+ *  text and however long the list: a list is said by its count, and its names are in
+ *  `__describe()`. The account's text is a person's own words, so it is what gives way. */
+export function describeLend(
+  account: string,
+  lend: readonly string[] | undefined,
+  logPath: string,
+): string {
+  const lent = lend
+    ? `it lends ${lend.length} named function${lend.length === 1 ? "" : "s"} of it and no other; call __describe() first for their names`
+    : "every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first";
+  const rest = `, as Baileys' socket (https://baileys.wiki): ${lent}. Every event of the socket lands on the account's stream (${logPath}).`;
+  const who = account.replace(/\s+/g, " ").trim();
+  const room = Math.max(1, DESCRIPTION_LIMIT - rest.length);
+  return `${who.length > room ? `${who.slice(0, room - 1)}…` : who}${rest}`
+    .replace(/\s+/g, " ")
+    .slice(0, DESCRIPTION_LIMIT);
+}
+
+export const description = describeLend(ACCOUNT, LEND, LOG_PATH);
 
 /** The project, as `iterate provide` hands it over: the part this file uses. */
 export type Itx = {
@@ -207,9 +247,11 @@ const isIdempotencyConflict = (error: unknown): boolean =>
  *  called on every connection to the project with that connection's `itx`, it answers the
  *  functions to lend — every function of the current socket, unchanged except that arguments and
  *  answers cross as JSON (Baileys' own `BufferJSON`: bytes as `{ type: "Buffer", data: <base64> }`),
- *  plus `downloadMedia` and `__describe`. */
+ *  plus `downloadMedia` and `__describe`. With `only`, those functions and `__describe` alone
+ *  (`lendOnly`). */
 export function provideWhatsApp(input: {
   logPath: string;
+  only?: readonly string[];
   connect: (onSocket: (socket: WhatsAppSocket) => void) => Promise<void>;
   downloadMedia: (message: WAMessage, socket: WhatsAppSocket) => Promise<Uint8Array>;
 }) {
@@ -378,6 +420,14 @@ export function provideWhatsApp(input: {
     };
     lent.getPNForLID = async (lid: string) => await lidMapping().getPNForLID(lid);
     lent.getLIDForPN = async (pn: string) => await lidMapping().getLIDForPN(pn);
+    const { only } = input;
+    if (only) {
+      // a name the socket does not have lends nothing: said here, since a typo lends less than was meant
+      const unknown = only.filter((name) => !Object.hasOwn(lent, name));
+      if (unknown.length > 0)
+        console.error(`WhatsApp: WHATSAPP_LEND names ${unknown.join(", ")}: no such function`);
+      for (const name of Object.keys(lent)) if (!only.includes(name)) delete lent[name];
+    }
     lent.__describe = () => ({
       instructions:
         ACCOUNT +
@@ -385,7 +435,10 @@ export function provideWhatsApp(input: {
         input.logPath +
         " as whatsapp/<Baileys' event name> with Baileys' data in payload.data: whatsapp/messages.upsert (one event a message: payload.data.messages[0], payload.data.type), whatsapp/messages.update (delivery, read, edits), whatsapp/message-receipt.update, whatsapp/group-participants.update, whatsapp/presence.update, whatsapp/call, …; and what belongs to one chat lands again on " +
         input.logPath +
-        "/chats/<the chat's jid>, the conversation alone. Only write to chats that already exist unless told otherwise: WhatsApp restricts accounts that start many new chats.",
+        "/chats/<the chat's jid>, the conversation alone. Only write to chats that already exist unless told otherwise: WhatsApp restricts accounts that start many new chats." +
+        (only
+          ? " Only the functions listed under `functions` are lent: the computer lending this account lends no other function of the socket."
+          : ""),
       functions: Object.keys(lent).sort(),
     });
     return lent;
@@ -498,6 +551,7 @@ async function connectBaileys(onSocket: (socket: WASocket) => void): Promise<voi
 
 export default provideWhatsApp({
   logPath: LOG_PATH,
+  only: LEND,
   connect: connectBaileys as (onSocket: (socket: WhatsAppSocket) => void) => Promise<void>,
   downloadMedia: async (message, socket) =>
     await downloadMediaMessage(

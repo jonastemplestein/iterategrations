@@ -355,6 +355,8 @@ test("the page shows the status with a link to set the token, every step of the 
   );
   assert.deepEqual(project.collected[0].path, "/secrets/iphone-voice-notes");
   assert.deepEqual(project.collected[0].egress, { urls: ["https://iphone-voice-notes.invalid"] });
+  // the form sends the person back to this page once the token is saved
+  assert.equal(project.collected[0].redirectUrl, `${ORIGIN}/`);
   assert.ok(html.includes(`data-copy="${ORIGIN}/webhook"`));
   assert.ok(html.includes(`data-copy="x-voice-note-token"`));
   for (const step of [
@@ -372,6 +374,10 @@ test("the page shows the status with a link to set the token, every step of the 
   project.secrets["/secrets/iphone-voice-notes"] = TOKEN;
   res = await project.page("/", "/projects/iterate/iphone-voice-notes");
   html = await res.text();
+  assert.equal(
+    project.collected[1].redirectUrl,
+    "https://os.iterate.example/projects/iterate/iphone-voice-notes/",
+  );
   assert.match(
     html,
     /Set up\. The project has the token <code>\/secrets\/iphone-voice-notes<\/code>/,

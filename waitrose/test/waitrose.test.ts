@@ -10,6 +10,7 @@ import {
   OPERATIONS,
   graphql,
   placeOrder,
+  reviewCheckout,
   waitrose,
   waitroseFetch,
 } from "../dist/index.js";
@@ -284,37 +285,59 @@ test("placeOrder refuses unless instant checkout is ALLOWED, and posts nothing",
   }
 });
 
+/** Each blocked state with one blocker: what changes, the blocker's code, and its message. */
+const BLOCKED: [Parameters<typeof checkoutWaitrose>[0], string, string][] = [
+  [
+    { trolley: (t) => void (t.trolley.orderId = "o-2") },
+    "TROLLEY_ORDER_MISMATCH",
+    "The trolley does not match the current order",
+  ],
+  [
+    { trolley: (t) => void (t.failures = [{ type: "X", message: "x" }]) },
+    "TROLLEY_FAILURES",
+    "Waitrose reported trolley failures",
+  ],
+  [
+    { trolley: (t) => void (t.instantCheckout = "NOT_ALLOWED") },
+    "INSTANT_CHECKOUT_NOT_ALLOWED",
+    "Instant checkout is NOT_ALLOWED; complete payment setup or checkout on the Waitrose website",
+  ],
+  [
+    { trolley: (t) => void (t.checkoutReadiness.slotTypeValid = false) },
+    "SLOT_INVALID",
+    "A valid delivery or collection slot is required",
+  ],
+  [{ slot: null }, "SLOT_INVALID", "A valid delivery or collection slot is required"],
+  [
+    { slot: { ...SLOT, slotType: "VAN" } },
+    "SLOT_INVALID",
+    "A valid delivery or collection slot is required",
+  ],
+  [
+    { slot: { ...SLOT, expiryDateTime: "2020-01-01T00:00:00Z" } },
+    "SLOT_EXPIRED",
+    "The slot reservation has expired or its expiry is unknown",
+  ],
+  [{ trolley: (t) => void (t.trolley.trolleyItems = []) }, "TROLLEY_EMPTY", "The trolley is empty"],
+  [
+    { trolley: (t) => void (t.trolley.trolleyTotals.minimumSpendThresholdMet = false) },
+    "MINIMUM_SPEND_NOT_MET",
+    "The minimum spend requirement is not met or unknown",
+  ],
+  [
+    { trolley: (t) => void (t.trolley.trolleyTotals.trolleyItemCounts.hardConflicts = 1) },
+    "HARD_CONFLICTS",
+    "Resolve trolley conflicts before checkout",
+  ],
+  [
+    { trolley: (t) => void (t.trolley.trolleyTotals.totalEstimatedCost = null) },
+    "TOTAL_UNAVAILABLE",
+    "The estimated total is unavailable",
+  ],
+];
+
 test("placeOrder names every other blocker, and posts nothing", async () => {
-  const cases: [Parameters<typeof checkoutWaitrose>[0], string][] = [
-    [
-      { trolley: (t) => void (t.failures = [{ type: "X", message: "x" }]) },
-      "Waitrose reported trolley failures",
-    ],
-    [
-      { trolley: (t) => void (t.checkoutReadiness.slotTypeValid = false) },
-      "A valid delivery or collection slot is required",
-    ],
-    [{ slot: null }, "A valid delivery or collection slot is required"],
-    [{ slot: { ...SLOT, slotType: "VAN" } }, "A valid delivery or collection slot is required"],
-    [
-      { slot: { ...SLOT, expiryDateTime: "2020-01-01T00:00:00Z" } },
-      "The slot reservation has expired or its expiry is unknown",
-    ],
-    [{ trolley: (t) => void (t.trolley.trolleyItems = []) }, "The trolley is empty"],
-    [
-      { trolley: (t) => void (t.trolley.trolleyTotals.minimumSpendThresholdMet = false) },
-      "The minimum spend requirement is not met or unknown",
-    ],
-    [
-      { trolley: (t) => void (t.trolley.trolleyTotals.trolleyItemCounts.hardConflicts = 1) },
-      "Resolve trolley conflicts before checkout",
-    ],
-    [
-      { trolley: (t) => void (t.trolley.trolleyTotals.totalEstimatedCost = null) },
-      "The estimated total is unavailable",
-    ],
-  ];
-  for (const [change, blocker] of cases) {
+  for (const [change, , blocker] of BLOCKED) {
     const { placed } = checkoutWaitrose(change);
     await assert.rejects(placeOrder(REVIEWED), { message: `Checkout blocked: ${blocker}` });
     assert.equal(placed().length, 0);
@@ -373,14 +396,270 @@ test("an unclear answer to the place POST is CheckoutOutcomeUnknownError, and th
 });
 
 test("a refusal of the place POST (HTTP 4xx) says so, and is not an unknown outcome", async () => {
-  const { placed } = checkoutWaitrose({ place: () => new Response("", { status: 409 }) });
-  const error = await placeOrder(REVIEWED).catch((error: unknown) => error);
-  assert.ok(error instanceof Error && !(error instanceof CheckoutOutcomeUnknownError));
-  assert.equal(
-    error.message,
-    "Waitrose checkout rejected (409). Check the order and checkout eligibility before retrying.",
+  for (const status of [403, 409]) {
+    const { placed } = checkoutWaitrose({ place: () => new Response("", { status }) });
+    const error = await placeOrder(REVIEWED).catch((error: unknown) => error);
+    assert.ok(error instanceof Error && !(error instanceof CheckoutOutcomeUnknownError));
+    assert.equal(
+      error.message,
+      `Waitrose checkout rejected (${status}). Check the order and checkout eligibility before retrying.`,
+    );
+    assert.equal(placed().length, 1);
+  }
+});
+
+// ------------------------------------------- reviewCheckout
+
+/** The review of the ready order: each test overrides only what its state changes. */
+const READY_REVIEW = {
+  orderId: "o-1",
+  ready: true,
+  blockers: [],
+  instantCheckout: "ALLOWED",
+  slotTypeValid: true,
+  slot: SLOT,
+  itemCount: 1,
+  minimumSpendThresholdMet: true,
+  hardConflicts: 0,
+  estimatedTotal: { amount: 87.45, currencyCode: "GBP" },
+  trolleyFailures: [],
+};
+
+/** Every request is a GraphQL query, never a mutation, and none goes to the place endpoint. */
+function assertReadOnly(sent: Sent[]) {
+  assert.ok(sent.length > 0);
+  for (const request of sent) {
+    assert.equal(request.url, GRAPHQL_URL);
+    assert.match(request.body.query, /^query /);
+    assert.ok(
+      [OPERATIONS.GetShoppingContext, OPERATIONS.GetTrolley, OPERATIONS.CurrentSlot].includes(
+        request.body.query,
+      ),
+    );
+  }
+}
+
+test("reviewCheckout of an order that is ready reports ready from three reads, and never sends the place request", async () => {
+  const { sent, placed } = checkoutWaitrose();
+  assert.deepEqual(await reviewCheckout(), READY_REVIEW);
+  assertReadOnly(sent);
+  assert.equal(sent.length, 3);
+  assert.equal(sent[0]!.body.query, OPERATIONS.GetShoppingContext);
+  assert.deepEqual(Object.fromEntries(sent.slice(1).map((r) => [r.body.query, r.body.variables])), {
+    [OPERATIONS.GetTrolley]: { orderId: "o-1" },
+    [OPERATIONS.CurrentSlot]: { input: { customerOrderId: "o-1" } },
+  });
+  assert.equal(placed().length, 0);
+});
+
+test("reviewCheckout reports each blocker with its code and the message placeOrder refuses with, and neither sends the place request", async () => {
+  for (const [change, code, message] of BLOCKED) {
+    const reviewed = checkoutWaitrose(change);
+    const review = await reviewCheckout();
+    assert.equal(review.ready, false, code);
+    assert.deepEqual(review.blockers, [{ code, message }]);
+    assertReadOnly(reviewed.sent);
+    assert.equal(reviewed.placed().length, 0);
+
+    const refused = checkoutWaitrose(change);
+    await assert.rejects(placeOrder(REVIEWED), { message: `Checkout blocked: ${message}` });
+    assert.equal(refused.placed().length, 0);
+  }
+});
+
+test("an empty trolley with no slot reports every blocker and every value, and placeOrder refuses with the same list", async () => {
+  const empty = {
+    slot: null,
+    trolley: (t: any) => {
+      t.instantCheckout = "NOT_ALLOWED";
+      t.checkoutReadiness.slotTypeValid = false;
+      t.trolley.trolleyItems = [];
+      t.trolley.trolleyTotals.minimumSpendThresholdMet = false;
+      t.trolley.trolleyTotals.totalEstimatedCost = { amount: 0, currencyCode: "GBP" };
+    },
+  };
+  const blockers = [
+    {
+      code: "INSTANT_CHECKOUT_NOT_ALLOWED",
+      message:
+        "Instant checkout is NOT_ALLOWED; complete payment setup or checkout on the Waitrose website",
+    },
+    { code: "SLOT_INVALID", message: "A valid delivery or collection slot is required" },
+    { code: "TROLLEY_EMPTY", message: "The trolley is empty" },
+    {
+      code: "MINIMUM_SPEND_NOT_MET",
+      message: "The minimum spend requirement is not met or unknown",
+    },
+  ];
+  const reviewed = checkoutWaitrose(empty);
+  assert.deepEqual(await reviewCheckout(), {
+    ...READY_REVIEW,
+    ready: false,
+    blockers,
+    instantCheckout: "NOT_ALLOWED",
+    slotTypeValid: false,
+    slot: null,
+    itemCount: 0,
+    minimumSpendThresholdMet: false,
+    estimatedTotal: { amount: 0, currencyCode: "GBP" },
+  });
+  assertReadOnly(reviewed.sent);
+  assert.equal(reviewed.placed().length, 0);
+
+  const refused = checkoutWaitrose(empty);
+  await assert.rejects(
+    placeOrder({ ...REVIEWED, expectedTotal: { amount: 0, currencyCode: "GBP" } }),
+    {
+      message: `Checkout blocked: ${blockers.map((blocker) => blocker.message).join("; ")}`,
+    },
   );
-  assert.equal(placed().length, 1);
+  assert.equal(refused.placed().length, 0);
+});
+
+test("reviewCheckout with no current order reports it from the one read, and does not read a trolley", async () => {
+  const { sent, placed } = checkoutWaitrose({ context: { customerOrderId: null } });
+  assert.deepEqual(await reviewCheckout(), {
+    orderId: null,
+    ready: false,
+    blockers: [{ code: "NO_CURRENT_ORDER", message: "No current order available for checkout" }],
+    instantCheckout: null,
+    slotTypeValid: null,
+    slot: null,
+    itemCount: null,
+    minimumSpendThresholdMet: null,
+    hardConflicts: null,
+    estimatedTotal: null,
+    trolleyFailures: [],
+  });
+  assert.deepEqual(
+    sent.map((request) => request.body.query),
+    [OPERATIONS.GetShoppingContext],
+  );
+  assert.equal(placed().length, 0);
+});
+
+test("a trolley answer with parts missing is a list of blockers, never a crash, and placeOrder refuses it", async () => {
+  const missing: ((trolley: any) => void)[] = [
+    (t) => {
+      t.trolley = null;
+    },
+    (t) => {
+      t.trolley.trolleyItems = null;
+      t.trolley.trolleyTotals = null;
+    },
+    (t) => {
+      t.trolley.trolleyTotals.trolleyItemCounts = null;
+      t.trolley.trolleyTotals.minimumSpendThresholdMet = null;
+    },
+  ];
+  for (const trolley of missing) {
+    const reviewed = checkoutWaitrose({ trolley });
+    const review = await reviewCheckout();
+    assert.equal(review.ready, false);
+    assert.ok(review.blockers.length > 0);
+    assert.equal(reviewed.placed().length, 0);
+
+    const refused = checkoutWaitrose({ trolley });
+    await assert.rejects(placeOrder(REVIEWED), /^Error: Checkout blocked: /);
+    assert.equal(refused.placed().length, 0);
+  }
+});
+
+test("reviewCheckout reports Waitrose's own trolley failures, and only the slot's times and type", async () => {
+  const failures = [{ type: "ITEM_UNAVAILABLE", message: "An item is unavailable" }];
+  checkoutWaitrose({
+    trolley: (t) => void (t.failures = failures.map((f) => ({ ...f, __typename: "Failure" }))),
+    slot: { ...SLOT, addressId: "a-1", postcode: "ZZ99 9ZZ", branchId: "b-1" },
+  });
+  const review = await reviewCheckout();
+  assert.deepEqual(review.trolleyFailures, failures);
+  assert.deepEqual(review.slot, SLOT);
+  assert.doesNotMatch(JSON.stringify(review), /a-1|ZZ99|b-1|c-1/);
+});
+
+test("reviewCheckout answers a null slot when Waitrose leaves currentSlot out", async () => {
+  checkoutWaitrose({ slot: undefined });
+  const review = await reviewCheckout();
+  assert.equal(review.slot, null);
+  assert.deepEqual(review.blockers, [
+    { code: "SLOT_INVALID", message: "A valid delivery or collection slot is required" },
+  ]);
+});
+
+test("reviewCheckout throws when a read fails, and sends no place request", async () => {
+  for (const failing of ["GetShoppingContext", "GetTrolley", "CurrentSlot"]) {
+    const sent = fakeWaitrose((url, operation) => {
+      if (url === PLACE_URL) return Response.json(PLACED);
+      if (operation === failing) return new Response("down", { status: 503 });
+      if (operation === "GetShoppingContext")
+        return Response.json({ data: { shoppingContext: CONTEXT } });
+      return Response.json({ data: { getTrolley: null, currentSlot: null } });
+    });
+    await assert.rejects(reviewCheckout(), { message: "HTTP 503: down" });
+    assert.ok(sent.every((request) => request.url !== PLACE_URL));
+  }
+});
+
+// ------------------------------------------- the README's checkout methods
+
+/** The class in the README, with the package and the SDK handed in as its imports. */
+async function readmeWorker() {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const block = readme
+    .split("### Checkout methods on the worker")[1]
+    ?.match(/```js\n([\s\S]*?)```/)?.[1];
+  assert.ok(block, "README has no class under 'Checkout methods on the worker'");
+  const source = block
+    .replace(/^import .*$/gm, "")
+    .replace(
+      "export default class",
+      "export default (IterateConfigEntrypoint, placeOrder, reviewCheckout) => class",
+    );
+  const { default: make } = await import(`data:text/javascript,${encodeURIComponent(source)}`);
+  return new (make(class {}, placeOrder, reviewCheckout))();
+}
+
+test("the README's review method reports the blockers of a blocked order and of a ready one, and never sends the place request", async () => {
+  const blocked = checkoutWaitrose({ trolley: (t) => void (t.instantCheckout = "NOT_ALLOWED") });
+  const review = await (await readmeWorker()).reviewWaitroseCheckout();
+  assert.equal(review.ready, false);
+  assert.equal(review.blockers[0].code, "INSTANT_CHECKOUT_NOT_ALLOWED");
+  assert.equal(blocked.placed().length, 0);
+
+  const ready = checkoutWaitrose();
+  assert.equal((await (await readmeWorker()).reviewWaitroseCheckout()).ready, true);
+  assert.equal(ready.placed().length, 0);
+});
+
+test("the README's place method needs the explicit order and total, keeps every guard, and posts at most once", async () => {
+  const worker = await readmeWorker();
+  const noRequest = checkoutWaitrose();
+  await assert.rejects(worker.placeWaitroseOrder({ orderId: "o-1" }), {
+    message: "A reviewed order ID and expected total/currency are required",
+  });
+  await assert.rejects(async () => worker.placeWaitroseOrder());
+  assert.equal(noRequest.sent.length, 0);
+
+  const blocked = checkoutWaitrose({ trolley: (t) => void (t.instantCheckout = "NOT_ALLOWED") });
+  await assert.rejects(worker.placeWaitroseOrder(REVIEWED), /^Error: Checkout blocked: /);
+  assert.equal(blocked.placed().length, 0);
+
+  const changed = checkoutWaitrose();
+  await assert.rejects(
+    worker.placeWaitroseOrder({ ...REVIEWED, expectedTotal: { amount: 1, currencyCode: "GBP" } }),
+    { message: "The estimated total has changed; review checkout again" },
+  );
+  assert.equal(changed.placed().length, 0);
+
+  const ready = checkoutWaitrose();
+  assert.deepEqual(await worker.placeWaitroseOrder(REVIEWED), PLACED);
+  assert.equal(ready.placed().length, 1);
+
+  const unclear = checkoutWaitrose({ place: () => new Response("", { status: 503 }) });
+  await assert.rejects(worker.placeWaitroseOrder(REVIEWED), {
+    message: /^Checkout outcome is unknown/,
+  });
+  assert.equal(unclear.placed().length, 1);
 });
 
 // ------------------------------------------- the login, as the secret's refresh

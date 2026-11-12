@@ -3,8 +3,14 @@ import { servePage } from "./page.js";
 export { exchange, EXCHANGE_SOURCE } from "./exchange.js";
 export { graphql, waitroseFetch } from "./fetch.js";
 export { OPERATIONS } from "./operations.js";
-export { CheckoutOutcomeUnknownError, placeOrder } from "./place-order.js";
-export type { PlacedOrder, Price } from "./place-order.js";
+export { CheckoutOutcomeUnknownError, placeOrder, reviewCheckout } from "./place-order.js";
+export type {
+  CheckoutBlocker,
+  CheckoutBlockerCode,
+  CheckoutReview,
+  PlacedOrder,
+  Price,
+} from "./place-order.js";
 
 /** The project, as the card and the page need it: what a config worker's `itx` already has. */
 export type WaitroseItx = {

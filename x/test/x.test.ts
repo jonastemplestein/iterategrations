@@ -12,7 +12,6 @@
 // delete or an append on /integrations fail. `host` is the worker hosting the package: a scope per
 // `getItx`, counted.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "vite-plus/test";
 import { x } from "../dist/x.js";
 
@@ -43,7 +42,7 @@ type Person = { id: string; username: string };
 const ADA: Person = { id: "1001", username: "fake_ada" };
 const GRACE: Person = { id: "1002", username: "fake_grace" };
 type Call = { url: string; headers: Record<string, string> };
-/** The account `completeOAuth` answers: its id, and its name when the endpoint has one. */
+/** The account `oauthResult` answers: its id, and its name when the endpoint has one. */
 type Named = { id: string; name: string | null };
 
 /** The account a JSON answer names at a lookup's dotted paths, as the platform reads it: a
@@ -57,9 +56,11 @@ function accountAt(json: unknown, lookup: { id: string; name?: string }): Named 
   return { id, name: typeof name === "string" && name ? name : null };
 }
 
-/** The kv key the package keeps an attempt under: the SHA-256 of its state. */
-const pendingKey = (state: string) =>
-  `own-x/pending/${createHash("sha256").update(state).digest("hex")}`;
+/** The kv key the package keeps an attempt under: its connection. */
+const pendingKey = (connection: string) => `own-x/pending/${connection}`;
+/** iterate's one callback, the redirect URI to register at X. */
+const PLATFORM = "https://os.example";
+const CALLBACK = `${PLATFORM}/.secrets/oauth/callback`;
 
 function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
@@ -70,12 +71,10 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   const begun: { path: string; options: any }[] = [];
   const completed: { path: string; input: { code: string; state: string } }[] = [];
   const scopes = { opened: 0, disposed: 0 };
-  // the platform: each secret's attempt in flight, each completed attempt's answer, and the origin
-  // it composes the redirect URI under (the deployment's ingress, never a primary hostname)
+  // the platform: each secret's attempt in flight, and each completed attempt's result by nonce
   const platform = {
-    attempts: {} as Record<string, { options: any; state: string }>,
-    answers: {} as Record<string, { path: string; scopes: string[]; account?: Named }>,
-    redirectOrigin: ORIGIN,
+    attempts: {} as Record<string, { options: any; state: string; nonce: string }>,
+    results: {} as Record<string, { scopes: string[]; account?: Named }>,
     states: 0,
     /** Whether it calls `account`'s endpoint: a platform older than the option ignores it, and
      *  names no account. */
@@ -128,69 +127,21 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
         // signed claims, as long as the platform's
         const claims = { kind: "secret-oauth", path, n: ++platform.states, pad: "x".repeat(150) };
         const state = `${Buffer.from(JSON.stringify(claims)).toString("base64url")}.a-made-up-signature`;
-        platform.attempts[path] = { options: structuredClone(given), state };
-        const url = new URL(given.authorizationEndpoint);
-        const params = {
-          ...given.extra,
-          response_type: "code",
-          client_id: given.clientId,
-          redirect_uri: `${platform.redirectOrigin}${given.redirect.path}`,
-          state,
-          code_challenge: "a-made-up-challenge",
-          code_challenge_method: "S256",
-          scope: given.scope,
+        const nonce = `nonce-${platform.states}`;
+        platform.attempts[path] = { options: structuredClone(given), state, nonce };
+        return {
+          authorizationUrl: `${PLATFORM}/.secrets/oauth/start/id-${platform.states}`,
+          nonce,
         };
-        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-        return { authorizationUrl: url.href, nonce: `nonce-${platform.states}` };
       },
-      completeOAuth: async (path: string, input: { code: string; state: string }) => {
-        completed.push({ path, input });
-        // the same callback again answers the same, and exchanges nothing twice
-        const answered = platform.answers[input.state];
-        if (answered) return answered;
-        const attempt = platform.attempts[path];
-        if (!attempt || attempt.state !== input.state)
-          throw new Error("no pending attempt matches this callback — begin again");
-        const person = x_.codes[input.code];
-        if (!person) throw new Error("the token endpoint answered 400 (invalid_request)");
-        const accessToken = `a-made-up-token-${++x_.mints}`;
-        x_.tokens[accessToken] = person;
-        // the account endpoint, called with the new token before anything is stored
-        const lookup = platform.lookups ? attempt.options.account : undefined;
-        const account = lookup && namedAt(lookup, accessToken);
-        const expected = attempt.options.expectAccount;
-        if (expected && account?.id !== expected)
-          throw Object.assign(
-            new Error(
-              `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
-            ),
-            { code: "IDENTITY_CONFLICT" },
-          );
-        secrets[path] = {
-          material: {
-            clientId: attempt.options.clientId,
-            clientSecret: attempt.options.clientSecret,
-            accessToken,
-            refreshToken: `a-made-up-refresh-token-${x_.mints}`,
-          },
-          options: {
-            urls: attempt.options.urls,
-            refresh: {
-              kind: "oauth-refresh-token",
-              tokenEndpoint: attempt.options.tokenEndpoint,
-              clientAuth: attempt.options.clientAuth ?? "client_secret_basic",
-            },
-          },
-        };
-        delete platform.attempts[path];
-        const answer = {
-          path,
-          scopes: attempt.options.scope.split(" "),
-          ...(account && { account }),
-        };
-        platform.answers[input.state] = answer;
-        return answer;
+      oauthResult: async (path: string, input: { nonce: string }) => {
+        const result = platform.results[input.nonce];
+        if (result) return { status: "complete", ...result };
+        return platform.attempts[path]?.nonce === input.nonce
+          ? { status: "pending" }
+          : { status: "unavailable" };
       },
+      oauthCallbackUrl: async () => CALLBACK,
     },
     kv: {
       get: async (key: string) => kv[key] ?? null,
@@ -231,6 +182,61 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
       lookup,
     );
   };
+  /** Iterate's callback, as the platform answers the provider's redirect: the attempt its state
+   *  names, completed (or its error page), then a redirect to the attempt's `next`, the page's own
+   *  landing, which this follows. */
+  const platformCallback = async (query: Record<string, string>): Promise<Response> => {
+    const found = Object.entries(platform.attempts).find(([, a]) => a.state === query.state);
+    if (!found) return new Response("This link is not one the platform issued\n", { status: 400 });
+    const [path, attempt] = found;
+    if (query.error)
+      return new Response(`The provider declined: ${query.error}\n`, { status: 400 });
+    const input = { code: query.code ?? "", state: query.state! };
+    completed.push({ path, input });
+    try {
+      const person = x_.codes[input.code];
+      if (!person) throw new Error("the token endpoint answered 400 (invalid_request)");
+      const accessToken = `a-made-up-token-${++x_.mints}`;
+      x_.tokens[accessToken] = person;
+      // the account endpoint, called with the new token before anything is stored
+      const lookup = platform.lookups ? attempt.options.account : undefined;
+      const account = lookup && namedAt(lookup, accessToken);
+      const expected = attempt.options.expectAccount;
+      if (expected && account?.id !== expected)
+        throw Object.assign(
+          new Error(
+            `the provider authorized a different account (${account?.id}) than this connection's (${expected}); connect it as a new connection instead`,
+          ),
+          { code: "IDENTITY_CONFLICT" },
+        );
+      secrets[path] = {
+        material: {
+          clientId: attempt.options.clientId,
+          clientSecret: attempt.options.clientSecret,
+          accessToken,
+          refreshToken: `a-made-up-refresh-token-${x_.mints}`,
+        },
+        options: {
+          urls: attempt.options.urls,
+          refresh: {
+            kind: "oauth-refresh-token",
+            tokenEndpoint: attempt.options.tokenEndpoint,
+            clientAuth: attempt.options.clientAuth ?? "client_secret_basic",
+          },
+        },
+      };
+      delete platform.attempts[path];
+      platform.results[attempt.nonce] = {
+        scopes: attempt.options.scope.split(" "),
+        ...(account && { account }),
+      };
+    } catch (error) {
+      return new Response(`Storing the tokens for ${path} failed: ${(error as Error).message}\n`, {
+        status: 400,
+      });
+    }
+    return page(attempt.options.next.path);
+  };
   /** The project's egress, a loaded worker's global `fetch`: the platform names every account, so
    *  the package calls no service, and each call is recorded and refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
@@ -267,14 +273,18 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   const setUp = async () => {
     secrets["/secrets/own-x-app"] = structuredClone(APP_SECRET);
   };
-  /** Press Connect, or Reconnect on `connection`: the state in the link to X. */
+  /** Press Connect, or Reconnect on `connection`: the state the platform's start link leads
+   *  X to carry. */
   const start = async (connection?: string) => {
     const res = await page("/connect", { form: connection ? { id: connection } : {} });
-    return new URL(res.headers.get("location")!).searchParams.get("state")!;
+    assert.match(
+      res.headers.get("location") ?? "",
+      /^https:\/\/os\.example\/\.secrets\/oauth\/start\//,
+    );
+    return platform.attempts[begun.at(-1)!.path]!.state;
   };
-  /** X's redirect to the callback. */
-  const callback = (query: Record<string, string>) =>
-    page(`/oauth2/callback?${new URLSearchParams(query).toString()}`);
+  /** X's redirect to iterate's callback, which sends the person on to the page. */
+  const callback = (query: Record<string, string>) => platformCallback(query);
   /** Connect (or Reconnect `connection`), and come back from X as `person`. */
   let codes = 0;
   const connect = async (person: Person = ADA, connection?: string) => {
@@ -425,27 +435,27 @@ test("every name the package keeps is its own: no secret or kv key the platform'
   for (const { path } of project.appended) assert.equal(path, "/integrations");
 });
 
-test("it answers its own routing slug, x unless another is given; anything but its page and callback is a 404", async () => {
+test("it answers its own routing slug, x unless another is given; anything but its page and its landing is a 404", async () => {
   assert.equal(x().routingSlug, "x");
   assert.equal(x({ slug: "twitter" }).routingSlug, "twitter");
   const project = fakeProject();
-  for (const path of ["/nope", "/oauth2/callbacks", "/webhook", "/oauth2"])
+  for (const path of ["/nope", "/oauth2/callback", "/connectedx", "/webhook", "/oauth2"])
     assert.equal((await project.page(path)).status, 404, path);
   assert.equal((await project.page("/nope", { form: {} })).status, 404);
-  assert.equal((await project.page("/oauth2/callback", { form: {} })).status, 405);
+  assert.equal((await project.page("/connected", { form: {} })).status, 405);
   // a member's stray path opens the project's scope and releases it, and writes nothing
   assert.equal(project.scopes.opened, project.scopes.disposed);
   assert.deepEqual(project.kv, {});
 });
 
-test("the page and the callback are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
+test("the page and the landing are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
   const project = fakeProject();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
     ["/connect", {}],
     ["/disconnect", { id: "0a1b2c3d" }],
-    ["/oauth2/callback?code=x&state=y", undefined],
+    ["/connected?id=0a1b2c3d", undefined],
   ] as const)
     assert.equal((await project.page(path, { form }, refused)).status, 401, path);
   assert.deepEqual(project.kv, {});
@@ -459,30 +469,27 @@ test("each request opens one scope and releases it", async () => {
   const { project } = await connected();
   const before = { ...project.scopes };
   await project.page("/");
-  await project.callback({ code: "x", state: "y" });
+  await project.page("/connected?id=ffffffff");
   assert.deepEqual(project.scopes, { opened: before.opened + 2, disposed: before.disposed + 2 });
 });
 
 // ------------------------------------------------------------------- the page
 
-test("the page shows the callback and website URLs to register at X, from the request's origin and the base path a paths ingress strips, each with a Copy button; a form may lead only here and to X", async () => {
+test("the page shows the callback URL to register at X, iterate's own, and the website URL from the request's origin and the base path a paths ingress strips, each with a Copy button; a form may lead only here, to iterate's start link and to X", async () => {
   const project = fakeProject();
   const res = await project.page("/", {
     headers: { "x-iterate-base-path": "/projects/iterate/x" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
-  for (const url of [
-    `${ORIGIN}/projects/iterate/x/oauth2/callback`,
-    `${ORIGIN}/projects/iterate/x/`,
-  ])
+  for (const url of [CALLBACK, `${ORIGIN}/projects/iterate/x/`])
     assert.ok(html.includes(`data-copy="${url}"`), url);
   assert.match(html, /User authentication settings/);
   assert.match(html, /Web App, Automated App or Bot/);
   assert.match(html, /https:\/\/console\.x\.com/);
   assert.match(html, /Keys and tokens/);
   const csp = res.headers.get("content-security-policy")!;
-  assert.match(csp, /form-action 'self' https:\/\/x\.com;/);
+  assert.match(csp, /form-action 'self' https:\/\/os\.example https:\/\/x\.com;/);
   // no other site may frame it: a framed Disconnect would post from this origin
   assert.match(csp, /frame-ancestors 'none'/);
   assert.equal(res.headers.get("x-frame-options"), "DENY");
@@ -515,6 +522,7 @@ test("the page links to the Dash's one form for the client, its ID public beside
           },
           { name: "clientSecret", label: "Client secret" },
         ],
+        redirectUrl: `${ORIGIN}/`,
       },
     ],
   );
@@ -552,12 +560,12 @@ test("a secret without the public field is not set up: the page asks to save the
   assert.deepEqual(project.begun, []);
 });
 
-test("no other site can frame the page's answers or the callback's", async () => {
+test("no other site can frame the page's answers or the landing's", async () => {
   const { project, connection } = await connected();
   const answers = [
     await project.page("/connect", { form: {} }),
     await project.page("/disconnect", { form: { id: "ffffffff" } }),
-    await project.callback({ code: "x", state: "y" }),
+    await project.page("/connected?id=ffffffff"),
     await project.connect(ADA, connection),
   ];
   for (const res of answers) {
@@ -568,7 +576,7 @@ test("no other site can frame the page's answers or the callback's", async () =>
 
 // ------------------------------------------------------------------ connect
 
-test("Connect needs the client; then it begins OAuth with X's endpoints, the callback, the scopes, the client's credentials in a Basic header, the client secret's placeholder and users/me, which names the account, and keeps the attempt by its state", async () => {
+test("Connect needs the client; then it begins OAuth with X's endpoints, the callback, the scopes, the client's credentials in a Basic header, the client secret's placeholder and users/me, which names the account, sends the person to iterate's start link, and keeps the attempt by its connection", async () => {
   const project = fakeProject();
   assert.match(
     location(await project.page("/connect", { form: {} })),
@@ -579,7 +587,8 @@ test("Connect needs the client; then it begins OAuth with X's endpoints, the cal
   const res = await project.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
-  assert.equal(to.origin + to.pathname, "https://x.com/i/oauth2/authorize");
+  assert.equal(to.origin, PLATFORM);
+  assert.match(to.pathname, /^\/\.secrets\/oauth\/start\//);
   const connection = project.lastConnection();
   assert.match(connection, /^[0-9a-f]{8}$/);
   assert.deepEqual(project.begun, [
@@ -590,7 +599,7 @@ test("Connect needs the client; then it begins OAuth with X's endpoints, the cal
         tokenEndpoint: "https://api.x.com/2/oauth2/token",
         clientId: CLIENT_ID,
         clientSecret: PLACEHOLDER,
-        redirect: { routingSlug: "x", path: "/oauth2/callback" },
+        next: { routingSlug: "x", path: `/connected?id=${connection}` },
         clientAuth: "client_secret_basic",
         scope: "tweet.read users.read offline.access",
         urls: URLS,
@@ -598,8 +607,9 @@ test("Connect needs the client; then it begins OAuth with X's endpoints, the cal
       },
     },
   ]);
-  const attempt = JSON.parse(project.kv[pendingKey(to.searchParams.get("state")!)]!);
+  const attempt = JSON.parse(project.kv[pendingKey(connection)]!);
   assert.equal(attempt.connection, connection);
+  assert.equal(attempt.nonce, project.platform.attempts[`/secrets/own-x-${connection}`]!.nonce);
   assert.ok(Math.abs(Date.now() - attempt.at) < 5000);
   // nothing is listed until X comes back
   assert.equal(
@@ -627,43 +637,33 @@ test("scopes and urls ask for more, beside the package's own; the page lists eve
   assert.match(await (await project.page("/")).text(), /<code>tweet\.write<\/code>/);
 });
 
-test("Connect forgets the attempts that never came back, after an hour", async () => {
+test("Connect forgets the attempts that never came back, after an hour, and a new connection's pending secret with them", async () => {
   const project = fakeProject();
   await project.setUp();
-  const stale = await project.start();
+  await project.start();
+  const stale = project.lastConnection();
   project.kv[pendingKey(stale)] = JSON.stringify({
-    connection: project.lastConnection(),
+    connection: stale,
+    nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  const fresh = await project.start();
-  const next = await project.start();
+  await project.start();
+  const fresh = project.lastConnection();
+  await project.start();
+  const next = project.lastConnection();
   assert.deepEqual(
     Object.keys(project.kv)
       .filter((key) => key.startsWith("own-x/pending/"))
       .sort(),
     [pendingKey(fresh), pendingKey(next)].sort(),
   );
+  // its delete ended the platform's attempt
+  assert.equal(project.platform.attempts[`/secrets/own-x-${stale}`], undefined);
 });
 
-test("after a Connect whose redirect URI is not the page's own address (a primary hostname), the page shows the one the platform sent X too", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.platform.redirectOrigin = "https://x--iterate.ingress.example";
-  assert.doesNotMatch(await (await project.page("/")).text(), /the platform sent X/);
-  await project.start();
-  const html = await (await project.page("/")).text();
-  assert.ok(html.includes(`data-copy="${ORIGIN}/oauth2/callback"`));
-  assert.match(html, /the platform sent X this one/);
-  assert.ok(html.includes('data-copy="https://x--iterate.ingress.example/oauth2/callback"'));
-  assert.equal(
-    project.kv["own-x/redirect-uri"],
-    "https://x--iterate.ingress.example/oauth2/callback",
-  );
-});
+// --------------------------------------------------------------- the landing
 
-// --------------------------------------------------------------- the callback
-
-test("the callback completes the attempt, keeps the account the platform named, registers the card then the row, and sends the person back; the package calls no service of its own", async () => {
+test("iterate's callback completes the attempt and sends the person to the landing, which keeps the account the platform named, registers the card then the row, and shows the page; the package calls no service of its own", async () => {
   const project = fakeProject();
   await project.setUp();
   const state = await project.start();
@@ -673,7 +673,7 @@ test("the callback completes the attempt, keeps the account the platform named, 
   const before = project.registry().length;
   const res = await project.callback({ state, code: "a-made-up-code" });
   assert.equal(res.status, 303);
-  assert.equal(res.headers.get("location"), "../?connected=%40fake_ada");
+  assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
   assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   // the tokens went no further than the pin the package asked for
   assert.deepEqual(project.secrets[path]!.options.urls, URLS);
@@ -689,7 +689,7 @@ test("the callback completes the attempt, keeps the account the platform named, 
     },
   );
   assert.ok(Math.abs(Date.now() - Date.parse(account.at)) < 5000);
-  assert.equal(project.kv[pendingKey(state)], undefined);
+  assert.equal(project.kv[pendingKey(connection)], undefined);
   // the card first: a row stands under its card alone
   assert.deepEqual(project.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "x", card: READY } },
@@ -703,67 +703,58 @@ test("the callback completes the attempt, keeps the account the platform named, 
   assert.match(html, />Disconnect</);
 });
 
-test("a callback with an unknown, missing or hour-old state is refused and writes nothing", async () => {
+test("a landing with an unknown, missing or hour-old attempt is refused and writes nothing", async () => {
   const project = fakeProject();
   await project.setUp();
-  const old = await project.start();
+  await project.start();
+  const old = project.lastConnection();
   project.kv[pendingKey(old)] = JSON.stringify({
-    connection: project.lastConnection(),
+    connection: old,
+    nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
   const kv = structuredClone(project.kv);
   const secrets = structuredClone(project.secrets);
   const before = project.registry().length;
-  const queries: Record<string, string>[] = [
-    { code: "a-made-up-code", state: "not-a-state" },
-    { code: "a-made-up-code", state: "" },
-    { code: "a-made-up-code" },
-    { code: "a-made-up-code", state: old },
-    { error: "access_denied", state: "not-a-state" },
-  ];
-  for (const query of queries) {
-    const res = await project.callback(query);
+  for (const query of ["?id=ffffffff", "?id=", "", "?id=not-a-connection", `?id=${old}`]) {
+    const res = await project.page(`/connected${query}`);
     assert.match(
       location(res),
-      /error=X came back from a sign-in this page did not start, or that is over an hour old/,
-      JSON.stringify(query),
+      /error=iterate came back from a sign-in this page did not start, or that is over an hour old/,
+      query,
     );
   }
   assert.deepEqual(project.kv, kv);
   assert.deepEqual(project.secrets, secrets);
-  assert.deepEqual(project.completed, []);
   assert.equal(project.registry().length, before);
 });
 
-test("a callback with X's error forgets the attempt and ends it: nothing is connected", async () => {
+test("X's no is iterate's callback's to show: the landing is never reached, and nothing is connected", async () => {
   const project = fakeProject();
   await project.setUp();
   const state = await project.start();
   const res = await project.callback({ error: "access_denied", state });
-  assert.match(location(res), /error=X answered access_denied: nothing changed\./);
-  assert.equal(project.kv[pendingKey(state)], undefined);
-  assert.deepEqual(project.platform.attempts, {});
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /The provider declined: access_denied/);
   assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
   assert.deepEqual(project.completed, []);
 });
 
-test("an exchange that fails deletes the pending secret, shows the error, and lists nothing", async () => {
+test("an exchange that fails is iterate's callback's to show: nothing is stored, the landing is never reached, and nothing is listed", async () => {
   const project = fakeProject();
   await project.setUp();
   const state = await project.start();
   const before = project.registry().length;
   const res = await project.callback({ state, code: "a-code-x-never-issued" });
-  assert.match(location(res), /error=the token endpoint answered 400 \(invalid_request\)/);
-  assert.deepEqual(project.platform.attempts, {}, "the attempt is ended");
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /the token endpoint answered 400 \(invalid_request\)/);
   assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
   assert.equal(
     Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
     0,
   );
   assert.equal(project.registry().length, before);
-  const html = await (await project.page(`/${res.headers.get("location")!.slice(3)}`)).text();
-  assert.match(html, /class="error">the token endpoint answered 400/);
-  assert.match(html, /None yet/);
+  assert.match(await (await project.page("/")).text(), /None yet/);
 });
 
 test("a platform that names no account (one older than the account endpoint) connects nothing: the new connection's secret goes", async () => {
@@ -785,7 +776,7 @@ test("an account users/me names no username for is listed by its id, with no Ope
   const project = fakeProject();
   await project.setUp();
   const res = await project.connect({ id: "1004", username: "" });
-  assert.equal(res.headers.get("location"), "../?connected=1004");
+  assert.equal(res.headers.get("location"), "./?connected=1004");
   const connection = project.lastConnection();
   assert.equal(JSON.parse(project.kv[`own-x/accounts/${connection}`]!).account, "1004");
   const { row: registered } = project.registry().at(-1)!.payload;
@@ -801,7 +792,7 @@ test("the same account connected twice keeps one row: the older connection's sec
   const res = await project.connect(ADA);
   const newer = project.lastConnection();
   assert.notEqual(newer, older);
-  assert.equal(res.headers.get("location"), "../?connected=%40fake_ada");
+  assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
   assert.equal(project.secrets[`/secrets/own-x-${older}`], undefined);
   assert.equal(project.kv[`own-x/accounts/${older}`], undefined);
   assert.equal(project.kv[`own-x/removed/${older}`], undefined, "its null row landed");
@@ -830,7 +821,7 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
   const path = `/secrets/own-x-${connection}`;
   const token = project.secrets[path]!.material.accessToken;
   const res = await project.connect(ADA, connection);
-  assert.equal(res.headers.get("location"), "../?connected=%40fake_ada");
+  assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
   assert.equal(project.lastConnection(), connection);
   assert.deepEqual(project.begun.at(-1), {
     path,
@@ -839,7 +830,7 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
       tokenEndpoint: "https://api.x.com/2/oauth2/token",
       clientId: CLIENT_ID,
       clientSecret: PLACEHOLDER,
-      redirect: { routingSlug: "x", path: "/oauth2/callback" },
+      next: { routingSlug: "x", path: `/connected?id=${connection}` },
       clientAuth: "client_secret_basic",
       scope: "tweet.read users.read offline.access",
       urls: URLS,
@@ -868,22 +859,20 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
   assert.equal(project.begun.length, begun);
 });
 
-test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: the page shows it, and nothing changes", async () => {
+test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: its callback shows it, and nothing changes", async () => {
   const { project, connection } = await connected();
   await project.connect(GRACE);
   const secrets = structuredClone(project.secrets);
-  const kv = structuredClone(project.kv);
   const before = project.registry().length;
   const res = await project.connect(GRACE, connection);
+  assert.equal(res.status, 400);
   assert.match(
-    location(res),
-    /error=the provider authorized a different account \(1002\) than this connection's \(1001\)/,
+    await res.text(),
+    /the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
   assert.deepEqual(project.secrets, secrets);
-  assert.deepEqual(project.kv, kv);
   assert.equal(project.registry().length, before);
-  const html = await (await project.page(`/${res.headers.get("location")!.slice(3)}`)).text();
-  assert.match(html, /class="error">the provider authorized a different account \(1002\)/);
+  const html = await (await project.page("/")).text();
   assert.match(html, /<b>@fake_ada<\/b>/);
   assert.match(html, /<b>@fake_grace<\/b>/);
 });
@@ -1066,9 +1055,9 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
   );
   await project.setUp();
   await project.start();
-  assert.deepEqual(project.begun[0]!.options.redirect, {
+  assert.deepEqual(project.begun[0]!.options.next, {
     routingSlug: "twitter",
-    path: "/oauth2/callback",
+    path: `/connected?id=${project.lastConnection()}`,
   });
   const count = project.appended.length;
   for (const event of [

@@ -1,11 +1,13 @@
 // calls.test.ts — the phone lend over a pretend `jeeves-phone serve` (fake-bridge.mjs) and a
 // pretend project: a caller the line does not vouch for, and a stranger, are turned away; a known
-// caller gets its voice call first and is picked up only then, with that caller's greeting and a
+// caller gets its voice call first, a press on that caller's own voice device (provisioned once),
+// and is picked up only then, with that caller's greeting and a
 // brief that says the caller is unverified; a note in kv (the phone's, else WhatsApp's) changes
 // the greeting; nothing is picked up or placed while a WhatsApp call is in progress; a placed call
 // rings once its voice is on the line and reports to the agent that asked; the test caller is
 // picked up and marked as a test. A call carries over to a new link when the old one is lost, and
-// is hung up once both sides have said goodbye. A real call needs the line: the README's walkthrough.
+// is hung up once both sides have said goodbye. A call keeps its agent ready from before the phone
+// rings until it ends. A real call needs the line: the README's walkthrough.
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,15 +49,26 @@ async function until<T>(what: string, look: () => T | undefined | false): Promis
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** A project whose voice app accepts every call a moment after the press, and whose appends, kv
- *  and agent messages are kept; `whatsapp` is what itx.whatsappCalls.status() answers. */
+/** A project whose voice app provisions devices and accepts every press a moment after it, and
+ *  whose appends, kv and agent messages are kept; `whatsapp` is what itx.whatsappCalls.status()
+ *  answers. */
 function pretendProject() {
   const listeners = new Map<string, (events: unknown[]) => void>();
   const project = {
     /** Deliver events to the subscription on `path`, as the platform would. */
     say: (path: string, events: unknown[]) => listeners.get(path)?.(events),
-    subscribed: [] as { path: string; name?: string; afterOffset?: number }[],
+    subscribed: [] as { path: string; name?: string }[],
+    /** Each `readEvents(afterOffset)` on a path: what a moved device reads of the gap. */
+    reads: [] as { path: string; afterOffset?: number }[],
+    /** Each `waitForEvent` on a path, open until a test answers it or lets it time out. */
+    waits: [] as {
+      path: string;
+      filter: Record<string, unknown>;
+      answer(): void;
+      timeOut(): void;
+    }[],
     events: [] as Appended[],
+    provisioned: [] as string[],
     messages: [] as { to: string; text: string }[],
     notes: new Map<string, string>(),
     whatsapp: null as null | { with: string },
@@ -67,37 +80,62 @@ function pretendProject() {
         delete: async (key: string) => void project.notes.delete(key),
       },
       voice: {
-        setupVoiceAgent: async ({ streamPath }: { streamPath: string; activation: string }) => {
-          setTimeout(
-            () =>
-              listeners.get(streamPath)?.([
-                {
-                  type: "events.iterate.com/voice-agent/conversation-accepted",
-                  payload: { handshakeTookMs: 1, upgradeTookMs: 1 },
-                },
-              ]),
-            30,
-          );
-          return { streamPath };
+        ensureVoiceDevice: async ({ client }: { client: string }) => {
+          project.provisioned.push(client);
+          return { path: `/voice/${client}`, agentPath: `/agents/voice/${client}` };
         },
       },
       cd: (path: string) => ({
         append: async (event: { type: string; payload: Record<string, any> }) => {
           project.events.push({ path, type: event.type, payload: event.payload });
+          const { activation } = event.payload;
+          // the relay accepts a press, and a call's end comes back through the subscription
+          if (event.type === "events.iterate.com/voice-agent/call-started")
+            setTimeout(
+              () =>
+                listeners.get(path)?.([
+                  {
+                    type: "events.iterate.com/voice-agent/conversation-accepted",
+                    payload: {
+                      activation,
+                      pressToDialMs: 1,
+                      handshakeTookMs: 1,
+                      upgradeTookMs: 1,
+                      heldMs: 0,
+                    },
+                  },
+                ]),
+              30,
+            );
           if (event.type === "events.iterate.com/voice-agent/call-ended")
             listeners.get(path)?.([event]);
           return {};
         },
+        appendOffsets: async (event: { type: string; payload: Record<string, any> }) => {
+          project.events.push({ path, type: event.type, payload: event.payload });
+          return [0];
+        },
+        waitForEvent: (filter: Record<string, unknown>) =>
+          new Promise((resolve, reject) =>
+            project.waits.push({
+              path,
+              filter,
+              answer: () => resolve({}),
+              timeOut: () => reject(new Error("WAIT_TIMEOUT")),
+            }),
+          ),
+        readEvents: async (afterOffset?: number) => {
+          project.reads.push({ path, afterOffset });
+          return { events: [], scannedThroughOffset: afterOffset ?? 0, atHead: true };
+        },
         subscribe: async ({
           target,
           name,
-          afterOffset,
         }: {
           target: (events: unknown[]) => void;
           name?: string;
-          afterOffset?: number;
         }) => {
-          project.subscribed.push({ path, name, afterOffset });
+          project.subscribed.push({ path, name });
           listeners.set(path, target);
           return { [Symbol.dispose]() {} };
         },
@@ -116,17 +154,21 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   const project = pretendProject();
   const { default: provide } = await import("../calls.ts");
   const lent = await provide({ itx: project.itx as never });
+  // the device of each person the lend answers is provisioned when it starts, before any call
+  await until("the answered people's devices", () => project.provisioned.length === 2);
+  assert.deepEqual(project.provisioned, ["phone-447700900001", "phone-447700900002"]);
   const recorded = (type: string) =>
     project.events.filter((event) => event.type === `phone-calls/${type}`);
+  // what the lend gave the voice to say, on the caller's relay
   const spoken = () =>
     project.events
-      .filter((event) => event.type === "events.iterate.com/agent/web-message-sent")
-      .map((event) => [event.path.split("/").slice(0, 4).join("/"), event.payload.message]);
+      .filter((event) => event.type === "events.iterate.com/voice-agent/words-given")
+      .map((event) => [event.path, event.payload.text]);
   const briefOf = (client: string) =>
     project.events.findLast(
       (event) =>
         event.type === "events.iterate.com/agent/context-added" &&
-        event.path.startsWith(`/agents/voice/${client}/`),
+        event.path === `/agents/voice/${client}`,
     )!.payload.content as string;
 
   // a caller the line does not vouch for, claiming a known number: turned away
@@ -167,7 +209,7 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   lineSays({ event: "incoming", callId: "in-2", number: "447700900001", from: "07700900001" });
   await until("the pick-up", () => bridgeHeard().find((line) => line.answer === "in-2"));
   await until("the greeting", () => spoken().length === 1);
-  assert.deepEqual(spoken(), [["/agents/voice/phone-447700900001", "At your service, sir."]]);
+  assert.deepEqual(spoken(), [["/voice/phone-447700900001", "At your service, sir."]]);
   assert.match(
     briefOf("phone-447700900001"),
     /rang your phone number \(a real telephone line, not WhatsApp\)/,
@@ -180,7 +222,8 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   assert.equal(ended.payload.from, "+447700900001");
   assert.equal(ended.payload.direction, "in");
   assert.equal(ended.payload.answered, true);
-  assert.match(ended.payload.streamPath, /^\/agents\/voice\/phone-447700900001\//);
+  assert.equal(ended.payload.streamPath, "/agents/voice/phone-447700900001");
+  assert.match(ended.payload.activations[0], /^[0-9a-f]{32}$/);
   assert.equal(lent.status(), null);
   await until("the busy flag cleared", () => !project.notes.has("calls/busy"));
 
@@ -221,13 +264,18 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
     lent.__describe().instructions,
     /It may ring anyone; it answers only \+447700900001/,
   );
+  // the line's own number comes from the bridge's `ready` (PHONE_SIP_NUMBER), not from calls.ts
+  assert.match(
+    lent.__describe().instructions,
+    /^Phone calls on the agents' own number \(\+447700900000\),/,
+  );
   const placed = await lent.call({
     to: "+44 7700 900002",
     opening: "Good evening, ma'am.",
     reportTo: "/agents/family-chief-of-staff",
   });
   assert.equal(placed.callId, "out-1");
-  assert.match(placed.streamPath, /^\/agents\/voice\/phone-447700900002\//);
+  assert.equal(placed.streamPath, "/agents/voice/phone-447700900002");
   assert.match(
     briefOf("phone-447700900002"),
     /You are on a phone call .* to \+447700900002, which you placed yourself/,
@@ -235,7 +283,7 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   await until("the opening", () => spoken().length === 4);
   assert.deepEqual(
     spoken()[3],
-    ["/agents/voice/phone-447700900002", "Good evening, ma'am."],
+    ["/voice/phone-447700900002", "Good evening, ma'am."],
     "a household number hears no recording notice",
   );
   assert.deepEqual(lent.hangup(), { hungUp: true, callId: "out-1" });
@@ -249,13 +297,15 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   // the test caller: picked up, as a test, by a voice client of its own
   lineSays({ event: "incoming", callId: "in-6", number: "", from: "?phonetest", untrusted: true });
   await until("the test call's greeting", () => spoken().length === 5);
-  assert.deepEqual(spoken()[4], ["/agents/voice/phone-test", "Hello, this is the test line."]);
+  assert.deepEqual(spoken()[4], ["/voice/phone-test", "Hello, this is the test line."]);
   assert.match(briefOf("phone-test"), /This is a TEST call/);
   lineSays({ event: "ended", callId: "in-6", reason: "the person hung up", answered: true });
   const testEnd = await until("the test call's end", () => recorded("call-ended")[4]);
   assert.equal(testEnd.payload.test, true);
   assert.equal(testEnd.payload.from, "?phonetest");
   assert.equal(project.messages.length, 1, "a test call reports to nobody");
+  // five calls with three callers: each caller's device was provisioned once
+  assert.deepEqual(project.provisioned, ["phone-447700900001", "phone-447700900002", "phone-test"]);
 });
 
 test("a call carries over a lost link, and ends once both sides have said goodbye", async () => {
@@ -264,12 +314,16 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   await provide({ itx: first.itx as never });
   lineSays({ event: "incoming", callId: "in-7", number: "447700900001", from: "07700900001" });
   await until("the pick-up", () => bridgeHeard().find((line) => line.answer === "in-7"));
-  const path = first.subscribed.at(-1)!.path;
-  assert.match(path, /^\/agents\/voice\/phone-447700900001\//);
+  // the caller's device, provisioned in the test before, moved to this link with its subscription
+  const path = "/voice/phone-447700900001";
+  assert.ok(first.subscribed.some((row) => row.path === path));
+  const { activation } = first.events.findLast(
+    (event) => event.type === "events.iterate.com/voice-agent/call-started" && event.path === path,
+  )!.payload;
   first.say(path, [
     {
       type: "events.iterate.com/voice-agent/utterance-transcribed",
-      payload: { text: "Hello" },
+      payload: { activation, text: "Hello" },
       offset: 40,
     },
   ]);
@@ -277,10 +331,13 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   // the link is lost: \`iterate provide\` reconnects, and the call carries over to the new link
   const second = pretendProject();
   await provide({ itx: second.itx as never });
-  const moved = await until("the call's subscription on the new link", () =>
+  await until("the call's subscription on the new link", () =>
     second.subscribed.find((row) => row.path === path),
   );
-  assert.equal(moved.afterOffset, 40, "it resumes after the last fact the old link delivered");
+  const read = await until("the gap read on the new link", () =>
+    second.reads.find((row) => row.path === path),
+  );
+  assert.equal(read.afterOffset, 40, "it reads the log after the last fact the old link delivered");
   lineSays({ event: "mic", pcm: Buffer.alloc(32).toString("base64") });
   await until("a microphone frame over the new link", () =>
     second.events.find((event) => event.type === "events.iterate.com/voice-agent/mic-frame"),
@@ -291,7 +348,7 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   const before = hangUps();
   const said = (type: string, text: string, offset: number) =>
     second.say(path, [
-      { type: `events.iterate.com/voice-agent/${type}`, payload: { text }, offset },
+      { type: `events.iterate.com/voice-agent/${type}`, payload: { activation, text }, offset },
     ]);
   said("utterance-transcribed", "Lovely, thanks. Bye!", 41);
   said("answer-transcribed", "Goodbye, sir.", 42);
@@ -319,13 +376,13 @@ test("a call to someone outside the household opens with the recording notice", 
     opening: "Good afternoon. Jeeves here.",
   });
   await until("the opening", () =>
-    project.events.find((event) => event.type === "events.iterate.com/agent/web-message-sent"),
+    project.events.find((event) => event.type === "events.iterate.com/voice-agent/words-given"),
   );
   const said = project.events.find(
-    (event) => event.type === "events.iterate.com/agent/web-message-sent",
+    (event) => event.type === "events.iterate.com/voice-agent/words-given",
   )!;
   assert.equal(
-    said.payload.message,
+    said.payload.text,
     "Good afternoon. Jeeves here. Please note that this call is recorded.",
   );
   const brief = project.events.find(
@@ -338,3 +395,96 @@ test("a call to someone outside the household opens with the recording notice", 
     project.events.find((event) => event.type === "phone-calls/call-ended"),
   );
 });
+
+test("a call keeps its agent ready from before the phone rings until it ends", async () => {
+  const project = pretendProject();
+  const { default: provide } = await import("../calls.ts");
+  const lent = await provide({ itx: project.itx as never });
+  const agent = "/agents/voice/phone-447700900021";
+  const warmUp = "events.iterate.com/agent/warm-up-requested";
+  const asks = () =>
+    project.events.filter((event) => event.type === warmUp && event.path === agent).length;
+  const waits = () => project.waits.filter((wait) => wait.path === agent);
+  const rang = () => bridgeHeard().filter((line) => line.call === "+447700900021").length;
+  // the line rings and answers at once here, so note what it had heard at the first ask
+  let rangAtFirstAsk: number | undefined;
+  const { cd } = project.itx;
+  project.itx.cd = (path: string) => {
+    const context = cd(path);
+    if (path !== agent) return context;
+    return {
+      ...context,
+      append: (event: { type: string; payload: Record<string, any> }) => {
+        if (event.type === warmUp) rangAtFirstAsk ??= rang();
+        return context.append(event);
+      },
+    };
+  };
+
+  const { callId } = await lent.call({ to: "+44 7700 900021", opening: "Good evening, sir." });
+  // one ask once the voice is on the line, before the ring, and one at the pick-up
+  await until("the ask at the pick-up", () => asks() === 2);
+  assert.equal(rangAtFirstAsk, 0, "the agent is asked before the phone rings");
+  // one wait on the agent, which holds it awake, for its model's next answer
+  await until("the wait", () => waits().length === 1);
+  assert.deepEqual(waits()[0]!.filter, {
+    type: [
+      "events.iterate.com/agent/llm-request-settled",
+      "events.iterate.com/agent/cache-kept-warm",
+    ],
+    timeoutMs: 50_000,
+  });
+
+  // the model answers: its socket's 60 s start again, so nothing is asked
+  waits()[0]!.answer();
+  await until("another wait", () => waits().length === 2);
+  assert.equal(asks(), 2);
+  // 50 s of quiet: the agent is asked again
+  waits()[1]!.timeOut();
+  await until("the ask after the quiet", () => asks() === 3);
+  await until("a wait after it", () => waits().length === 3);
+
+  // the call ends: the open wait lapses, and nothing more is asked
+  lent.hangup();
+  await until("the end", () =>
+    project.events.find(
+      (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
+    ),
+  );
+  waits()[2]!.timeOut();
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.deepEqual({ asks: asks(), waits: waits().length }, { asks: 3, waits: 3 });
+}, 15_000);
+
+test("a lost link never spins: an ask that cannot be sent waits its turn, and the call goes on", async () => {
+  const project = pretendProject();
+  const { default: provide } = await import("../calls.ts");
+  const lent = await provide({ itx: project.itx as never });
+  const agent = "/agents/voice/phone-447700900022";
+  const { cd } = project.itx;
+  const asked: number[] = [];
+  project.itx.cd = (path: string) => {
+    const context = cd(path);
+    if (path !== agent) return context;
+    return {
+      ...context,
+      append: (event: { type: string; payload: Record<string, any> }) => {
+        if (event.type !== "events.iterate.com/agent/warm-up-requested")
+          return context.append(event);
+        asked.push(Date.now());
+        return Promise.reject(new Error("the link is gone"));
+      },
+      waitForEvent: () => Promise.reject(new Error("the link is gone")),
+    };
+  };
+  const { callId } = await lent.call({ to: "+44 7700 900022" });
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  // the ask before the ring, the one at the pick-up, and about one a second after them
+  assert.ok(asked.length >= 3 && asked.length <= 5, `asked ${String(asked.length)} times in 2.5 s`);
+  assert.deepEqual(lent.hangup(), { hungUp: true, callId });
+  await until("the end", () =>
+    project.events.find(
+      (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
+    ),
+  );
+}, 15_000);

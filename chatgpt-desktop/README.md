@@ -42,7 +42,7 @@ website as the app's signed-in account. Share it only with a project you trust.
 
 ## How it works
 
-The app listens on `/tmp/codex-browser-use/<uuid>.sock`: a 4-byte little-endian length, then one
+The app listens on `/tmp/codex-app-tools-<uid>/<uuid>.sock`: a 4-byte little-endian length, then one
 JSON-RPC message; `tools/list` and `tools/call`, the tools its own agent uses (`create_thread`,
 `send_message_to_thread`, `wait_threads`, `read_thread`, …). The socket name changes when the app
 starts; the lend finds the one that lists `create_thread`. Every call names a calling thread, so the

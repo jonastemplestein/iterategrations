@@ -7,9 +7,9 @@ export type OAuthOptions = {
   /** A placeholder naming the secret that holds it: the platform reads it there at the code
    *  exchange and at every refresh, so it never passes through this code. */
   clientSecret: string;
-  /** The package's own callback: a place in the project, which the platform turns into the
-   *  redirect URI under the deployment's ingress. */
-  redirect: { routingSlug: string; path: string };
+  /** Where the platform's callback sends the person once it stored the tokens: a page of the
+   *  project's, which the platform composes. Every attempt comes back to the platform first. */
+  next: { routingSlug: string; path: string };
   clientAuth?: "client_secret_basic" | "client_secret_post";
   scope: string;
   /** The origins the tokens may be sent to: the token endpoint's, and the APIs'. */
@@ -17,7 +17,7 @@ export type OAuthOptions = {
   extra?: Record<string, string>;
   /** Where the provider names the account the new tokens are for: an endpoint within `urls`, which
    *  the platform calls once with the new access token before it stores anything, and the JSON
-   *  paths of the account's id and name. `completeOAuth` answers the account. */
+   *  paths of the account's id and name. `oauthResult` answers the account. */
   account: { url: string; id: string; name?: string };
   /** The account the tokens must be for, by the id `account`'s endpoint names: the platform refuses
    *  another account's tokens before it stores anything (`IDENTITY_CONFLICT`). */
@@ -57,12 +57,25 @@ export type GoogleItx = {
         placeholder?: string;
         pattern?: string;
       }[];
+      /** Where the Dash's form sends the person once it is saved. */
+      redirectUrl?: string;
     }): Promise<{ path: string; url: string }>;
-    beginOAuth(path: string, options: OAuthOptions): Promise<{ authorizationUrl: string }>;
-    completeOAuth(
+    /** Answers the platform's start link, and the attempt's nonce. */
+    beginOAuth(
       path: string,
-      input: { code: string; state: string },
-    ): Promise<{ path: string; scopes: string[]; account?: { id: string; name: string | null } }>;
+      options: OAuthOptions,
+    ): Promise<{ authorizationUrl: string; nonce: string }>;
+    /** What became of the attempt `nonce`, once the platform's callback sent the person back. */
+    oauthResult(
+      path: string,
+      input: { nonce: string },
+    ): Promise<
+      | { status: "pending" }
+      | { status: "complete"; scopes: string[]; account?: { id: string; name: string | null } }
+      | { status: "unavailable" }
+    >;
+    /** The redirect URI to register at Google: the platform's one callback. */
+    oauthCallbackUrl(): Promise<string>;
   };
   cd(path: string): {
     append(event: {
@@ -74,7 +87,7 @@ export type GoogleItx = {
 };
 
 /** What `google()` was given, with the package's own scopes and origins: the routing slug the
- *  Dash's buttons and the redirect lead to, every scope a connection asks for, and every origin its
+ *  Dash's buttons and the landing after a sign-in lead to, every scope a connection asks for, and every origin its
  *  tokens may be sent to. */
 export type Settings = { slug: string; scopes: string[]; urls: string[] };
 
@@ -116,11 +129,9 @@ export const secretOf = (connection: string): string => `/secrets/own-google-${c
 export const placeholder = (connection: string): string =>
   `getSecret("${secretOf(connection)}", { field: "accessToken" })`;
 
-/** The kv: `own-google/redirect-uri` (the redirect URI the platform last sent Google),
- *  `own-google/pending/<digest of the state>` (a sign-in this page started),
+/** The kv: `own-google/pending/<connection>` (a sign-in this page started),
  *  `own-google/accounts/<connection>` (an account), and `own-google/removed/<connection>` (a
  *  removal whose null row has yet to land on the Dash). */
-export const REDIRECT_URI = "own-google/redirect-uri";
 const PENDING = "own-google/pending/";
 export const ACCOUNTS = "own-google/accounts/";
 export const REMOVED = "own-google/removed/";
@@ -135,8 +146,11 @@ export type App = { clientId: string };
 /** What the kv keeps of an account: its address, its id at Google, the scopes Google granted, and
  *  when it was connected. */
 export type Account = { account: string; externalId: string; scopes: string[]; at: string };
-/** A sign-in the page started: the connection it is for, and when. */
-export type Attempt = { connection: string; at: number };
+/** A sign-in the page started: the connection it is for, the platform's nonce for the attempt,
+ *  and when. */
+export type Attempt = { connection: string; nonce: string; at: number };
+/** Where the platform sends the person once it stored the tokens: this page's `/connected`. */
+export const LANDING = "/connected";
 /** What a callback came to: the account connected, with the connections of the same account it
  *  replaced. */
 export type Outcome = { connected: string; replaced: string[] };
@@ -157,13 +171,6 @@ export async function dropSecret(itx: Pick<GoogleItx, "secrets">, path: string):
 const hexOf = (bytes: Uint8Array): string =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 const hex = (bytes: number): string => hexOf(crypto.getRandomValues(new Uint8Array(bytes)));
-
-/** The kv key of an attempt: the `state` is a token the platform signs, a few hundred characters
- *  long, so the key holds its SHA-256. */
-const pendingKey = async (state: string): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(state));
-  return `${PENDING}${hexOf(new Uint8Array(digest))}`;
-};
 
 /** The client, from the catalog: null until `APP_SECRET` holds its ID as a public field. A secret
  *  there without it (set by hand, or saved before the form asked for the ID) is not a client: the
@@ -207,13 +214,18 @@ export const scopesShown = (scopes: string[]): string[] =>
 /** What Connect begins OAuth with, and Reconnect with `existing`: held to its account by the id the
  *  userinfo endpoint names, and Google is hinted to ask for it. Google issues a refresh token only
  *  with offline access and the consent screen. */
-function oauthOptionsOf(app: App, settings: Settings, existing: Account | null): OAuthOptions {
+function oauthOptionsOf(
+  app: App,
+  settings: Settings,
+  connection: string,
+  existing: Account | null,
+): OAuthOptions {
   return {
     authorizationEndpoint: AUTHORIZATION_ENDPOINT,
     tokenEndpoint: TOKEN_ENDPOINT,
     clientId: app.clientId,
     clientSecret: `getSecret("${APP_SECRET}", { field: "clientSecret" })`,
-    redirect: { routingSlug: settings.slug, path: "/oauth2/callback" },
+    next: { routingSlug: settings.slug, path: `${LANDING}?id=${connection}` },
     scope: settings.scopes.join(" "),
     urls: settings.urls,
     extra: {
@@ -226,11 +238,10 @@ function oauthOptionsOf(app: App, settings: Settings, existing: Account | null):
   };
 }
 
-/** Begin OAuth for an account: a new connection, or `connection` again (Reconnect). Answers the URL
- *  to send the person to. The attempt is kept by its `state`, the query parameter the platform
- *  signed into that URL and Google sends back to the callback. It needs the client. The redirect
- *  URI the platform sent is kept when it changes: a project with a primary hostname serves the page
- *  there, but the platform composes the redirect under iterate's ingress, and the page shows it. */
+/** Begin OAuth for an account: a new connection, or `connection` again (Reconnect). Answers the
+ *  platform's start link to send the person to. Google comes back to the platform's callback, which
+ *  stores the tokens in the browser that opened the link and sends the person to `/connected`. The
+ *  attempt is kept by its connection, with the platform's nonce for it. It needs the client. */
 export async function startConnect(
   itx: GoogleItx,
   settings: Settings,
@@ -240,11 +251,15 @@ export async function startConnect(
   if (!app) throw new Error("Save the client first");
   const existing = connection === undefined ? null : await readAccount(itx, connection);
   if (connection !== undefined && !existing) throw new Error("Unknown account");
-  // a sign-in that never came back leaves its attempt behind: those over an hour old go
+  // a sign-in that never came back leaves its attempt behind: those over an hour old go, and with
+  // a new connection's its pending secret, which ends the attempt
   for (const key of (await itx.kv.list(PENDING)).keys) {
     const value = await itx.kv.get(key);
-    if (!value || Date.now() - (JSON.parse(value) as Attempt).at >= ATTEMPT_TTL_MS)
-      await itx.kv.delete(key);
+    const stale = value ? (JSON.parse(value) as Attempt) : null;
+    if (stale && Date.now() - stale.at < ATTEMPT_TTL_MS) continue;
+    if (stale && !(await readAccount(itx, stale.connection)))
+      await dropSecret(itx, secretOf(stale.connection));
+    await itx.kv.delete(key);
   }
   let id = connection ?? hex(4);
   // a new connection's id is one no account and no removal has
@@ -254,74 +269,57 @@ export async function startConnect(
       (await itx.kv.get(`${REMOVED}${id}`)) !== null
     )
       id = hex(4);
-  const { authorizationUrl } = await itx.secrets.beginOAuth(
+  const { authorizationUrl, nonce } = await itx.secrets.beginOAuth(
     secretOf(id),
-    oauthOptionsOf(app, settings, existing),
+    oauthOptionsOf(app, settings, id, existing),
   );
-  const url = new URL(authorizationUrl);
-  const state = url.searchParams.get("state");
-  if (!state) throw new Error("The platform's authorization URL carries no state");
-  const attempt: Attempt = { connection: id, at: Date.now() };
-  await itx.kv.put(await pendingKey(state), JSON.stringify(attempt));
-  const redirectUri = url.searchParams.get("redirect_uri");
-  if (redirectUri && redirectUri !== (await itx.kv.get(REDIRECT_URI)))
-    await itx.kv.put(REDIRECT_URI, redirectUri);
+  const attempt: Attempt = { connection: id, nonce, at: Date.now() };
+  await itx.kv.put(`${PENDING}${id}`, JSON.stringify(attempt));
   return authorizationUrl;
 }
 
-/** The attempt `state` names, while it is under an hour old: null for any other, which the
- *  callback refuses before it writes anything. */
+/** The attempt the page started for `connection`, while it is under an hour old: null for any
+ *  other, which the landing refuses before it writes anything. */
 export async function attemptOf(
   itx: Pick<GoogleItx, "kv">,
-  state: string,
+  connection: string,
 ): Promise<Attempt | null> {
-  if (!state) return null;
-  const value = await itx.kv.get(await pendingKey(state));
+  if (!CONNECTION.test(connection)) return null;
+  const value = await itx.kv.get(`${PENDING}${connection}`);
   const attempt = value ? (JSON.parse(value) as Attempt) : null;
-  return attempt && CONNECTION.test(attempt.connection) && Date.now() - attempt.at < ATTEMPT_TTL_MS
+  return attempt && attempt.connection === connection && Date.now() - attempt.at < ATTEMPT_TTL_MS
     ? attempt
     : null;
 }
 
-/** Forget an attempt that came back without a code (the person said no at Google): its kv entry,
- *  and a new connection's pending secret, which ends the attempt. A reconnected account keeps its
- *  tokens. */
-export async function dropAttempt(itx: GoogleItx, state: string, attempt: Attempt): Promise<void> {
-  await itx.kv.delete(await pendingKey(state));
-  if (!(await readAccount(itx, attempt.connection)))
-    await dropSecret(itx, secretOf(attempt.connection));
-}
-
-/** Finish an attempt the page started. The platform exchanges the code inside the secret's facet
- *  (the page never sees a token), names the account at the userinfo endpoint before it stores the
- *  tokens, and refuses a reconnect's tokens for another account (`IDENTITY_CONFLICT`). The kv
+/** Finish an attempt the page started, once the platform's callback sent the person back. The
+ *  platform exchanged the code inside the secret's facet (the page never sees a token or a code),
+ *  named the account at the userinfo endpoint before it stored the tokens, and refused a
+ *  reconnect's tokens for another account (`IDENTITY_CONFLICT`, shown on its own page). The kv
  *  keeps the account it names. A connection of the same account made before goes: one row per
  *  account.
  *
- *  An exchange that fails or is refused stores nothing: a new connection's pending secret goes, and
- *  a reconnected one keeps its old tokens. Tokens the platform names no account for go with a new
- *  connection. */
-export async function connectAccount(
-  itx: GoogleItx,
-  state: string,
-  code: string,
-  attempt: Attempt,
-): Promise<Outcome> {
+ *  An attempt the platform did not complete connects nothing, and stays for another try at the
+ *  same link. Tokens the platform names no account for go with a new connection. */
+export async function connectAccount(itx: GoogleItx, attempt: Attempt): Promise<Outcome> {
   const { connection } = attempt;
   const path = secretOf(connection);
   const existing = await readAccount(itx, connection);
-  await itx.kv.delete(await pendingKey(state)); // tidying only: the platform says whether a state is good
-  const undo = async (error: unknown): Promise<never> => {
+  const result = await itx.secrets.oauthResult(path, { nonce: attempt.nonce });
+  if (result.status === "pending")
+    throw new Error("Google's sign-in has not finished yet. Open the link again to finish it.");
+  await itx.kv.delete(`${PENDING}${connection}`);
+  if (result.status !== "complete")
+    throw new Error("This sign-in is over, or a newer one replaced it. Press Connect again.");
+  const { scopes, account: named } = result;
+  if (!named) {
+    const error = new Error("The platform named no account for these tokens");
     if (!existing)
       await dropSecret(itx, path).catch((leftover: unknown) => {
         throw new Error(`${messageOf(error)}; ${path} is left: ${messageOf(leftover)}`);
       });
     throw error;
-  };
-  const { scopes, account: named } = await itx.secrets
-    .completeOAuth(path, { code, state })
-    .catch(undo);
-  if (!named) return await undo(new Error("The platform named no account for these tokens"));
+  }
   const account: Account = {
     account: named.name ?? named.id,
     externalId: named.id,

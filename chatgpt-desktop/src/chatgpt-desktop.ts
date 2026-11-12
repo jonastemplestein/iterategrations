@@ -6,7 +6,8 @@
 //   - EVENTS: what the tasks started here (or by the `chatgpt-browser` command line) do lands on a
 //     stream of the project as `chatgpt-desktop/<kind>`: each turn's start and end, the agent's
 //     messages, its tool calls. Nothing else from the app's sessions is read or sent.
-// The app serves its agent tools on a Unix socket in /tmp/codex-browser-use: a 4-byte little-endian
+// The app serves its agent tools on a Unix socket in /tmp/codex-app-tools-<uid> (in /tmp/codex-browser-use
+// before app 26.1103): a 4-byte little-endian
 // length, then one JSON-RPC message; `tools/list` and `tools/call`. Every call names a calling thread,
 // so the lend keeps one "Agent bridge" task in the app. The wire is the contract: no client library.
 import { randomUUID } from "node:crypto";
@@ -72,6 +73,8 @@ export type Options = {
   logPath?: string;
   /** How often the tasks' rollout files are read for new events. */
   pollMs?: number;
+  /** How long a task stays quiet before its rollout is no longer read every poll. */
+  quietMs?: number;
 };
 
 type State = {
@@ -137,8 +140,16 @@ export function rpc(
 }
 
 export function createLend(options: Options = {}) {
-  const socketDir =
-    options.socketDir ?? (process.env.CHATGPT_DESKTOP_SOCKET_DIR || "/tmp/codex-browser-use");
+  // Newest first: app 26.1103 (November 2026) moved the tools to /tmp/codex-app-tools-<uid>.
+  const socketDirs = options.socketDir
+    ? [options.socketDir]
+    : process.env.CHATGPT_DESKTOP_SOCKET_DIR
+      ? [process.env.CHATGPT_DESKTOP_SOCKET_DIR]
+      : [
+          `/tmp/codex-app-tools-${process.getuid?.() ?? ""}`,
+          "/tmp/codex-app-tools",
+          "/tmp/codex-browser-use",
+        ];
   const stateDir =
     options.stateDir ??
     join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "chatgpt-browser");
@@ -201,12 +212,14 @@ export function createLend(options: Options = {}) {
   const appSocket = async (): Promise<string> => {
     const cached = loadState().socket;
     if (cached && existsSync(cached) && (await isAppSocket(cached))) return cached;
-    const candidates = existsSync(socketDir)
-      ? readdirSync(socketDir)
+    const candidates = socketDirs
+      .filter((dir) => existsSync(dir))
+      .flatMap((dir) =>
+        readdirSync(dir)
           .filter((name) => name.endsWith(".sock"))
-          .map((name) => join(socketDir, name))
-          .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
-      : [];
+          .map((name) => join(dir, name)),
+      )
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
     for (const path of candidates) {
       if (await isAppSocket(path)) {
         await changeState((state) => void (state.socket = path));
@@ -214,7 +227,7 @@ export function createLend(options: Options = {}) {
       }
     }
     throw new DesktopError(
-      `The ChatGPT desktop app is not running: no app tool socket in ${socketDir}`,
+      `The ChatGPT desktop app is not running: no app tool socket in ${socketDirs.join(", ")}`,
     );
   };
 
@@ -323,6 +336,24 @@ export function createLend(options: Options = {}) {
       return await rawCall(path, await bridge(path), tool, args, timeoutMs);
     }
   };
+  /**
+   * Show a task in the app's window and give it a browser tab. Since app 26.1103 the in-app browser
+   * exists only for the chat the window shows (`browsers.list()` is empty for a hidden one), so this
+   * runs before every prompt, and one task at a time can use the browser.
+   */
+  const showInWindow = async (thread: string) => {
+    try {
+      await callTool("navigate_to_codex_page", { threadId: thread });
+      await callTool("open_in_codex", {
+        threadId: thread,
+        target: { type: "browser", url: "about:blank" },
+      });
+    } catch (error) {
+      log(
+        `could not show ${thread} in the window (${error instanceof Error ? error.message : String(error)}); its browser may be unavailable`,
+      );
+    }
+  };
 
   // ---- names ----
   const resolve = (ref: string): string => {
@@ -426,6 +457,7 @@ export function createLend(options: Options = {}) {
         thread = (await callTool("fork_thread", { threadId: template }))?.threadId;
         if (!thread) throw new DesktopError("the app made no fork");
         first = (await snapshot(thread)).latestTurn?.id;
+        await showInWindow(thread);
         await callTool("send_message_to_thread", {
           threadId: thread,
           prompt,
@@ -446,6 +478,7 @@ export function createLend(options: Options = {}) {
       if (opts.thinking) args.thinking = opts.thinking;
       const created = await callTool("create_thread", args);
       thread = created?.threadId;
+      if (thread) await showInWindow(thread);
     }
     if (!thread) throw new DesktopError("The app made no thread");
     const started = thread;
@@ -511,6 +544,10 @@ export function createLend(options: Options = {}) {
     string,
     { file?: string; offset: number; rest: string; quietSince: number }
   >();
+  /** Where a task that went quiet stopped being read. Following it again goes on from there: its
+   *  rollout's lines are already events, and a repeat would land them all a second time. */
+  const readTo = new Map<string, number>();
+
   /** Follow a thread's rollout from `offset` bytes: 0 for a new task, else from its end as it is now,
    *  so a follow-up sent next is read from its first line. */
   const follow = (thread: string, offset?: number) => {
@@ -570,7 +607,10 @@ export function createLend(options: Options = {}) {
       }
       const size = statSync(entry.file).size;
       if (size <= entry.offset) {
-        if (Date.now() - entry.quietSince > 6 * 3_600_000) followed.delete(thread);
+        if (Date.now() - entry.quietSince > (options.quietMs ?? 6 * 3_600_000)) {
+          readTo.set(thread, entry.offset);
+          followed.delete(thread);
+        }
         continue;
       }
       const fd = openSync(entry.file, "r");
@@ -597,11 +637,12 @@ export function createLend(options: Options = {}) {
   let timer: NodeJS.Timeout | undefined;
   const watch = () => {
     // tasks from the last two days that this lend or the command line started, from where they are now
-    const since = Date.now() - 48 * 3_600_000;
-    for (const entry of loadState().threads ?? []) if (entry.at > since) follow(entry.id);
+    const recent = () => Date.now() - 48 * 3_600_000;
+    for (const entry of loadState().threads ?? []) if (entry.at > recent()) follow(entry.id);
     timer ??= setInterval(() => {
       for (const entry of loadState().threads ?? [])
-        if (entry.at > since && !followed.has(entry.id)) follow(entry.id, 0);
+        if (entry.at > recent() && !followed.has(entry.id))
+          follow(entry.id, readTo.get(entry.id) ?? 0);
       try {
         readNew();
       } catch (error) {
@@ -639,6 +680,7 @@ export function createLend(options: Options = {}) {
       if (typeof message !== "string" || !message.trim())
         throw new DesktopError("send(task, message) needs a message");
       const before = (await snapshot(thread)).latestTurn?.id;
+      await showInWindow(thread);
       await callTool("send_message_to_thread", { threadId: thread, prompt: message });
       follow(thread);
       if (opts.wait === false) return { thread, name: nameOf(thread), status: "sent" };

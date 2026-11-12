@@ -21,14 +21,14 @@ export function acme(options: { slug?: string } = {}): Integration {
     // the host it answers: acme--<project>.<ingress>, or <origin>/projects/<project>/acme/ under paths
     routingSlug,
     // every request on that host and no other: deliveries at /webhook, which prove themselves,
-    // then for members only the provider's return at /oauth2/callback and the page at /
+    // then for members only the landing after a sign-in at /connected and the page at /
     async fetch(request, host) {
       const url = new URL(request.url);
       if (url.pathname === "/webhook") return receive(request, host.getItx());
       const denied = host.auth.require(request);
       if (denied) return denied;
       using itx = host.getItx();
-      if (url.pathname === "/oauth2/callback") return callback(request, itx);
+      if (url.pathname === "/connected") return landing(request, itx);
       return page(request, itx, routingSlug);
     },
     // every durable event of the project, unordered, at least once
@@ -40,8 +40,8 @@ export function acme(options: { slug?: string } = {}): Integration {
 }
 ```
 
-A package's address has three places and no others. `/` is its page, for members. `/oauth2/callback`
-is where a provider sends the member back, for members too. `/webhook` takes a service's deliveries,
+A package's address has three places and no others. `/` is its page, for members. `/connected` is
+where iterate sends the member back after a sign-in at a provider, for members too. `/webhook` takes a service's deliveries,
 which prove themselves (`/webhook/<name>` when a service has several). Those are the URLs a person
 registers at the service.
 
@@ -117,27 +117,30 @@ Every integration seen so far is one of these, or a mix.
 
 **A service with its own page and webhook** (Telegram, ChatGPT). The page at `/` collects what the
 service needs (`itx.secrets.collectFromUser` gives a link where the person pastes a token: the
-package never sees it), sets the webhook at the service to `/webhook/<name>` on the project's host, and
+package never sees it, and `redirectUrl`, the page's own URL, brings them back once it is saved), sets the webhook at the service to `/webhook/<name>` on the project's host, and
 registers a row. The webhook proves itself: `itx.secrets.verifyHmac(path, { payload, signature })`
 for a signed body, `itx.secrets.verifyEquals(path, { value })` for a token in the URL. Each delivery
 lands once on `/integrations/<slug>/<connection>`, keyed by the service's delivery id. The page and
 its forms send `Content-Security-Policy` with `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 
-**An OAuth app of the project's own** (a GitHub App, any OAuth provider). The page starts the attempt
-with the package's own callback as the redirect, a place in the project the platform turns into the
-URL the provider gets:
+**An OAuth app of the project's own** (any OAuth provider). The provider comes back to iterate's own
+callback, which completes the sign-in only in the browser that opened the start link, and only for
+a member; then iterate sends the person to the package's page, which reads the result:
 
 ```ts
-const { authorizationUrl } = await itx.secrets.beginOAuth("/secrets/acme-main", {
+// register this URL at the provider: <platform origin>/.secrets/oauth/callback
+const callbackUrl = await itx.secrets.oauthCallbackUrl();
+const { authorizationUrl, nonce } = await itx.secrets.beginOAuth("/secrets/acme-main", {
   authorizationEndpoint,
   tokenEndpoint,
   clientId,
   clientSecret: 'getSecret("/secrets/acme-app", { field: "clientSecret" })',
-  redirect: { routingSlug: "acme", path: "/oauth2/callback" }, // register this URL at the provider
+  next: { routingSlug: "acme", path: "/connected?id=main" }, // a page of the project's
   scope: "read",
 });
-// the provider sends the person to /oauth2/callback?code=…&state=…; the page, for members only, hands both back
-const { scopes } = await itx.secrets.completeOAuth("/secrets/acme-main", { code, state });
+// keep `nonce` for "main", send the person to authorizationUrl (iterate's start link); on /connected:
+const result = await itx.secrets.oauthResult("/secrets/acme-main", { nonce });
+// { status: "complete", scopes, account? } | { status: "pending" } | { status: "unavailable" }
 ```
 
 The client is one secret, and a person enters it on one form:
@@ -150,6 +153,7 @@ const { url } = await itx.secrets.collectFromUser({
     { name: "clientId", label: "Client ID", public: true, pattern: String.raw`[a-z0-9\-]{1,64}` },
     { name: "clientSecret", label: "Client secret" },
   ],
+  redirectUrl: here, // this page's URL: the form sends the person back once it is saved
 });
 // the catalog answers a public field's value, and never a secret one
 const app = (await itx.secrets.list()).find((entry) => entry.path === "/secrets/acme-app");
@@ -161,11 +165,11 @@ A `public` field is no secret: the form shows it as a plain input, checked again
 escaped), and the catalog answers its value. The package reads the client ID there and keeps no
 copy in its kv. A GitHub App's ID and slug are public fields of its secret in the same way.
 
-The exchange runs in the platform's secret facet: the page never sees a token, and the same callback
-again (a refreshed tab) answers the same. The platform composes the URL by the deployment's static
-rules: on the hostname its config pins to the project when it has one, else under its ingress, never
-on a hostname the project claimed, so the URL is the project's by construction. It is the URL the
-page shows, and the one to register at the provider. For a GitHub App, store one secret per installation with the App's key as a placeholder and
+The exchange runs in the platform's secret facet: the page never sees a token or a code. The platform
+composes `next` by the deployment's static rules: on the hostname its config pins to the project
+when it has one, else under its ingress, so the landing is the project's by construction. The page
+shows iterate's callback, the one URL to register at the provider. A GitHub App's install has its own
+setup URL, which is no OAuth sign-in (the `github` package): for a GitHub App, store one secret per installation with the App's key as a placeholder and
 the `github-app-installation` refresh strategy: the platform mints each installation's token on use.
 Claim a nonce once by appending an event with the nonce as its idempotency key and a body only
 that claim has (a random value: the same event again is a no-op, so two identical claims would

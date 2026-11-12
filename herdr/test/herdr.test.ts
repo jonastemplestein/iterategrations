@@ -126,6 +126,45 @@ async function started() {
   return { herdr, project, bridge, lent };
 }
 
+test("with a key of its own, news goes through the key's append and focus is not sent", async () => {
+  const herdr = pretendHerdr();
+  await herdr.listening;
+  const project = pretendProject();
+  const signed: { path: string; event: { type: string; payload?: Record<string, unknown> } }[] = [];
+  const bridge = createBridge({
+    logPath: "/integrations/herdr/test",
+    socket: herdr.path,
+    retryMs: 10,
+  });
+  cleanups.push(() => {
+    bridge.stop();
+    herdr.close();
+  });
+  await bridge.provide({
+    itx: project.itx,
+    append: async (path, event) => void signed.push({ path, event }),
+  });
+  await until(() => signed.length === 1, "the snapshot");
+  herdr.pushEvent({
+    event: "workspace_focused",
+    data: { type: "workspace_focused", workspace_id: "w1" },
+  });
+  herdr.pushEvent({
+    event: "pane.agent_status_changed",
+    data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
+  });
+  await until(() => signed.length === 2, "the status");
+  assert.deepEqual(
+    signed.map(({ path, event }) => [path, event.type, Object.keys(event).toSorted()]),
+    [
+      ["/integrations/herdr/test", "herdr/snapshot", ["payload", "type"]],
+      ["/integrations/herdr/test", "herdr/pane_agent_status_changed", ["payload", "type"]],
+    ],
+  );
+  // nothing goes through the key's itx: it lends and does nothing else
+  assert.equal(project.events.length, 0);
+});
+
 test("the real lend imports without connecting: a default export and a description", () => {
   assert.equal(typeof provideHerdr, "function");
   assert.match(description, /call\(method, params\)/);
@@ -214,6 +253,22 @@ test("a pane that appears ends the connection, and the next one subscribes to it
   assert.equal(herdr.live().length, 1);
   assert.ok(project.events.some((e) => e.type === "herdr/pane_created"));
   assert.equal(project.events.filter((e) => e.type === "herdr/snapshot").length, 2);
+});
+
+test("a tab that closes takes its panes with it: a fresh snapshot follows", async () => {
+  const { herdr, project } = await started();
+  await until(
+    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 1,
+    "the first snapshot",
+  );
+  // Herdr says `tab_closed`, and no `pane_closed` for the panes in it
+  herdr.setPanes([]);
+  herdr.pushEvent({ event: "tab_closed", data: { type: "tab_closed", tab_id: "w1:t1" } });
+  await until(
+    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 2,
+    "the snapshot after the tab closed",
+  );
+  assert.ok(project.events.some((e) => e.type === "herdr/tab_closed"));
 });
 
 test("a dropped connection is dialed again, with a fresh snapshot", async () => {

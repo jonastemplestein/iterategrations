@@ -1,0 +1,47 @@
+{
+  "name": "iterate-amazon",
+  "version": "0.0.0",
+  "description": "Amazon UK shopping through its website HTTP protocol, with a Zinc alternative",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "default": "./dist/web.js"
+    },
+    "./node-session": {
+      "types": "./dist/node-session.d.ts",
+      "default": "./dist/node-session.js"
+    },
+    "./provide": {
+      "types": "./dist/provide.d.ts",
+      "default": "./dist/provide.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp pack && vp test",
+    "setup-account": "vp pack && node dist/setup.js",
+    "bootstrap": "vp pack && node dist/bootstrap.js",
+    "smoke": "vp pack && node test/sandbox.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "cheerio": "1.1.2",
+    "tough-cookie": "6.0.0"
+  }
+}

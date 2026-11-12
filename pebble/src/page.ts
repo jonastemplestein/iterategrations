@@ -38,14 +38,16 @@ const COPY_SCRIPT = `document.addEventListener("click", async (event) => {
 const copyRow = (text: string): string =>
   `<div class="copy"><code>${esc(text)}</code><button type="button" class="quiet" data-copy="${esc(text)}">Copy</button></div>`;
 
-/** What the page shows: the card's title and sentence, the recipe, and the signing secret's path
- *  and whether it exists, as the install hook reads it. */
+/** What the page shows: the card's title and sentence, the recipe, the signing secret's path and
+ *  whether it exists, as the install hook reads it, and what to paste into a coding agent until it
+ *  does. */
 export type PageView = {
   title: string;
   description: string;
   recipe: string;
   secret: string;
   saved: boolean;
+  hint: string;
 };
 
 /** The members-only page at `/`: whether the ring is set up, the webhook URL to paste in the Pebble
@@ -56,7 +58,7 @@ export function servePage(request: Request, view: PageView): Response {
   const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
   const status = view.saved
     ? `<p class="ok">Set up. The project has the signing secret <code>${esc(view.secret)}</code>.</p>`
-    : `<p class="warn">Set up by your coding agent: see the recipe. The project has no signing secret <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(`Set up ${view.title} in my iterate project. Follow the recipe at ${view.recipe}`)}`;
+    : `<p class="warn">Set up by your coding agent: see the recipe. The project has no signing secret <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(view.hint)}`;
   const body = `<p>${esc(view.description)}</p>
     <section><h2>Status</h2>${status}</section>
     <section>

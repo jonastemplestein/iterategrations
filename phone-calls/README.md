@@ -11,9 +11,11 @@ a SIP phone from your computer.
 
 It is [WhatsApp calls](../whatsapp-calls) with a phone line in place of WhatsApp: `calls.ts` is a
 copy of that lend (the same calls, voice, notes and records, under `phone-calls/*`), and
-`jeeves-phone serve` speaks that bridge's protocol on stdin and stdout. Each call is a context of
-its own at `/agents/voice/phone-<the other person's digits>/<time>-<id>`, and the voice is on the
-line before the phone rings or the call is picked up.
+`jeeves-phone serve` speaks that bridge's protocol on stdin and stdout. Each call is a press on the
+person's own voice device, `phone-<the other person's digits>`, provisioned once and kept (for a
+person the lend answers, when it starts, so their first call does not wait for it): its agent at
+`/agents/voice/phone-<digits>` keeps every call with that person. The voice is on the line before
+the phone rings or the call is picked up.
 
 `jeeves-phone` is Go, on [sipgo](https://github.com/emiago/sipgo) and
 [diago](https://github.com/emiago/diago): it registers the number with `voiceless.aa.net.uk`
@@ -30,7 +32,8 @@ as any number.
 ## Run it
 
 You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a project with the
-voice app installed (`itx.voice.setupVoiceAgent`), and this repository.
+voice app installed on a build with `itx.voice.ensureVoiceDevice`, and this
+repository.
 
 ```sh
 pnpm install
@@ -118,4 +121,10 @@ pnpm test:go     # the codec, the playout queue, and the bridge against a SIP pe
 - **A recorded line says so.** With `PHONE_CALLS_RECORDING_NOTICE` set (for example "Please note
   that this call is recorded."), a placed call to a number the lend does not answer opens with it,
   and the call's agent is told. Household numbers (`PHONE_CALLS_ALLOWED`) hear no notice.
+- **The agent is kept ready for the whole call.** The voice hands the person's words over at once,
+  and the first hand-over can come a minute or two after the press. From the moment the voice is on
+  the line, before the phone rings, one `waitForEvent` stays open on the agent, which holds its
+  context awake. The agent is asked for a warm-up then, at the pick-up, and whenever 50 s pass with
+  no answer from its model, which keeps its socket open. A failure here never touches the call:
+  a hand-over only takes a second or two longer.
 - DTMF (keys pressed) arrives and is logged, nothing more.

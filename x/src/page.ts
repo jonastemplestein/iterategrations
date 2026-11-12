@@ -3,11 +3,9 @@ import {
   APP_PIN,
   APP_SECRET,
   CONNECTION,
-  REDIRECT_URI,
   REMOVED,
   attemptOf,
   connectAccount,
-  dropAttempt,
   forget,
   hasAppSecret,
   listAccounts,
@@ -73,7 +71,7 @@ const post = (action: string, fields: Record<string, string>, label: string, qui
 
 /** No other site may show these pages in a frame: a framed form posts from this origin, so the
  *  member gate passes (clickjacking). `default-src` does not cover `frame-ancestors`. Every answer
- *  carries both, the page's and the callback's alike. */
+ *  carries both, the page's and the landing's alike. */
 const NO_FRAMES = {
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
@@ -108,37 +106,41 @@ const FIELDS = [
   { name: "clientSecret", label: "Client secret" },
 ];
 
-/** The link to the Dash's page that collects the client into `/secrets/own-x-app`, on one form. It
- *  only builds a URL, so the page asks for a fresh one each time it renders. */
-const collectLink = (itx: XItx): Promise<string> =>
+/** The link to the Dash's page that collects the client into `/secrets/own-x-app`, on one form,
+ *  which sends the person back to this page once it is saved. It only builds a URL, so the page asks
+ *  for a fresh one each time it renders. */
+const collectLink = (itx: XItx, here: string): Promise<string> =>
   itx.secrets
     .collectFromUser({
       path: APP_SECRET,
       egress: { urls: APP_PIN },
       description: COLLECT_DESCRIPTION,
       fields: FIELDS,
+      redirectUrl: `${here}/`,
     })
     .then((link) => link.url);
 
-async function render(itx: XItx, settings: Settings, here: string, flash: string): Promise<string> {
+async function render(
+  itx: XItx,
+  settings: Settings,
+  here: string,
+  callback: string,
+  flash: string,
+): Promise<string> {
   const app = await readApp(itx);
   // a secret saved without the public client ID: by hand, or before the form asked for it
   const incomplete = !app && (await hasAppSecret(itx));
-  const link = await collectLink(itx).catch((error: unknown) => ({ failed: messageOf(error) }));
+  const link = await collectLink(itx, here).catch((error: unknown) => ({
+    failed: messageOf(error),
+  }));
   const accounts = await listAccounts(itx);
-  const callback = `${here}/oauth2/callback`;
-  const redirectUri = await itx.kv.get(REDIRECT_URI);
-  const sent =
-    redirectUri && redirectUri !== callback
-      ? `<p class="warn">With the last Connect, the platform sent X this one, the project's address under iterate's ingress: a hostname claimed on the Dash never replaces it. Add it too:</p>${copyRow(redirectUri)}`
-      : "";
   const step1 = `<section>
     <h2>1. Create the OAuth client</h2>
     <p>Open <a href="https://console.x.com">console.x.com</a>, X's developer console, and the app the project should use, or create one. In the app's <b>Settings</b>, press <b>Set up</b> (or <b>Edit</b>) at <b>User authentication settings</b>, and fill in:</p>
     <ul>
       <li><b>App permissions:</b> what the project needs: <b>Read</b>, or <b>Read and write</b> to post.</li>
       <li><b>Type of App:</b> Web App, Automated App or Bot. It is a confidential client, which has a Client Secret.</li>
-      <li><b>Callback URI / Redirect URL:</b> this one, exactly:${copyRow(callback)}${sent}</li>
+      <li><b>Callback URI / Redirect URL:</b> this one, exactly:${copyRow(callback)}</li>
       <li><b>Website URL:</b> this page:${copyRow(`${here}/`)}</li>
     </ul>
     <p>Press <b>Save</b>. Then, under the app's <b>Keys and tokens</b>, find <b>OAuth 2.0 Client ID and Client Secret</b>: keep both for step 2. X shows the Client Secret once; if it is lost, regenerate it there.</p>
@@ -196,7 +198,7 @@ export async function servePage(
   const path = url.pathname.replace(/^\//, "");
 
   if (request.method === "GET" && path === "") {
-    // the URLs X is given keep the base path a paths ingress strips
+    // the page's own address keeps the base path a paths ingress strips
     const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
     const error = url.searchParams.get("error");
     const connected = url.searchParams.get("connected");
@@ -205,7 +207,10 @@ export async function servePage(
       : connected
         ? `<p class="ok">Connected ${esc(connected)}. The project's code and agents can now call X's API as this account.</p>`
         : "";
-    const body = await render(itx, settings, here, flash);
+    // iterate's one callback: what X is told to come back to, on the platform's origin, where
+    // Connect's start link leads first
+    const callback = await itx.secrets.oauthCallbackUrl();
+    const body = await render(itx, settings, here, callback, flash);
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
     return new Response(
       `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>X</title><style>${STYLE}</style></head><body><h1>X</h1>${body}<script nonce="${nonce}">${COPY_SCRIPT}</script></body></html>`,
@@ -214,8 +219,9 @@ export async function servePage(
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
           "x-frame-options": NO_FRAMES["x-frame-options"],
-          // Connect posts here and is sent on to X, so a form may lead there too
-          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' https://x.com; base-uri 'none'; frame-ancestors 'none'`,
+          // Connect posts here and is sent on to iterate's start link, then to X, so a form
+          // may lead to both
+          "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; form-action 'self' ${new URL(callback).origin} https://x.com; base-uri 'none'; frame-ancestors 'none'`,
         },
       },
     );
@@ -260,43 +266,32 @@ export async function servePage(
   }
 }
 
-/** X's return, `/oauth2/callback`, members only: the person comes back from the authorization page
- *  with `code` and `state`, or with `error` when they said no
- *  (https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code). Anyone
- *  can open this URL with any query, so a state this page kept, under an hour old, is required
- *  before anything is written. The platform checks the state itself and exchanges the code once:
- *  the same callback again answers the same. The card goes before the row: a row stands under its
- *  card alone. */
-export async function serveCallback(
+/** Where iterate's callback sends the person once it stored an account's tokens, `/connected?id=`,
+ *  members only. Anyone can open this URL with any query, so an attempt this page started for that
+ *  connection, under an hour old, is required before anything is written; what X granted is
+ *  the platform's answer (`oauthResult`), never the query's. The card goes before the row: a row
+ *  stands under its card alone. */
+export async function serveLanding(
   request: Request,
   itx: XItx,
   settings: Settings,
 ): Promise<Response> {
   if (request.method !== "GET")
     return new Response("GET only\n", { status: 405, headers: NO_FRAMES });
-  const query = new URL(request.url).searchParams;
-  const state = query.get("state") ?? "";
-  const code = query.get("code") ?? "";
+  const connection = new URL(request.url).searchParams.get("id") ?? "";
   const back = (flash: string): Response =>
-    new Response(null, { status: 303, headers: { location: `../${flash}`, ...NO_FRAMES } });
-  const attempt = await attemptOf(itx, state);
+    new Response(null, { status: 303, headers: { location: `./${flash}`, ...NO_FRAMES } });
+  const attempt = await attemptOf(itx, connection);
   if (!attempt)
     return back(
       flashOf(
         "error",
-        "X came back from a sign-in this page did not start, or that is over an hour old. Press Connect again.",
+        "iterate came back from a sign-in this page did not start, or that is over an hour old. Press Connect again.",
       ),
     );
   try {
-    if (!code) {
-      await dropAttempt(itx, state, attempt);
-      return back(
-        flashOf("error", `X answered ${query.get("error") || "with no code"}: nothing changed.`),
-      );
-    }
-    const outcome = await connectAccount(itx, state, code, attempt);
-    for (const connection of outcome.replaced)
-      await registerRemoval(itx, settings.slug, connection);
+    const outcome = await connectAccount(itx, attempt);
+    for (const replaced of outcome.replaced) await registerRemoval(itx, settings.slug, replaced);
     await registerCard(itx, settings.slug);
     await registerRow(itx, settings.slug, attempt.connection);
     return back(flashOf("connected", outcome.connected));
