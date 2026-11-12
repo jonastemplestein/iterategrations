@@ -131,6 +131,107 @@ test("a message WhatsApp delivers again with a different body stays one event, a
   );
 });
 
+test("after a restart the account's own stream is appended first, and the chats' streams after it, a few at once", async () => {
+  const OWN = "/integrations/whatsapp";
+  const project = heldProject();
+  const ev = new EventEmitter();
+  const lend = lendOver({
+    logPath: OWN,
+    connect: async (onSocket) => onSocket({ ev } as unknown as Parameters<typeof onSocket>[0]),
+    downloadMedia: async () => new Uint8Array(),
+  });
+  await lend({ itx: project.itx });
+  const from = (chat: number, id: string) => ({
+    key: { remoteJid: `4477009000${chat}@s.whatsapp.net`, fromMe: false, id },
+    message: { conversation: id },
+  });
+  // what WhatsApp sends after a restart: messages of twenty chats at once
+  const chats = Array.from({ length: 20 }, (_, index) => 10 + index);
+  ev.emit("messages.upsert", {
+    type: "append",
+    messages: chats.map((chat) => from(chat, `old-${chat}`)),
+  });
+  await project.asked();
+  // the account's stream alone, with all twenty: no chat's stream is asked for before it answers
+  assert.deepEqual(project.open(), [[OWN, 20]]);
+
+  project.answer();
+  await project.asked();
+  // then the chats' streams: eight at once, no more
+  assert.deepEqual(
+    project.open(),
+    chats.slice(0, 8).map((chat) => [`${OWN}/chats/4477009000${chat}@s.whatsapp.net`, 1]),
+  );
+
+  // a new message while those are open: it goes on the account's stream before the next chats
+  ev.emit("messages.upsert", { type: "notify", messages: [from(10, "new")] });
+  await project.asked();
+  assert.equal(project.open().length, 8);
+  project.answer();
+  await project.asked();
+  assert.deepEqual(project.open(), [[OWN, 1]]);
+
+  while (project.open().length > 0) {
+    assert.ok(project.open().length <= 8);
+    project.answer();
+    await project.asked();
+  }
+  // all of it landed, each stream in the order it came
+  const ids = (path: string) =>
+    project.streams.get(path)!.map((event) => (event.payload.data as any).messages[0].key.id);
+  assert.deepEqual(ids(OWN), [...chats.map((chat) => `old-${chat}`), "new"]);
+  assert.deepEqual(ids(`${OWN}/chats/447700900010@s.whatsapp.net`), ["old-10", "new"]);
+  for (const chat of chats.slice(1))
+    assert.deepEqual(ids(`${OWN}/chats/4477009000${chat}@s.whatsapp.net`), [`old-${chat}`]);
+  // and never two appends open on one stream
+  assert.equal(project.mostOpenOnOneStream, 1);
+});
+
+test("what failed over a connection that a newer one replaced meanwhile goes over the newer one, with no new event", async () => {
+  const OWN = "/integrations/whatsapp";
+  const old = heldProject();
+  const newer = heldProject();
+  const ev = new EventEmitter();
+  const lend = lendOver({
+    logPath: OWN,
+    connect: async (onSocket) => onSocket({ ev } as unknown as Parameters<typeof onSocket>[0]),
+    downloadMedia: async () => new Uint8Array(),
+  });
+  const errors: string[] = [];
+  const consoleError = console.error;
+  console.error = (line: string) => void errors.push(line);
+  try {
+    await lend({ itx: old.itx });
+    ev.emit("messages.upsert", {
+      type: "notify",
+      messages: [
+        {
+          key: { remoteJid: "447700900003@s.whatsapp.net", fromMe: false, id: "A" },
+          message: { conversation: "a photo" },
+        },
+      ],
+    });
+    await old.asked();
+    assert.deepEqual(old.open(), [[OWN, 1]]);
+    // the next connection comes while the first append is still open, and then that append fails
+    await lend({ itx: newer.itx });
+    old.answer(new Error("RPC session was shut down by disposing the main stub"));
+    await newer.asked();
+    assert.deepEqual(newer.open(), [[OWN, 1]]);
+    newer.answer();
+    await newer.asked();
+    newer.answer();
+    await newer.asked();
+  } finally {
+    console.error = consoleError;
+  }
+  assert.equal(errors.length, 1);
+  assert.match(errors[0]!, /2 event\(s\) wait for the project's next connection/);
+  assert.equal(old.streams.size, 0);
+  assert.equal(newer.streams.get(OWN)!.length, 1);
+  assert.equal(newer.streams.get(`${OWN}/chats/447700900003@s.whatsapp.net`)!.length, 1);
+});
+
 test("every other event of the socket lands as whatsapp/<its Baileys name>, and user() and the LID mapping are lent", async () => {
   const project = pretendProject();
   const ev = new EventEmitter();
@@ -403,6 +504,46 @@ test("an event's part for each chat keeps the event's own shape, and the account
   ] as const)
     assert.deepEqual([...chatParts(name, data)], []);
 });
+
+/** A project whose `cd(path).append` stays open until the test answers it: `open()` is the appends
+ *  that wait, in the order they were asked, each as its stream and how many events it carries;
+ *  `answer()` lets all of them land (or fail with `error`); `asked()` waits for the lend's next
+ *  step. */
+function heldProject() {
+  const waiting: { path: string; events: WhatsAppEvent[]; settle: (error?: Error) => void }[] = [];
+  const project = {
+    streams: new Map<string, WhatsAppEvent[]>(),
+    mostOpenOnOneStream: 0,
+    open: () => waiting.map(({ path, events }) => [path, events.length]),
+    answer: (error?: Error) => {
+      for (const call of waiting.splice(0)) call.settle(error);
+    },
+    asked: async () => {
+      for (let round = 0; round < 5; round++) await new Promise((resolve) => setImmediate(resolve));
+    },
+    itx: {
+      cd: (path: string) => ({
+        append: (...events: WhatsAppEvent[]) =>
+          new Promise<void>((resolve, reject) => {
+            waiting.push({
+              path,
+              events,
+              settle: (error) => {
+                if (error) return reject(error);
+                project.streams.set(path, [...(project.streams.get(path) ?? []), ...events]);
+                resolve();
+              },
+            });
+            project.mostOpenOnOneStream = Math.max(
+              project.mostOpenOnOneStream,
+              waiting.filter((call) => call.path === path).length,
+            );
+          }),
+      }),
+    } as Itx,
+  };
+  return project;
+}
 
 /** A project whose `cd(path).append` keeps the events, or fails while `failing`. As the platform
  *  does, a key it holds dedupes the same body and refuses a different one, the whole call with it,
