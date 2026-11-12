@@ -6,7 +6,11 @@
 //
 // The Herdr bridge (../src/herdr.ts) lends a computer's Herdr to the mind and lands its events on
 // `/integrations/herdr/<computer>`. This kind reads those and keeps one agent for each pane that
-// runs a coding agent, at `/agents/herdr/<computer>/<pane>`:
+// runs a coding agent, at `/agents/people/<person>/herdr/<computer>/<pane>`. `<person>` is the member
+// whose sign-in the bridge runs on (each event says who wrote it): the start of their address,
+// before the `@`. So each member's agents are in a folder of their own. A bridge that runs on a
+// key has no person, and its agents are at `/agents/herdr/<computer>/<pane>`, as every agent of
+// this kind was before:
 //
 //   `herdr/snapshot` (every connection of the bridge: what is true now)
 //   → each agent pane not listed as it now is gets `herdr/agent-seen` on its own context;
@@ -29,7 +33,16 @@ type Itx = {
   cd(path: string): { append(...events: unknown[]): Promise<unknown> };
   agents: { list(): Promise<Record<string, unknown>[]> };
 };
-type Event = { type: string; path: string; offset: number; createdAt?: string; payload?: unknown };
+/** Who wrote an event, as the mind stamps it: the member, or the member that code wrote it for. */
+type Writer = { principal?: { email?: string } };
+type Event = {
+  type: string;
+  path: string;
+  offset: number;
+  createdAt?: string;
+  payload?: unknown;
+  source?: Writer & { onBehalfOf?: Writer };
+};
 
 const LISTING_UPDATED = "events.iterate.com/agent/listing-updated";
 const SEEN = "herdr/agent-seen";
@@ -74,10 +87,30 @@ export const CATALOG_ROWS = [
   },
 ];
 
-/** The agent of a pane: `/agents/herdr/<computer>/<pane>`. A pane id (`w3:p1`) is not a path part
- *  as it is. */
-export const agentPath = (computer: string, paneId: string) =>
-  `/agents/herdr/${computer}/${paneId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 64)}`;
+/** WHERE THE PEOPLE'S FOLDERS ARE: each member's agents are under `<PEOPLE>/<person>`. A level of
+ *  its own, because `/agents/<name>` with one part is a long-lived agent of that name
+ *  (`/agents/support`): a member named like one would have their agents under that agent, and a
+ *  list hides what is under an agent. */
+const PEOPLE = "/agents/people";
+
+/** The folder name of the member who wrote `event`: the start of their sign-in address, in lower
+ *  case, with `-` for what is no letter or digit. `null` when no member wrote it (a bridge on a
+ *  key, the mind's own code). */
+export function personOf(event: Pick<Event, "source">): string | null {
+  const email = event.source?.principal?.email || event.source?.onBehalfOf?.principal?.email || "";
+  const name = email
+    .split("@")[0]!
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return name || null;
+}
+
+/** The agent of a pane: `<PEOPLE>/<person>/herdr/<computer>/<pane>`, or with no person
+ *  `/agents/herdr/<computer>/<pane>`. A pane id (`w3:p1`) is not a path part as it is. */
+export const agentPath = (computer: string, paneId: string, person?: string | null) =>
+  `${person ? `${PEOPLE}/${person}` : "/agents"}/herdr/${computer}/${paneId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 64)}`;
 
 export default {
   kind: "herdr",
@@ -151,8 +184,10 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
   if (!computer || !String(event.type).startsWith("herdr/")) return;
   const data = record(record(event.payload).data);
   const key = `herdr-agent:${event.path}:${event.offset}`;
+  const person = personOf(event);
+  const pathOf = (paneId: string) => agentPath(computer, paneId, person);
   const see = (pane: Record<string, unknown>, more: Record<string, string>) =>
-    itx.cd(agentPath(computer, str(pane.pane_id))).append(...setupEvents(), {
+    itx.cd(pathOf(str(pane.pane_id))).append(...setupEvents(), {
       type: SEEN,
       idempotencyKey: `${key}:${str(pane.pane_id)}:seen`,
       payload: {
@@ -168,10 +203,15 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
       idempotencyKey: `${key}:${path}:gone`,
       payload: { computer },
     });
-  /** The agents the catalog lists for this computer that have not ended. */
+  /** The agents the catalog lists for this computer that have not ended, in a person's folder or
+   *  not: an agent listed before its person had a folder is this computer's too, and ends when
+   *  its pane is no longer there under that path. */
   const listedHere = async () =>
     (await itx.agents.list()).filter(
-      (row) => str(row.path).startsWith(`/agents/herdr/${computer}/`) && row.status !== "ended",
+      (row) =>
+        str(row.path).startsWith("/agents/") &&
+        str(row.path).includes(`/herdr/${computer}/`) &&
+        row.status !== "ended",
     );
 
   if (event.type === "herdr/snapshot") {
@@ -181,7 +221,7 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
     const listed = await listedHere();
     for (const pane of panes) {
       const now = describe(computer, pane);
-      const row = listed.find((each) => each.path === agentPath(computer, str(pane.pane_id)));
+      const row = listed.find((each) => each.path === pathOf(str(pane.pane_id)));
       // a snapshot comes at every connection: an agent listed as it now is gets no new event
       const same =
         row &&
@@ -190,7 +230,7 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
         row.activity === now.activity;
       if (!same) await see(pane, now);
     }
-    const here = new Set(panes.map((pane) => agentPath(computer, str(pane.pane_id))));
+    const here = new Set(panes.map((pane) => pathOf(str(pane.pane_id))));
     for (const row of listed) if (!here.has(str(row.path))) await leave(str(row.path));
     return;
   }
@@ -201,8 +241,9 @@ async function processEvent({ event, itx }: { event: Event; itx: Itx }) {
     event.type === "herdr/pane_exited" ||
     (event.type === "herdr/pane_agent_detected" && (!str(data.agent) || data.released === true));
   if (gone) {
-    const path = agentPath(computer, paneId);
-    if ((await listedHere()).some((row) => row.path === path)) await leave(path);
+    // the pane's agent wherever it is listed: in this person's folder, or where it was before
+    const paths = new Set([pathOf(paneId), agentPath(computer, paneId)]);
+    for (const row of await listedHere()) if (paths.has(str(row.path))) await leave(str(row.path));
     return;
   }
   const said =
