@@ -48,9 +48,9 @@ control of the computer's terminals. Share it only with a mind you trust.
 [`agent-kinds/herdr.ts`](agent-kinds/herdr.ts) is an agent kind: copy it to the mind's config repo as
 `agent-kinds/herdr.ts` and name it in `worker.ts`'s `agentKinds`. It reads the events above and
 keeps one agent for each pane that runs a coding agent (Claude Code, Codex, opencode, …), at
-`/agents/<person>/herdr/<computer>/<pane>`. `<person>` is the member whose sign-in the bridge runs
-on, by the start of their address (`sam@example.com` is `sam`), so each member's agents are in a
-folder of their own. A bridge on a key has no person: its agents are at
+`/agents/people/<person>/herdr/<computer>/<pane>`. `<person>` is the member whose sign-in the
+bridge runs on, by the start of their address (`sam@example.com` is `sam`), so each member's agents
+are in a folder of their own, under `/agents/people`. A bridge on a key has no person: its agents are at
 `/agents/herdr/<computer>/<pane>`. `<computer>` is the last part of the stream's path
 (`HERDR_LOG_PATH`), so give each computer a stream of its own.
 

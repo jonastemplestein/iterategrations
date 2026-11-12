@@ -6,7 +6,7 @@
 //
 // The Herdr bridge (../src/herdr.ts) lends a computer's Herdr to the mind and lands its events on
 // `/integrations/herdr/<computer>`. This kind reads those and keeps one agent for each pane that
-// runs a coding agent, at `/agents/<person>/herdr/<computer>/<pane>`. `<person>` is the member
+// runs a coding agent, at `/agents/people/<person>/herdr/<computer>/<pane>`. `<person>` is the member
 // whose sign-in the bridge runs on (each event says who wrote it): the start of their address,
 // before the `@`. So each member's agents are in a folder of their own. A bridge that runs on a
 // key has no person, and its agents are at `/agents/herdr/<computer>/<pane>`, as every agent of
@@ -87,10 +87,11 @@ export const CATALOG_ROWS = [
   },
 ];
 
-/** WHERE THE PEOPLE'S FOLDERS ARE: each member's agents are under `<PEOPLE>/<person>`. `/agents`
- *  puts a person's folder beside the kinds' folders; `/agents/by` gives the people a level of
- *  their own. */
-const PEOPLE = "/agents";
+/** WHERE THE PEOPLE'S FOLDERS ARE: each member's agents are under `<PEOPLE>/<person>`. A level of
+ *  its own, because `/agents/<name>` with one part is a long-lived agent of that name
+ *  (`/agents/support`): a member named like one would have their agents under that agent, and a
+ *  list hides what is under an agent. */
+const PEOPLE = "/agents/people";
 
 /** The folder name of the member who wrote `event`: the start of their sign-in address, in lower
  *  case, with `-` for what is no letter or digit. `null` when no member wrote it (a bridge on a

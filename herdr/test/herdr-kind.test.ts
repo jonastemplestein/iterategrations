@@ -130,7 +130,7 @@ test("a bridge on a member's sign-in lists its agents in that member's folder, a
     itx: mind.itx,
   });
   const mine = agentPath("studio", "w1:p1", "ada-lovelace");
-  assert.equal(mine, "/agents/ada-lovelace/herdr/studio/w1-p1");
+  assert.equal(mine, "/agents/people/ada-lovelace/herdr/studio/w1-p1");
   assert.equal(mind.seen(mine)!.title, "Fix the build");
   // the listing before is ended, and its context stays where it was
   assert.equal(mind.rows.get(before)!.status, "ended");
