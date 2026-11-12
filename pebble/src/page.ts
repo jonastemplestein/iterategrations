@@ -57,8 +57,8 @@ export function servePage(request: Request, view: PageView): Response {
   // the URL the Pebble app is given keeps the base path a paths ingress strips
   const here = `${url.origin}${request.headers.get("x-iterate-base-path") || ""}`;
   const status = view.saved
-    ? `<p class="ok">Set up. The project has the signing secret <code>${esc(view.secret)}</code>.</p>`
-    : `<p class="warn">Set up by your coding agent: see the recipe. The project has no signing secret <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(view.hint)}`;
+    ? `<p class="ok">Set up. The mind has the signing secret <code>${esc(view.secret)}</code>.</p>`
+    : `<p class="warn">Set up by your coding agent: see the recipe. The mind has no signing secret <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${copyRow(view.hint)}`;
   const body = `<p>${esc(view.description)}</p>
     <section><h2>Status</h2>${status}</section>
     <section>

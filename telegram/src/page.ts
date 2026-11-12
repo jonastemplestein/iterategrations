@@ -155,7 +155,7 @@ const connectForm = (first: boolean) => `<section>
     <input name="token" type="password" placeholder="123456:ABC-DEF…" autocomplete="off" required />
     <button>Connect</button>
   </form>
-  <p class="muted">The token goes into this project's secrets and is only ever sent to api.telegram.org. Use an account that belongs to the company to make the bot: that account owns it.</p>
+  <p class="muted">The token goes into this mind's secrets and is only ever sent to api.telegram.org. Use an account that belongs to the company to make the bot: that account owns it.</p>
 </section>`;
 
 /** A form's answer: back to the page, which no other site may frame either. */

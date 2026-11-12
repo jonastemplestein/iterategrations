@@ -1,6 +1,6 @@
 import { servePage, type PageNote } from "./page.js";
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type VoiceNotesItx = {
   secrets: {
     list(): Promise<{ path: string }[]>;
@@ -47,10 +47,10 @@ export type IntegrationHost = {
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -66,8 +66,8 @@ export type IphoneVoiceNotesOptions = {
 };
 
 const TOKEN_SECRET = "/secrets/iphone-voice-notes";
-/** The header the shortcut sends the token in. Not `Authorization`: a project's host answers
- *  bearer tokens itself, before the project's code runs. */
+/** The header the shortcut sends the token in. Not `Authorization`: a mind's host answers
+ *  bearer tokens itself, before the mind's code runs. */
 const TOKEN_HEADER = "x-voice-note-token";
 /** `true` marks a note as a test: stored and transcribed like any other, and flagged so a consumer
  *  can skip it. */
@@ -82,7 +82,7 @@ const TRANSCRIBED = "iphone-voice-notes/recording-transcribed";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const TITLE = "iPhone voice notes";
 const DESCRIPTION =
@@ -251,12 +251,12 @@ async function transcribe(
   });
 }
 
-/** A project's iPhone voice-note receiver, as an integration its worker hosts:
+/** A mind's iPhone voice-note receiver, as an integration its worker hosts:
  *  `const integrations: Integration[] = [iphoneVoiceNotes()];`
  *
  *  On its routing slug it answers the shortcut's uploads at `/webhook` and, for members only, its
  *  page at `/`; any other path is a 404. Its hook transcribes each recording, and its install hook
- *  (`project/worker-updated`) lists it on the Dash's Integrations page. */
+ *  (`mind/worker-updated`) lists it on the Dash's Integrations page. */
 export function iphoneVoiceNotes(options: IphoneVoiceNotesOptions = {}): Integration {
   const slug = options.slug ?? "iphone-voice-notes";
   return {

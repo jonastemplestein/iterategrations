@@ -1,8 +1,8 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// Runs against dist, the package as shipped. `fakeMind` is a mind: secrets (a catalog that
 // answers the public fields a set named and never a secret one, a delete of a missing secret
 // refused as SECRET_NOT_SET, and any delete ending the OAuth attempt in flight, as the platform's
 // do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the platform runs
-// them for a client of the project's own (a signed state, the redirect composed under the ingress,
+// them for a client of the mind's own (a signed state, the redirect composed under the ingress,
 // the client secret's placeholder refused unless its secret is pinned to the token endpoint, the
 // person named at `account`'s endpoint (a pretend Cloudflare's /user, called with the new token)
 // and another person refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and the same
@@ -63,7 +63,7 @@ const pendingKey = (connection: string) => `own-cloudflare/pending/${connection}
 const PLATFORM = "https://os.example";
 const CALLBACK = `${PLATFORM}/.secrets/oauth/callback`;
 
-function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
+function fakeMind(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
@@ -236,7 +236,7 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
     }
     return page(attempt.options.next.path);
   };
-  /** The project's egress, a loaded worker's global `fetch`: it swaps a connection's placeholder
+  /** The mind's egress, a loaded worker's global `fetch`: it swaps a connection's placeholder
    *  for its token and answers Cloudflare's /accounts with the one account the person picked;
    *  every call is recorded, and any other is refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
@@ -304,11 +304,11 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   };
   /** The connection of the last attempt begun. */
   const lastConnection = () => begun.at(-1)!.path.slice("/secrets/own-cloudflare-".length);
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) => {
     globalThis.fetch = egress as typeof fetch;
     return integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   };
@@ -399,7 +399,7 @@ const location = (res: Response) => decodeURIComponent(res.headers.get("location
 const card = (status: object, label: string, routingSlug = "cloudflare") => ({
   title: "Cloudflare",
   description:
-    "The project's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent (its Workers, D1, KV, R2 and the rest), with tokens the platform refreshes.",
+    "The mind's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent (its Workers, D1, KV, R2 and the rest), with tokens the platform refreshes.",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });
@@ -419,47 +419,47 @@ const NO_CLIENT = card(
 );
 const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
 
-/** A project with Ada connected through the page, and her connection. */
+/** A mind with Ada connected through the page, and her connection. */
 async function connected() {
-  const project = fakeProject();
-  await project.setUp();
-  await project.connect(ADA);
-  return { project, connection: project.lastConnection() };
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.connect(ADA);
+  return { mind, connection: mind.lastConnection() };
 }
 
 // ------------------------------------------------------------- the integration
 
 test("every name the package keeps is its own: no secret or kv key the platform's shared Cloudflare client could own", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  await project.connect(ADA, connection);
-  await project.connect(ADA); // the same person again: the older connection goes
-  project.faults.registry = 1; // leaves a tombstone behind, for a while
-  await project.page("/disconnect", { form: { id: project.lastConnection() } });
-  await project.publish(3);
-  assert.equal(project.written.secrets.size, 3);
-  for (const path of project.written.secrets)
+  const { mind, connection } = await connected();
+  await mind.connect(GRACE);
+  await mind.connect(ADA, connection);
+  await mind.connect(ADA); // the same person again: the older connection goes
+  mind.faults.registry = 1; // leaves a tombstone behind, for a while
+  await mind.page("/disconnect", { form: { id: mind.lastConnection() } });
+  await mind.publish(3);
+  assert.equal(mind.written.secrets.size, 3);
+  for (const path of mind.written.secrets)
     assert.match(path, /^\/secrets\/own-cloudflare-[0-9a-f]{8}$/);
-  assert.ok(project.written.kv.size >= 6, [...project.written.kv].join(" "));
-  for (const key of project.written.kv) assert.match(key, /^own-cloudflare\//);
-  for (const { path } of project.appended) assert.equal(path, "/integrations");
+  assert.ok(mind.written.kv.size >= 6, [...mind.written.kv].join(" "));
+  for (const key of mind.written.kv) assert.match(key, /^own-cloudflare\//);
+  for (const { path } of mind.appended) assert.equal(path, "/integrations");
 });
 
 test("it answers its own routing slug, cloudflare unless another is given; anything but its page and its landing is a 404", async () => {
   assert.equal(cloudflare().routingSlug, "cloudflare");
   assert.equal(cloudflare({ slug: "cf" }).routingSlug, "cf");
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/nope", "/oauth2/callback", "/connectedx", "/webhook", "/oauth2"])
-    assert.equal((await project.page(path)).status, 404, path);
-  assert.equal((await project.page("/nope", { form: {} })).status, 404);
-  assert.equal((await project.page("/connected", { form: {} })).status, 405);
-  // a member's stray path opens the project's scope and releases it, and writes nothing
-  assert.equal(project.scopes.opened, project.scopes.disposed);
-  assert.deepEqual(project.kv, {});
+    assert.equal((await mind.page(path)).status, 404, path);
+  assert.equal((await mind.page("/nope", { form: {} })).status, 404);
+  assert.equal((await mind.page("/connected", { form: {} })).status, 405);
+  // a member's stray path opens the mind's scope and releases it, and writes nothing
+  assert.equal(mind.scopes.opened, mind.scopes.disposed);
+  assert.deepEqual(mind.kv, {});
 });
 
 test("the page and the landing are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
@@ -467,20 +467,20 @@ test("the page and the landing are for members: whatever auth.require answers is
     ["/disconnect", { id: "0a1b2c3d" }],
     ["/connected?id=0a1b2c3d", undefined],
   ] as const)
-    assert.equal((await project.page(path, { form }, refused)).status, 401, path);
-  assert.deepEqual(project.kv, {});
-  assert.deepEqual(project.secrets, {});
-  assert.deepEqual(project.begun, []);
-  assert.deepEqual(project.calls, []);
-  assert.equal(project.scopes.opened, 0);
+    assert.equal((await mind.page(path, { form }, refused)).status, 401, path);
+  assert.deepEqual(mind.kv, {});
+  assert.deepEqual(mind.secrets, {});
+  assert.deepEqual(mind.begun, []);
+  assert.deepEqual(mind.calls, []);
+  assert.equal(mind.scopes.opened, 0);
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page shows the redirect URI to register at Cloudflare, iterate's own callback whatever address serves the page, and the request that registers a client with it; a form may lead only here, to iterate's start link and to Cloudflare", async () => {
-  const project = fakeProject();
-  const res = await project.page("/", {
-    headers: { "x-iterate-base-path": "/projects/iterate/cloudflare" },
+  const mind = fakeMind();
+  const res = await mind.page("/", {
+    headers: { "x-iterate-base-path": "/minds/iterate/cloudflare" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
@@ -500,13 +500,13 @@ test("the page shows the redirect URI to register at Cloudflare, iterate's own c
 });
 
 test("the page links to the Dash's one form for the client, its ID public beside its secret, which never passes through this code; the form checks the ID's shape as the browser does", async () => {
-  const project = fakeProject();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  const html = await (await mind.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
   assert.match(html, />Save the client</);
-  assert.match(project.collected[0]!.description, /32 hex/);
+  assert.match(mind.collected[0]!.description, /32 hex/);
   assert.deepEqual(
-    project.collected.map((input) => ({ ...input, description: undefined })),
+    mind.collected.map((input) => ({ ...input, description: undefined })),
     [
       {
         path: "/secrets/own-cloudflare-app",
@@ -530,36 +530,33 @@ test("the page links to the Dash's one form for the client, its ID public beside
   assert.match(CLIENT_ID, shape);
   for (const value of ["a-made-up-secret", "0123456789ABCDEF0123456789abcdef", ""])
     assert.doesNotMatch(value, shape);
-  await project.setUp();
-  assert.match(await (await project.page("/")).text(), />Replace it</);
+  await mind.setUp();
+  assert.match(await (await mind.page("/")).text(), />Replace it</);
 });
 
 test("a secret without the public field is not set up: the page asks to save the client again, and Connect is refused", async () => {
-  const project = fakeProject();
-  project.secrets["/secrets/own-cloudflare-app"] = structuredClone(SECRET_ALONE);
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  mind.secrets["/secrets/own-cloudflare-app"] = structuredClone(SECRET_ALONE);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /has no public client ID\. Save the client again/);
   assert.doesNotMatch(html, /action="connect"/);
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client first/,
-  );
-  assert.deepEqual(project.begun, []);
+  assert.match(location(await mind.page("/connect", { form: {} })), /error=Save the client first/);
+  assert.deepEqual(mind.begun, []);
 });
 
 // ------------------------------------------------------------------ connect
 
 test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes, the client secret's placeholder in the token request's body, and /user naming the person; it sends the person to iterate's start link, and keeps the attempt by its connection", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const res = await project.page("/connect", { form: {} });
+  const mind = fakeMind();
+  await mind.setUp();
+  const res = await mind.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
   assert.equal(to.origin, PLATFORM);
   assert.match(to.pathname, /^\/\.secrets\/oauth\/start\//);
-  const connection = project.lastConnection();
+  const connection = mind.lastConnection();
   assert.match(connection, /^[0-9a-f]{8}$/);
-  assert.deepEqual(project.begun, [
+  assert.deepEqual(mind.begun, [
     {
       path: `/secrets/own-cloudflare-${connection}`,
       options: {
@@ -575,53 +572,53 @@ test("Connect begins OAuth with Cloudflare's endpoints, the callback, the scopes
       },
     },
   ]);
-  const attempt = JSON.parse(project.kv[pendingKey(connection)]!);
+  const attempt = JSON.parse(mind.kv[pendingKey(connection)]!);
   assert.equal(attempt.connection, connection);
   assert.equal(
     attempt.nonce,
-    project.platform.attempts[`/secrets/own-cloudflare-${connection}`]!.nonce,
+    mind.platform.attempts[`/secrets/own-cloudflare-${connection}`]!.nonce,
   );
   assert.ok(Math.abs(Date.now() - attempt.at) < 5000);
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
     0,
   );
 });
 
 test("scopes and urls ask for more, beside the package's own: DEPLOY_SCOPES is what a deploy of iterate needs; the page lists every scope", async () => {
-  const project = fakeProject({ scopes: DEPLOY_SCOPES, urls: ["https://api.cloudflare.com"] });
-  await project.setUp();
-  await project.start();
-  const { options } = project.begun[0]!;
+  const mind = fakeMind({ scopes: DEPLOY_SCOPES, urls: ["https://api.cloudflare.com"] });
+  await mind.setUp();
+  await mind.start();
+  const { options } = mind.begun[0]!;
   assert.equal(options.scope, [...SCOPES, ...DEPLOY_SCOPES].join(" "));
   assert.deepEqual(options.urls, URLS);
   assert.ok(DEPLOY_SCOPES.includes("workers-scripts.write"));
   assert.ok(DEPLOY_SCOPES.includes("secrets-store.write"));
-  assert.match(await (await project.page("/")).text(), /<code>workers-scripts\.write<\/code>/);
+  assert.match(await (await mind.page("/")).text(), /<code>workers-scripts\.write<\/code>/);
 });
 
 // --------------------------------------------------------------- the landing
 
 test("the callback completes the attempt, keeps the person the platform named and the account their token reaches (one call to /accounts with the placeholder), registers the card then the row, and sends the person back", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const connection = project.lastConnection();
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const connection = mind.lastConnection();
   const path = `/secrets/own-cloudflare-${connection}`;
-  project.cloudflare.codes["a-made-up-code"] = ADA;
-  const before = project.registry().length;
-  const res = await project.callback({ code: "a-made-up-code", state });
+  mind.cloudflare.codes["a-made-up-code"] = ADA;
+  const before = mind.registry().length;
+  const res = await mind.callback({ code: "a-made-up-code", state });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
-  assert.deepEqual(project.secrets[path]!.options.urls, URLS);
-  assert.deepEqual(project.calls, [
+  assert.deepEqual(mind.completed, [{ path, input: { code: "a-made-up-code", state } }]);
+  assert.deepEqual(mind.secrets[path]!.options.urls, URLS);
+  assert.deepEqual(mind.calls, [
     {
       url: ACCOUNTS,
       headers: { authorization: `Bearer getSecret("${path}", { field: "accessToken" })` },
     },
   ]);
-  const account = JSON.parse(project.kv[`own-cloudflare/accounts/${connection}`]!);
+  const account = JSON.parse(mind.kv[`own-cloudflare/accounts/${connection}`]!);
   assert.deepEqual(
     { ...account, at: undefined },
     {
@@ -632,15 +629,15 @@ test("the callback completes the attempt, keeps the person the platform named an
       at: undefined,
     },
   );
-  assert.equal(project.kv[pendingKey(state)], undefined);
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.kv[pendingKey(state)], undefined);
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "cloudflare", card: READY } },
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "cloudflare", connection, row: row() },
     },
   ]);
-  const html = await (await project.page("/?connected=ada%40example.com")).text();
+  const html = await (await mind.page("/?connected=ada%40example.com")).text();
   assert.match(html, /Connected ada@example\.com\./);
   assert.match(html, /on Ada Co \(acc-1001\)/);
   assert.match(html, />Reconnect</);
@@ -648,71 +645,71 @@ test("the callback completes the attempt, keeps the person the platform named an
 });
 
 test("a connection whose /accounts does not answer still stands, with no account listed", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.cloudflare.accountsAnswer = false;
-  await project.connect(ADA);
-  const account = JSON.parse(project.kv[`own-cloudflare/accounts/${project.lastConnection()}`]!);
+  const mind = fakeMind();
+  await mind.setUp();
+  mind.cloudflare.accountsAnswer = false;
+  await mind.connect(ADA);
+  const account = JSON.parse(mind.kv[`own-cloudflare/accounts/${mind.lastConnection()}`]!);
   assert.deepEqual(account.accounts, []);
-  assert.equal(project.registry().at(-1)!.payload.row.details.Account, "none listed");
-  assert.match(await (await project.page("/")).text(), /on none listed/);
+  assert.equal(mind.registry().at(-1)!.payload.row.details.Account, "none listed");
+  assert.match(await (await mind.page("/")).text(), /on none listed/);
 });
 
 test("a landing with an unknown, missing or hour-old attempt is refused and writes nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  await project.start();
-  const old = project.lastConnection();
-  project.kv[pendingKey(old)] = JSON.stringify({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.start();
+  const old = mind.lastConnection();
+  mind.kv[pendingKey(old)] = JSON.stringify({
     connection: old,
     nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  const kv = structuredClone(project.kv);
-  const before = project.registry().length;
+  const kv = structuredClone(mind.kv);
+  const before = mind.registry().length;
   for (const query of ["?id=ffffffff", "", `?id=${old}`]) {
-    const res = await project.page(`/connected${query}`);
+    const res = await mind.page(`/connected${query}`);
     assert.match(
       location(res),
       /error=iterate came back from a sign-in this page did not start, or that is over an hour old/,
       query,
     );
   }
-  assert.deepEqual(project.kv, kv);
-  assert.equal(project.registry().length, before);
+  assert.deepEqual(mind.kv, kv);
+  assert.equal(mind.registry().length, before);
 });
 
 test("Cloudflare's no, and an exchange that fails, are iterate's callback's to show: the landing is never reached, and nothing is stored", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const refused = await project.start();
-  const res = await project.callback({ error: "access_denied", state: refused });
+  const mind = fakeMind();
+  await mind.setUp();
+  const refused = await mind.start();
+  const res = await mind.callback({ error: "access_denied", state: refused });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /The provider declined: access_denied/);
-  const failed = await project.start();
-  const again = await project.callback({ code: "a-code-cloudflare-never-issued", state: failed });
+  const failed = await mind.start();
+  const again = await mind.callback({ code: "a-code-cloudflare-never-issued", state: failed });
   assert.equal(again.status, 400);
   assert.match(await again.text(), /the token endpoint answered 400 \(invalid_grant\)/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-cloudflare-app"]);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-cloudflare-app"]);
   assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
+    Object.keys(mind.kv).filter((key) => key.startsWith("own-cloudflare/accounts/")).length,
     0,
   );
 });
 
 test("the same person connected twice keeps one row: the older connection's secret and row go", async () => {
-  const { project, connection: older } = await connected();
-  await project.connect(GRACE);
-  const grace = project.lastConnection();
-  const res = await project.connect(ADA);
-  const newer = project.lastConnection();
+  const { mind, connection: older } = await connected();
+  await mind.connect(GRACE);
+  const grace = mind.lastConnection();
+  const res = await mind.connect(ADA);
+  const newer = mind.lastConnection();
   assert.notEqual(newer, older);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.equal(project.secrets[`/secrets/own-cloudflare-${older}`], undefined);
-  assert.equal(project.kv[`own-cloudflare/accounts/${older}`], undefined);
-  assert.ok(project.secrets[`/secrets/own-cloudflare-${newer}`]);
-  assert.ok(project.secrets[`/secrets/own-cloudflare-${grace}`], "another person stays");
-  const html = await (await project.page("/")).text();
+  assert.equal(mind.secrets[`/secrets/own-cloudflare-${older}`], undefined);
+  assert.equal(mind.kv[`own-cloudflare/accounts/${older}`], undefined);
+  assert.ok(mind.secrets[`/secrets/own-cloudflare-${newer}`]);
+  assert.ok(mind.secrets[`/secrets/own-cloudflare-${grace}`], "another person stays");
+  const html = await (await mind.page("/")).text();
   assert.equal(html.match(/<b>ada@example\.com<\/b>/g)!.length, 1);
   assert.match(html, /<b>grace@example\.com<\/b>/);
 });
@@ -720,69 +717,69 @@ test("the same person connected twice keeps one row: the older connection's secr
 // --------------------------------------------------------------- reconnect
 
 test("Reconnect begins OAuth again on the same connection, held to its person (expectAccount); a Reconnect that comes back as another person is refused before anything is stored", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   const path = `/secrets/own-cloudflare-${connection}`;
-  const token = project.secrets[path]!.material.accessToken;
-  const res = await project.connect(ADA, connection);
+  const token = mind.secrets[path]!.material.accessToken;
+  const res = await mind.connect(ADA, connection);
   assert.equal(res.headers.get("location"), "./?connected=ada%40example.com");
-  assert.equal(project.lastConnection(), connection);
-  assert.equal(project.begun.at(-1)!.options.expectAccount, "1001");
-  assert.notEqual(project.secrets[path]!.material.accessToken, token, "new tokens");
+  assert.equal(mind.lastConnection(), connection);
+  assert.equal(mind.begun.at(-1)!.options.expectAccount, "1001");
+  assert.notEqual(mind.secrets[path]!.material.accessToken, token, "new tokens");
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/connect", { form: { id } })),
+      location(await mind.page("/connect", { form: { id } })),
       /error=Unknown connection/,
       id,
     );
-  const secrets = structuredClone(project.secrets);
-  const conflict = await project.connect(GRACE, connection);
+  const secrets = structuredClone(mind.secrets);
+  const conflict = await mind.connect(GRACE, connection);
   assert.equal(conflict.status, 400);
   assert.match(
     await conflict.text(),
     /the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
-  assert.deepEqual(project.secrets, secrets);
+  assert.deepEqual(mind.secrets, secrets);
 });
 
 // --------------------------------------------------------------- disconnect
 
 test("Disconnect deletes the connection's secret and kv entry, takes its row away and registers the card; a failed delete keeps everything for another try", async () => {
-  const { project, connection } = await connected();
-  project.faults.deletes = true;
-  const refused = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  mind.faults.deletes = true;
+  const refused = await mind.page("/disconnect", { form: { id: connection } });
   assert.match(location(refused), /error=the secret store is unavailable/);
-  assert.ok(project.secrets[`/secrets/own-cloudflare-${connection}`]);
-  project.faults.deletes = false;
-  const before = project.registry().length;
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  assert.ok(mind.secrets[`/secrets/own-cloudflare-${connection}`]);
+  mind.faults.deletes = false;
+  const before = mind.registry().length;
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.secrets[`/secrets/own-cloudflare-${connection}`], undefined);
-  assert.ok(project.secrets["/secrets/own-cloudflare-app"], "the client's secret stays");
-  assert.equal(project.kv[`own-cloudflare/accounts/${connection}`], undefined);
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets[`/secrets/own-cloudflare-${connection}`], undefined);
+  assert.ok(mind.secrets["/secrets/own-cloudflare-app"], "the client's secret stays");
+  assert.equal(mind.kv[`own-cloudflare/accounts/${connection}`], undefined);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "cloudflare", connection, row: null },
     },
     { type: CONFIGURED, payload: { integration: "cloudflare", card: NO_ACCOUNT } },
   ]);
-  assert.match(await (await project.page("/")).text(), /None yet/);
+  assert.match(await (await mind.page("/")).text(), /None yet/);
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/disconnect", { form: { id } })),
+      location(await mind.page("/disconnect", { form: { id } })),
       /error=Unknown connection/,
     );
 });
 
 test("a Disconnect whose row cannot be taken away leaves a tombstone, which the next publish finishes", async () => {
-  const { project, connection } = await connected();
-  project.faults.registry = 1;
-  const failed = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  mind.faults.registry = 1;
+  const failed = await mind.page("/disconnect", { form: { id: connection } });
   assert.match(location(failed), /error=the registry is unavailable/);
-  assert.ok(project.kv[`own-cloudflare/removed/${connection}`]);
-  await project.publish(9);
+  assert.ok(mind.kv[`own-cloudflare/removed/${connection}`]);
+  await mind.publish(9);
   assert.deepEqual(
-    project
+    mind
       .registry()
       .filter((event) => event.payload.connection === connection)
       .at(-1),
@@ -792,29 +789,29 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone, which the 
       payload: { integration: "cloudflare", connection, row: null },
     },
   );
-  assert.equal(project.kv[`own-cloudflare/removed/${connection}`], undefined);
+  assert.equal(mind.kv[`own-cloudflare/removed/${connection}`], undefined);
 });
 
 // --------------------------------------------- the Dash's Integrations page
 
 test("the install hook registers the card and a row per connection, keyed by the event's path and offset: a retry appends nothing new; the card asks for the client, then for an account, then is ok", async () => {
-  const project = fakeProject();
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind();
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "cloudflare:registry:/@5",
       payload: { integration: "cloudflare", card: NO_CLIENT },
     },
   ]);
-  await project.setUp();
-  await project.publish(6);
-  assert.deepEqual(project.registry().at(-1)!.payload.card, NO_ACCOUNT);
-  await project.connect(ADA);
-  const connection = project.lastConnection();
-  const before = project.registry().length;
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(9);
-  assert.deepEqual(project.registry().slice(before), [
+  await mind.setUp();
+  await mind.publish(6);
+  assert.deepEqual(mind.registry().at(-1)!.payload.card, NO_ACCOUNT);
+  await mind.connect(ADA);
+  const connection = mind.lastConnection();
+  const before = mind.registry().length;
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(9);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONFIGURED,
       idempotencyKey: "cloudflare:registry:/@9",

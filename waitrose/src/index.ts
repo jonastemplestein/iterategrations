@@ -12,7 +12,7 @@ export type {
   Price,
 } from "./place-order.js";
 
-/** The project, as the card and the page need it: what a config worker's `itx` already has. */
+/** The mind, as the card and the page need it: what a config worker's `itx` already has. */
 export type WaitroseItx = {
   secrets: { list(): Promise<{ path: string }[]> };
   cd(path: string): {
@@ -30,10 +30,10 @@ export type IntegrationHost = {
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -46,12 +46,12 @@ const ACCOUNT = "/secrets/waitrose";
 
 /** What the platform appends on `/` after it publishes a commit of the config repo: the install
  *  hook. */
-const WORKER_UPDATED = "events.iterate.com/project/worker-updated";
+const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
 const SLUG = "waitrose";
 const TITLE = "Waitrose";
 const DESCRIPTION =
-  "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout), signed in as the person's own account: agents and the project's code call it with fetch and the token's placeholder.";
+  "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout), signed in as the person's own account: agents and the mind's code call it with fetch and the token's placeholder.";
 const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/waitrose";
 
 /** The card on the Dash's Integrations page (iterate/integrations). A coding agent sets Waitrose up
@@ -74,12 +74,12 @@ const cardOf = (account: boolean) => ({
 const hasAccount = async (itx: WaitroseItx): Promise<boolean> =>
   (await itx.secrets.list()).some((secret) => secret.path === ACCOUNT);
 
-/** A project's Waitrose on the Dash, as an integration its worker hosts:
+/** A mind's Waitrose on the Dash, as an integration its worker hosts:
  *  `const integrations: Integration[] = [waitrose()];`
  *
  *  On the `waitrose` routing slug it answers, for members only, its page at `/`; any other path is
- *  a 404. Its install hook (`project/worker-updated`) lists Waitrose on the Dash's Integrations
- *  page. That is all it does: agents and the project's code call Waitrose with `fetch`
+ *  a 404. Its install hook (`mind/worker-updated`) lists Waitrose on the Dash's Integrations
+ *  page. That is all it does: agents and the mind's code call Waitrose with `fetch`
  *  (`waitroseFetch`, `graphql`, `placeOrder`), as the README says. */
 export function waitrose(): Integration {
   return {

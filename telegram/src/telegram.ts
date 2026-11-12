@@ -3,7 +3,7 @@ import { servePage } from "./page.js";
 import { WORKER_UPDATED } from "./registry.js";
 import { receiveUpdate, type Deliver } from "./webhook.js";
 
-// No Telegram client: an agent calls the Bot API with `fetch` (see the README). The project's own
+// No Telegram client: an agent calls the Bot API with `fetch` (see the README). The mind's own
 // code can import the small helpers it needs to answer in a chat.
 export { placeholder } from "./bot.js";
 export { api, MESSAGE_LIMIT, sendAnswer, splitText } from "./send.js";
@@ -11,17 +11,17 @@ export type { Deliver } from "./webhook.js";
 export type { TelegramItx } from "./bot.js";
 
 /** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
- *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
+ *  `using itx = host.getItx()` is the mind's scope for one block, and `host.auth.require` the
  *  gate of a members-only page. */
 export type IntegrationHost = {
   getItx(): TelegramItx & Disposable;
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -29,17 +29,17 @@ export type Integration = {
   processEvent?(args: { event: IntegrationEvent; itx: TelegramItx }): Promise<void>;
 };
 
-/** A project's Telegram bot, as an integration its worker hosts:
+/** A mind's Telegram bot, as an integration its worker hosts:
  *  `const integrations: Integration[] = [telegram()];`
  *
  *  On its routing slug it answers Telegram's webhook at `/webhook/<bot>` (checked with a secret) and,
- *  for members only, the Connect Telegram page at `/`. Its install hook (`project/worker-updated`)
+ *  for members only, the Connect Telegram page at `/`. Its install hook (`mind/worker-updated`)
  *  lists it on the Dash's Integrations page: the card, and a row per connected bot.
  *
  *  - `slug`: the routing slug to answer on. Default `telegram`.
  *  - `deliver`: `agents` (default): each chat gets an agent of its own here, which wakes for what is
  *    meant for it. `events`: the package keeps the door (who is let in, invites, welcomes) and
- *    records `telegram/message-accepted` for each message from someone let in; the project routes
+ *    records `telegram/message-accepted` for each message from someone let in; the mind routes
  *    it to its own agents and sends their answers (`sendAnswer`, or `api` for any other call). */
 export function telegram(options: { slug?: string; deliver?: Deliver } = {}): Integration {
   const routingSlug = options.slug ?? "telegram";

@@ -53,11 +53,11 @@ export type PageView = {
 /** The members-only page at `/`: whether Arbor is set up, for which school site, and the recipe.
  *  Arbor has no webhook, so there is no URL to paste. It writes nothing, so it has no form. */
 export function servePage(view: PageView): Response {
-  const hint = `${copyRow(`Set up ${view.title} in my iterate project. Follow the recipe at ${view.recipe}`)}`;
+  const hint = `${copyRow(`Set up ${view.title} in my iterate mind. Follow the recipe at ${view.recipe}`)}`;
   const status = !view.saved
-    ? `<p class="warn">Set up by your coding agent: see the recipe. The project has no Arbor account <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${hint}`
+    ? `<p class="warn">Set up by your coding agent: see the recipe. The mind has no Arbor account <code>${esc(view.secret)}</code> yet. Paste this into your coding agent:</p>${hint}`
     : view.site
-      ? `<p class="ok">Set up. The project has the Arbor account <code>${esc(view.secret)}</code>, for the school site <code>${esc(view.site)}</code>.</p>`
+      ? `<p class="ok">Set up. The mind has the Arbor account <code>${esc(view.secret)}</code>, for the school site <code>${esc(view.site)}</code>.</p>`
       : `<p class="warn">The Arbor account <code>${esc(view.secret)}</code> has no school site. Paste this into your coding agent:</p>${hint}`;
   const body = `<p>${esc(view.description)}</p>
     <section><h2>Status</h2>${status}</section>

@@ -1,43 +1,43 @@
 # GitHub
 
-A project's own GitHub App, with a **Connect GitHub** page of its own. GitHub's webhook deliveries for
-each installation land in the project as events, and the project's code and agents call GitHub's API
+A mind's own GitHub App, with a **Connect GitHub** page of its own. GitHub's webhook deliveries for
+each installation land in the mind as events, and the mind's code and agents call GitHub's API
 as the installation. The platform mints each installation's token from the App's key: the agent only
 ever sends a placeholder naming the installation's secret, and iterate's egress swaps the token in.
 
-It is project code: one element, `github()`, in the `integrations` array of the project's config
-worker, which hands it the requests on the project's `github` routing slug, and every event.
+It is mind code: one element, `github()`, in the `integrations` array of the mind's config
+worker, which hands it the requests on the mind's `github` routing slug, and every event.
 
-- **The page** (members only, at the project's `github` address, `/`): the URLs to paste into the
+- **The page** (members only, at the mind's `github` address, `/`): the URLs to paste into the
   App's settings, a link that collects the App (its ID, slug, private key and webhook secret, on one
   form of iterate's Dash), an **Install** button, a form that connects an installation that exists
   already, and the installations with a Disconnect button.
 - **The setup URL** (the same address, `/oauth2/callback`, members only): GitHub sends the person back here
   after an install, and the page connects the installation.
 - **The webhook** (the same address, `/webhook`): GitHub's, checked with the App's webhook secret.
-- **The Dash:** the project's Integrations page shows a GitHub card ("Create a GitHub App and paste
+- **The Dash:** the mind's Integrations page shows a GitHub card ("Create a GitHub App and paste
   its secrets" until the App is saved) and a row per installation: its account, and buttons to the
   page and to the account on GitHub. The card changes when the App is saved or deleted: the package
   registers it again on that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
 
 The deployment's own GitHub App (iterate's, on the Dash's Connect sheet) is another thing: it is
-shared by every project, and the platform keeps it. This package is for an App the project owns.
+shared by every mind, and the platform keeps it. This package is for an App the mind owns.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `github()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-github";
 const IMPORT = 'import { github } from "iterate-github";';
 const ELEMENT = "github()";
@@ -65,14 +65,14 @@ async (itx) => itx.url({ routingSlug: "github", path: "/" });
 Say: "Open this, sign in, and follow the steps." The page walks them through it:
 
 1. **Create the App** at <https://github.com/settings/apps/new>, or for an organization at
-   `https://github.com/organizations/<org>/settings/apps/new`, with (`<address>` is the project's
+   `https://github.com/organizations/<org>/settings/apps/new`, with (`<address>` is the mind's
    `github` address, `itx.url({ routingSlug: "github" })`):
    - **Homepage URL:** the page's own address.
    - **Setup URL:** `<address>/oauth2/callback`, with **Redirect on update** ticked.
    - **Webhook URL:** `<address>/webhook`, and a **webhook secret** they make up
      (`openssl rand -hex 32`).
-   - **Permissions** and **events:** what the project needs, and no more. Ask the person what the
-     project should do (read code, comment on issues, review pull requests) and name the permissions
+   - **Permissions** and **events:** what the mind needs, and no more. Ask the person what the
+     mind should do (read code, comment on issues, review pull requests) and name the permissions
      for it.
    - **Where can this GitHub App be installed?** "Only on this account", unless other accounts
      should install it.
@@ -85,16 +85,16 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    secret on one form, and keeps them as one secret, `/secrets/own-github-app`, pinned to
    `github.com` and `api.github.com`. The App ID and the slug (the end of the App's public link,
    `https://github.com/apps/<slug>`) are public fields of that secret: the form shows them as plain
-   text and checks their shapes, and the project reads them from its list of secrets. The key and
-   the webhook secret never pass through the project's code.
+   text and checks their shapes, and the mind reads them from its list of secrets. The key and
+   the webhook secret never pass through the mind's code.
 3. **Install**: GitHub asks which account and which repositories, then sends them back to the page,
    which connects the installation and shows its account. GitHub comes back to the page only after
-   a new install or a change to one, so an App that is installed already (a project that moves to
+   a new install or a change to one, so an App that is installed already (a mind that moves to
    this package) is connected by its installation ID instead, in the form under **Install**: the
    number at the end of `https://github.com/settings/installations/<id>`, or for an organization
    `https://github.com/organizations/<org>/settings/installations/<id>`.
 
-Then write the App's name, its installations and where its page is into the project's `AGENTS.md`.
+Then write the App's name, its installations and where its page is into the mind's `AGENTS.md`.
 
 ## What the agent gets
 
@@ -114,7 +114,7 @@ nothing:
 }
 ```
 
-`body` is GitHub's payload, untouched. A project's worker routes it in `processEvent` (an issue
+`body` is GitHub's payload, untouched. A mind's worker routes it in `processEvent` (an issue
 opened, a review asked for) to its agents.
 
 Each installation is a secret, `/secrets/own-github-<installation id>`, whose `accessToken` the
@@ -153,8 +153,8 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
 
 ## Good to know
 
-- **The URLs are on the project's host.** Renaming the project moves its hosts, and GitHub keeps
-  pointing at the old ones. Set a primary hostname for the project before you create an App that
+- **The URLs are on the mind's host.** Renaming the mind moves its hosts, and GitHub keeps
+  pointing at the old ones. Set a primary hostname for the mind before you create an App that
   should outlive a rename, and paste the URLs the page shows on it.
 - **One App secret serves every installation.** The App is one secret, `/secrets/own-github-app`:
   `appId` and `slug`, public fields that the catalog (`itx.secrets.list()`) answers, and
@@ -166,7 +166,7 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
   App again through the page's link (**Replace it**: the form asks for all four values, so a lost
   webhook secret is replaced in the App's settings too), then delete the old key at GitHub.
 - **No admin proof.** iterate's shared App proves that the person administers an account before an
-  installation counts for a project. This App is the project's own: it holds the App's key, so it
+  installation counts for a mind. This App is the mind's own: it holds the App's key, so it
   can mint for any installation of its App already. The page binds GitHub's redirect to an install
   it started instead: a nonce in the install link's `state`, good for an hour (or, for a request,
   until it is answered). An installation claims its nonce once, as an `own-github/nonce-used`
@@ -198,12 +198,12 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
   `github()` and its import out of `worker.ts`, and delete `/secrets/own-github-app`. Once that
   commit is live, take the card off with its null, which takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "github", card: null } })`. Then delete the App
-  at GitHub, or keep it for another project.
+  at GitHub, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-github`: the secrets
   `/secrets/own-github-app` and `/secrets/own-github-<installation id>`, the streams
   `/integrations/own-github/<installation id>`, and the kv keys `own-github/…`. iterate's shared
   GitHub App owns every `/secrets/github-<connection>` and `/integrations/github/<connection>`, for
-  any connection name a member or an agent chooses (`app`, digits), so a project can use both. The
+  any connection name a member or an agent chooses (`app`, digits), so a mind can use both. The
   routing slug and the card on the Dash stay `github`.
 - **Not the platform's event.** `events.iterate.com/github/webhook-received` is the platform's record
   of a delivery for iterate's shared App (github-sync and the AI linter read it). This package's

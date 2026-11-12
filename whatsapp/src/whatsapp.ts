@@ -1,6 +1,6 @@
-// whatsapp.ts — your WhatsApp, lent to an iterate project from your own computer:
+// whatsapp.ts — your WhatsApp, lent to an iterate mind from your own computer:
 //
-//   iterate provide whatsapp/src/whatsapp.ts --project <slug>
+//   iterate provide whatsapp/src/whatsapp.ts --mind <address>
 //
 // Baileys (https://baileys.wiki) links this computer to your WhatsApp as a linked device, the way
 // WhatsApp Web does, from your own IP. The lend is as thin as it can be, so Baileys' own
@@ -11,7 +11,7 @@
 //     `user()` (the linked account, Baileys' `sock.user`), and `getPNForLID(lid)` / `getLIDForPN(pn)`
 //     (Baileys' `sock.signalRepository.lidMapping`). WHATSAPP_LEND names the functions to lend,
 //     and nothing else is lent then (`lendOnly`).
-//   - EVENTS: every event the socket emits lands on the project as `whatsapp/<Baileys' event name>`
+//   - EVENTS: every event the socket emits lands on the mind as `whatsapp/<Baileys' event name>`
 //     (`whatsapp/messages.upsert`, `whatsapp/messages.update`, `whatsapp/group-participants.update`,
 //     `whatsapp/presence.update`, `whatsapp/call`, …) with `payload.data` Baileys' own data. A
 //     `messages.upsert` of several messages lands as one event a message (`data.messages` holds
@@ -38,7 +38,7 @@ import makeWASocket, {
 import pino from "pino";
 import qrcode from "qrcode-terminal";
 
-/** Where this account's messages land in the project: WHATSAPP_LOG_PATH for a second account lent
+/** Where this account's messages land in the mind: WHATSAPP_LOG_PATH for a second account lent
  *  beside the first (`iterate provide whatsapp.ts --name whatsappPersonal` with its own
  *  WHATSAPP_AUTH_FOLDER), each on a stream of its own. */
 const LOG_PATH = process.env.WHATSAPP_LOG_PATH || "/integrations/whatsapp";
@@ -56,11 +56,11 @@ const ACCOUNT = process.env.WHATSAPP_ACCOUNT || "A WhatsApp account";
 const APPEAR_OFFLINE = LOG_PATH === "/integrations/whatsapp-personal";
 
 /** THE FUNCTIONS THIS LEND HAS, when it is not the whole socket: WHATSAPP_LEND, names with commas
- *  between them (`sendMessage,groupMetadata,downloadMedia`). The project can call nothing else
+ *  between them (`sendMessage,groupMetadata,downloadMedia`). The mind can call nothing else
  *  then: not `relayMessage` or `sendNode`, which send a message as `sendMessage` does, and not
- *  `logout`, which unlinks the device. Unset, the whole socket is lent. A project that holds
+ *  `logout`, which unlinks the device. Unset, the whole socket is lent. A mind that holds
  *  `sendMessage` for a person's approval holds a name: with the whole socket lent, the other ways
- *  to send stay free, so give such a project a list. Set and empty, it lends no function. */
+ *  to send stay free, so give such a mind a list. Set and empty, it lends no function. */
 export function lendOnly(list: string | undefined): readonly string[] | undefined {
   if (list === undefined) return undefined;
   return list
@@ -70,12 +70,12 @@ export function lendOnly(list: string | undefined): readonly string[] | undefine
 }
 const LEND = lendOnly(process.env.WHATSAPP_LEND);
 
-/** A project keeps a lend's description as one line of at most this many characters, and refuses
+/** A mind keeps a lend's description as one line of at most this many characters, and refuses
  *  a longer one: the lend then does not start. */
 const DESCRIPTION_LIMIT = 500;
 
 /** WHAT AN AGENT READS OF THIS LEND IN ITS CAPABILITY TREE: the account, what is lent of the
- *  socket, and where its events land. One line within the project's limit, whatever the account's
+ *  socket, and where its events land. One line within the mind's limit, whatever the account's
  *  text and however long the list: a list is said by its count, and its names are in
  *  `__describe()`. The account's text is a person's own words, so it is what gives way. */
 export function describeLend(
@@ -96,7 +96,7 @@ export function describeLend(
 
 export const description = describeLend(ACCOUNT, LEND, LOG_PATH);
 
-/** The project, as `iterate provide` hands it over: the part this file uses. */
+/** The mind, as `iterate provide` hands it over: the part this file uses. */
 export type Itx = {
   cd(path: string): { append(...events: WhatsAppEvent[]): Promise<unknown> };
 };
@@ -233,12 +233,12 @@ export function chatParts(name: string, data: unknown): Map<string, unknown> {
   return new Map([...rows].map(([chat, keys]) => [chat, { keys }]));
 }
 
-/** Messages that could not reach the project yet wait here for its next connection, at most this
+/** Messages that could not reach the mind yet wait here for its next connection, at most this
  *  many, the oldest dropped first (and said so). */
 const PENDING_LIMIT = 1_000;
 
-/** How many chats' streams are appended to at once. The project makes a stream at its first event,
- *  which takes it a moment; more at once is more load on the project for little gain. */
+/** How many chats' streams are appended to at once. The mind makes a stream at its first event,
+ *  which takes it a moment; more at once is more load on the mind for little gain. */
 const CHAT_STREAMS_AT_ONCE = 8;
 
 /** The platform's refusal of a key that already names a different event (iterate's
@@ -255,7 +255,7 @@ const isIdempotencyConflict = (error: unknown): boolean =>
 
 /** THE LEND. `connect` opens the WhatsApp socket once for the whole process, and a new one each time
  *  Baileys closes one, handing each to `onSocket`. The answer is `iterate provide`'s default export:
- *  called on every connection to the project with that connection's `itx`, it answers the
+ *  called on every connection to the mind with that connection's `itx`, it answers the
  *  functions to lend — every function of the current socket, unchanged except that arguments and
  *  answers cross as JSON (Baileys' own `BufferJSON`: bytes as `{ type: "Buffer", data: <base64> }`),
  *  plus `downloadMedia` and `__describe`. With `only`, those functions and `__describe` alone
@@ -277,21 +277,19 @@ export function provideWhatsApp(input: {
     events.push(event);
     if (events.length > PENDING_LIMIT) {
       const dropped = events.splice(0, events.length - PENDING_LIMIT);
-      console.error(
-        `WhatsApp: dropped ${dropped.length} event(s) of ${path} the project never took`,
-      );
+      console.error(`WhatsApp: dropped ${dropped.length} event(s) of ${path} the mind never took`);
     }
     pending.set(path, events);
   };
   /** The connection the last append went over. */
   let appendedOver: Itx | undefined;
-  /** Append the next events that wait for `path`, at most 50, over `project`. */
-  const appendNext = async (project: Itx, path: string): Promise<void> => {
+  /** Append the next events that wait for `path`, at most 50, over `mind`. */
+  const appendNext = async (mind: Itx, path: string): Promise<void> => {
     const events = pending.get(path);
     if (!events) return;
-    appendedOver = project;
+    appendedOver = mind;
     const batch = events.slice(0, 50);
-    const log = project.cd(path);
+    const log = mind.cd(path);
     await log.append(...batch).catch(async (error: unknown) => {
       if (!isIdempotencyConflict(error)) throw error;
       // A redelivery whose body differs from the event its key already names (an `append`
@@ -310,7 +308,7 @@ export function provideWhatsApp(input: {
    *  failure leaves it waiting for the next connection.
    *
    *  THE ACCOUNT'S OWN STREAM GOES FIRST, to its end, and again before each next few chats: it is
-   *  where a project hears of a message. The chats' streams follow, a few at once
+   *  where a mind hears of a message. The chats' streams follow, a few at once
    *  (CHAT_STREAMS_AT_ONCE), each its next events. After a restart WhatsApp sends events for some
    *  hundred chats, and each chat's first event makes its stream: one after the other, and with
    *  the account's stream in turn among them, a new message waited more than a minute. */
@@ -319,16 +317,16 @@ export function provideWhatsApp(input: {
       try {
         while (itx && waiting() > 0) {
           while (pending.has(input.logPath)) await appendNext(itx, input.logPath);
-          const project = itx;
+          const mind = itx;
           const chats = [...pending.keys()].slice(0, CHAT_STREAMS_AT_ONCE);
           // every one of them answers before the next step: a stream never has two appends open
-          const answers = await Promise.allSettled(chats.map((path) => appendNext(project, path)));
+          const answers = await Promise.allSettled(chats.map((path) => appendNext(mind, path)));
           for (const answer of answers) if (answer.status === "rejected") throw answer.reason;
         }
         return true;
       } catch (error) {
         console.error(
-          `WhatsApp: ${waiting()} event(s) wait for the project's next connection (${error instanceof Error ? error.message : String(error)})`,
+          `WhatsApp: ${waiting()} event(s) wait for the mind's next connection (${error instanceof Error ? error.message : String(error)})`,
         );
         return false;
       }
@@ -487,7 +485,7 @@ function revive(value: unknown): unknown {
 }
 
 /** Baileys reads a media `{ url }` that is not http(s) or data: as a path on THIS computer, and
- *  fetches an http one from this computer's network: from the project, only https: and data:. */
+ *  fetches an http one from this computer's network: from the mind, only https: and data:. */
 function refuseLocalUrls(value: unknown): void {
   if (!value || typeof value !== "object") return;
   if ("url" in value && value.url != null) {

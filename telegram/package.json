@@ -1,7 +1,7 @@
 {
   "name": "iterate-telegram",
   "version": "0.0.0",
-  "description": "A Telegram bot for an iterate project: a Connect Telegram page, the webhook, and each chat handed to an agent",
+  "description": "A Telegram bot for an iterate mind: a Connect Telegram page, the webhook, and each chat handed to an agent",
   "type": "module",
   "exports": {
     ".": {

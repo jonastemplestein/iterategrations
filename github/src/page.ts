@@ -93,7 +93,7 @@ const COLLECT_DESCRIPTION = `Your GitHub App: its ID and slug, its private key a
 - **Private key (.pem):** open the \`.pem\` file GitHub downloaded when you generated the key, in a text editor, and paste all of it, the BEGIN and END lines too.
 - **Webhook secret:** the secret you typed under Webhook in the App's settings.
 
-The key only signs the App's requests for installation tokens to GitHub's API, and the webhook secret only checks GitHub's deliveries. Neither passes through the project's code.`;
+The key only signs the App's requests for installation tokens to GitHub's API, and the webhook secret only checks GitHub's deliveries. Neither passes through the mind's code.`;
 
 /** The App's four fields: its ID and its slug, public, each in the shape GitHub gives it (HTML's
  *  `pattern`, which the browser compiles with the `v` flag), then its key and its webhook secret. */
@@ -130,7 +130,7 @@ const collectLink = (itx: GithubItx, here: string): Promise<string> =>
     .then((link) => link.url);
 
 /** Under Install: an installation that exists already, by its ID. GitHub comes back to the setup URL
- *  only after a new install or a change to one, so a project that moves to this package with its
+ *  only after a new install or a change to one, so a mind that moves to this package with its
  *  App installed connects the installation here. */
 const CONNECT_FORM = `<p class="muted">Installed already? GitHub sends you back here only after a new install or a change to one. To connect an installation that exists, give its ID: the number at the end of its settings page, <code>github.com/settings/installations/&lt;id&gt;</code>, or for an organization <code>github.com/organizations/&lt;org&gt;/settings/installations/&lt;id&gt;</code>.</p>
     <form method="post" action="connect" class="block">
@@ -151,11 +151,11 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
     <h2>1. Create the App</h2>
     <p>Open <a href="https://github.com/settings/apps/new">github.com/settings/apps/new</a> for your own account, or for an organization <code>github.com/organizations/&lt;org&gt;/settings/apps/new</code>. Fill in:</p>
     <ul>
-      <li><b>GitHub App name:</b> any name that is free on GitHub; the project's is a good one.</li>
+      <li><b>GitHub App name:</b> any name that is free on GitHub; the mind's is a good one.</li>
       <li><b>Homepage URL:</b> this page:${copyRow(`${here}/`)}</li>
       <li><b>Setup URL</b> (under Post installation), and tick <b>Redirect on update</b>:${copyRow(`${here}/oauth2/callback`)}</li>
       <li><b>Webhook:</b> Active. <b>Webhook URL:</b>${copyRow(`${here}/webhook`)}<b>Secret:</b> make one up (<code>openssl rand -hex 32</code>) and keep it for step 2.</li>
-      <li><b>Permissions</b> and <b>Subscribe to events:</b> what the project needs, no more. Every event you subscribe to reaches the project.</li>
+      <li><b>Permissions</b> and <b>Subscribe to events:</b> what the mind needs, no more. Every event you subscribe to reaches the mind.</li>
       <li><b>Where can this GitHub App be installed?</b> Only on this account, unless other accounts should install it.</li>
     </ul>
     <p>Press <b>Create GitHub App</b>. On the App's page, note its <b>App ID</b> and its public link (<code>https://github.com/apps/&lt;slug&gt;</code>), then press <b>Generate a private key</b>: GitHub downloads a <code>.pem</code> file. Keep them for step 2.</p>
@@ -166,13 +166,13 @@ async function render(itx: GithubItx, here: string, flash: string): Promise<stri
       app
         ? `<p class="ok">App ${esc(app.appId)}, <a href="https://github.com/apps/${esc(app.slug)}">github.com/apps/${esc(app.slug)}</a></p>`
         : incomplete
-          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public App ID and slug. Save the App again: the form asks for all four values together.</p>`
+          ? `<p class="warn">The mind's secret <code>${APP_SECRET}</code> has no public App ID and slug. Save the App again: the form asks for all four values together.</p>`
           : ""
     }
     ${
       typeof link === "string"
         ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the App"}</a></p>${copyRow(link)}`
-        : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
+        : `<p class="error">The mind could not make the link: ${esc(link.failed)}</p>`
     }
     <p class="muted">The link opens a page of iterate's Dash, which asks for the App ID, the slug, the private key and the webhook secret, and keeps them as <code>${APP_SECRET}</code>, pinned to github.com and api.github.com. The key and the webhook secret never pass through this page.</p>
   </section>`;
@@ -217,7 +217,7 @@ export async function servePage(request: Request, itx: GithubItx, slug: string):
     const flash = error
       ? `<p class="error">${esc(error)}</p>`
       : connected
-        ? `<p class="ok">Installed on ${esc(connected)}. Its webhook deliveries now reach the project.</p>`
+        ? `<p class="ok">Installed on ${esc(connected)}. Its webhook deliveries now reach the mind.</p>`
         : url.searchParams.has("requested")
           ? `<p class="warn">GitHub asked an owner of that account to approve the App. The request waits below. When GitHub sends their approval back here, it becomes the installation.</p>`
           : "";

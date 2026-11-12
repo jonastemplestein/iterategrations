@@ -1,5 +1,5 @@
 // Runs against dist (the package as shipped): `pnpm test` builds first. `fakeArbor` puts a pretend
-// Arbor behind the global `fetch`, which is the project's egress in a loaded worker: it answers each
+// Arbor behind the global `fetch`, which is the mind's egress in a loaded worker: it answers each
 // request by its URL, and records every request it was sent. Every name, school and ID here is
 // made up.
 import assert from "node:assert/strict";
@@ -960,9 +960,9 @@ test("the README's script calls Arbor as the package does: the same request as a
 
 // ------------------------------------------- the card on the Dash
 
-/** A project with `secrets` (path to its public fields) and an /integrations context that keeps
+/** A mind with `secrets` (path to its public fields) and an /integrations context that keeps
  *  what is appended, as the platform does with an idempotency key. */
-function project(secrets: Record<string, Record<string, unknown> | undefined>) {
+function mind(secrets: Record<string, Record<string, unknown> | undefined>) {
   const appended: { path: string; event: any }[] = [];
   const itx: any = {
     secrets: {
@@ -983,7 +983,7 @@ function project(secrets: Record<string, Record<string, unknown> | undefined>) {
 const card = (status: object) => ({
   title: "Arbor",
   description:
-    "Arbor, the school's MIS, as a parent sees it (children, meals, messages, calendar, attendance, payments, clubs and trips): agents and the project's code call it with fetch and the token's placeholder.",
+    "Arbor, the school's MIS, as a parent sees it (children, meals, messages, calendar, attendance, payments, clubs and trips): agents and the mind's code call it with fetch and the token's placeholder.",
   icon: "https://www.google.com/s2/favicons?domain=arbor-education.com&sz=64",
   status,
   actions: [
@@ -994,12 +994,12 @@ const card = (status: object) => ({
 
 test("arbor() answers the arbor routing slug; its install hook registers the card, keyed by the event's path and offset, ok once the account's secret has its site", async () => {
   const secrets: Record<string, Record<string, unknown> | undefined> = {};
-  const { itx, appended } = project(secrets);
+  const { itx, appended } = mind(secrets);
   const integration = arbor();
   assert.equal(integration.routingSlug, "arbor");
   const publish = (
     offset: number,
-    type = "events.iterate.com/project/worker-updated",
+    type = "events.iterate.com/mind/worker-updated",
     payload?: object,
   ) => integration.processEvent!({ event: { type, path: "/", offset, payload }, itx });
 
@@ -1050,9 +1050,9 @@ test("arbor() answers the arbor routing slug; its install hook registers the car
 });
 
 test("a site that is no URL still registers the card", async () => {
-  const { itx, appended } = project({ "/secrets/arbor": { site: "example primary" } });
+  const { itx, appended } = mind({ "/secrets/arbor": { site: "example primary" } });
   await arbor().processEvent!({
-    event: { type: "events.iterate.com/project/worker-updated", path: "/", offset: 1 },
+    event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset: 1 },
     itx,
   });
   assert.deepEqual(appended[0]!.event.payload.card.status, { kind: "ok", text: "example primary" });
@@ -1060,7 +1060,7 @@ test("a site that is no URL still registers the card", async () => {
 
 // ------------------------------------------- the page
 
-/** The worker hosting the package, over a project with `secrets`: a scope per `getItx`, counted,
+/** The worker hosting the package, over a mind with `secrets`: a scope per `getItx`, counted,
  *  and a member gate that refuses unless `member` is set. */
 function hosted(
   secrets: Record<string, Record<string, unknown> | undefined>,
@@ -1072,7 +1072,7 @@ function hosted(
     integration.fetch!(request, {
       getItx: () => {
         scopes.opened++;
-        return { ...project(secrets).itx, [Symbol.dispose]: () => void scopes.disposed++ };
+        return { ...mind(secrets).itx, [Symbol.dispose]: () => void scopes.disposed++ };
       },
       auth: {
         require: () => (options.member ? null : new Response("Sign in\n", { status: 401 })),
@@ -1094,7 +1094,7 @@ test("the page is for members: a non-member gets what auth.require answers, and 
 
 test("the page shows the status: what to paste into a coding agent until the account has its site, then the site", async () => {
   const sent = fakeArbor(() => undefined);
-  const hint = `Set up Arbor in my iterate project. Follow the recipe at ${RECIPE}`;
+  const hint = `Set up Arbor in my iterate mind. Follow the recipe at ${RECIPE}`;
   let html = await (await hosted({}, { member: true }).page("/")).text();
   assert.match(html, /<h1>Arbor<\/h1>/);
   assert.match(html, /Set up by your coding agent: see the recipe/);
@@ -1112,7 +1112,7 @@ test("the page shows the status: what to paste into a coding agent until the acc
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
   assert.ok(
     html.includes(
-      `Set up. The project has the Arbor account <code>/secrets/arbor</code>, for the school site <code>${SITE}</code>.`,
+      `Set up. The mind has the Arbor account <code>/secrets/arbor</code>, for the school site <code>${SITE}</code>.`,
     ),
   );
   assert.doesNotMatch(html, /coding agent|data-copy="/);

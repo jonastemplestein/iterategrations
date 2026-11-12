@@ -1,7 +1,7 @@
 {
   "name": "iterate-x",
   "version": "0.0.0",
-  "description": "A project's own X app for an iterate project: a Connect X page, its callback, and each connected account as a secret",
+  "description": "A mind's own X app for an iterate mind: a Connect X page, its callback, and each connected account as a secret",
   "type": "module",
   "exports": {
     ".": {

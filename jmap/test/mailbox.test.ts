@@ -1,5 +1,5 @@
 // Runs against dist (the package as shipped): `pnpm test` builds first. `fakeFastmail` puts a
-// pretend Fastmail behind the global `fetch`, which is the project's egress in a loaded worker. Like
+// pretend Fastmail behind the global `fetch`, which is the mind's egress in a loaded worker. Like
 // egress, it refuses a request toward an origin the secret is not pinned to. It answers the session,
 // the upload URL and each JMAP method by name, and records every request.
 import assert from "node:assert/strict";

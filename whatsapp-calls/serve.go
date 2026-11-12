@@ -1,5 +1,5 @@
 // serve.go — the linked device, kept connected, with its calls on stdin and stdout for a parent
-// process that carries their audio somewhere else (calls.ts, which carries it to the project's
+// process that carries their audio somewhere else (calls.ts, which carries it to the mind's
 // voice processor). It places calls and it is rung: an incoming call is announced and left
 // ringing until the parent says to answer it. One call at a time has its audio carried. Both
 // directions are JSON lines; audio is 16 kHz mono PCM16, little-endian, base64: the voice

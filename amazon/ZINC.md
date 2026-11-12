@@ -59,7 +59,7 @@ order can fail until the provider and account holder resolve access.
 
 ## 2. Collect the Zinc API key as an iterate secret
 
-Use iterate's MCP `run({ script })` in the target project. Read
+Use iterate's MCP `run({ script })` in the target mind. Read
 <https://os.iterate.com/connect-a-service.md> if this is new to you.
 
 ```js
@@ -68,7 +68,7 @@ async (itx) =>
     path: "/secrets/zinc",
     egress: { urls: ["https://api.zinc.com"] },
     description:
-      "Your Zinc API key from https://app.zinc.com. It is sent only to api.zinc.com. Amazon credentials are registered privately with Zinc, not stored in this project.",
+      "Your Zinc API key from https://app.zinc.com. It is sent only to api.zinc.com. Amazon credentials are registered privately with Zinc, not stored in this mind.",
   });
 ```
 
@@ -78,7 +78,7 @@ credentials, which iterate's URL/header-only secret substitution does not suppor
 
 ## 3. Serve the member-only API
 
-After this package is published by CI, pin `iterate-amazon` in the project's config `package.json`
+After this package is published by CI, pin `iterate-amazon` in the mind's config `package.json`
 to a full commit:
 
 ```json
@@ -117,7 +117,7 @@ if (request.headers.get("x-iterate-routing-slug") === "amazon") {
 ```
 
 The worker pins the Amazon account and the price cap. Agents cannot change them in order
-arguments. Only project members can call this route. Use a dedicated Zinc account/key for the
+arguments. Only mind members can call this route. Use a dedicated Zinc account/key for the
 experiment: the provider key itself has broader powers than this adapter.
 
 To work before package publication, copy `src/index.ts`, `src/client.ts` and `src/transport.ts`
@@ -146,7 +146,7 @@ preflight the chosen URL. Production search calls incur Zinc's documented data f
 purchases disabled; sandbox keys are free. See [search pricing](https://www.zinc.com/docs/v2/api-reference/search/cross-retailer).
 
 After the owner enables the purchase policy, submit a purchase as follows. Persist the key and
-the complete draft in the project before the network call. Keep that same key and draft when an
+the complete draft in the mind before the network call. Keep that same key and draft when an
 outcome is uncertain. The following is a template, not an instruction to buy this ASIN:
 
 ```js
@@ -213,7 +213,7 @@ managed-account link, so the script does not relax the adapter's UK checks. It r
 without the `zn_test_` prefix. Use Node
 22.18 or later for that script. A successful [Zinc sandbox](https://www.zinc.com/docs/v2/api-reference/introduction/sandbox)
 call proves protocol compatibility, not real Amazon UK authentication or checkout. The config
-worker route still needs a read-only test in the target iterate project after its key is saved.
+worker route still needs a read-only test in the target iterate mind after its key is saved.
 
 On 6 October 2026, all 13 package tests passed. The network smoke test submitted a synthetic
 order, read its pending status, and received `already_exists` on duplicate submission. Sandbox

@@ -21,7 +21,7 @@ type Methods = Pick<
 >;
 let api: AmazonWebApi | undefined;
 
-/** `iterate provide amazon/dist/provide.js --name amazon --project <slug>`. */
+/** `iterate provide amazon/dist/provide.js --name amazon --mind <address>`. */
 export default function provide(): Methods {
   const path = process.env.AMAZON_SESSION_FILE;
   if (!path) throw new Error("amazon: set AMAZON_SESSION_FILE to a private Chrome session export");

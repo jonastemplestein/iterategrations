@@ -8,7 +8,7 @@ export type OAuthOptions = {
    *  exchange and at every refresh, so it never passes through this code. */
   clientSecret: string;
   /** Where the platform's callback sends the person once it stored the tokens: a page of the
-   *  project's, which the platform composes. Every attempt comes back to the platform first. */
+   *  mind's, which the platform composes. Every attempt comes back to the platform first. */
   next: { routingSlug: string; path: string };
   clientAuth?: "client_secret_basic" | "client_secret_post";
   scope: string;
@@ -24,16 +24,16 @@ export type OAuthOptions = {
   expectAccount?: string;
 };
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type GoogleItx = {
-  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  /** The mind's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<unknown>;
     delete(key: string): Promise<unknown>;
     list(prefix?: string): Promise<{ keys: string[] }>;
   };
-  /** The project's files, where a Gmail sync (gmail.ts) keeps attachments and long bodies. */
+  /** The mind's files, where a Gmail sync (gmail.ts) keeps attachments and long bodies. */
   files: {
     get(path: string): {
       put(input: { contentType: string; data: Uint8Array }): Promise<unknown>;
@@ -94,8 +94,8 @@ export type Settings = { slug: string; scopes: string[]; urls: string[] };
 /** EVERY NAME THE PACKAGE KEEPS STARTS WITH `own-google`: its secrets and its kv keys. The
  *  platform's shared Google client owns every `/secrets/google-<connection>` and
  *  `/integrations/google/<connection>`, for any connection name a member or an agent chooses, so a
- *  project that uses both would collide on any `google-` name. Its routing slug and its card on the
- *  Dash stay `google`: the shared client has no project host, and the registry is the packages'
+ *  mind that uses both would collide on any `google-` name. Its routing slug and its card on the
+ *  Dash stay `google`: the shared client has no mind host, and the registry is the packages'
  *  own. */
 
 /** The OAuth client, one secret: `clientId`, a public field, and `clientSecret`. A person enters both
@@ -181,7 +181,7 @@ export async function readApp(itx: Pick<GoogleItx, "secrets">): Promise<App | nu
   return clientId ? { clientId } : null;
 }
 
-/** Whether the project has a secret at `APP_SECRET`, a client or not. */
+/** Whether the mind has a secret at `APP_SECRET`, a client or not. */
 export async function hasAppSecret(itx: Pick<GoogleItx, "secrets">): Promise<boolean> {
   return (await itx.secrets.list()).some((secret) => secret.path === APP_SECRET);
 }

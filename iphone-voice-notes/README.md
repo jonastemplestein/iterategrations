@@ -1,6 +1,6 @@
 # iPhone voice notes
 
-Hold the iPhone's Action Button, speak, tap stop: the recording lands in an iterate project. The
+Hold the iPhone's Action Button, speak, tap stop: the recording lands in an iterate mind. The
 audio becomes the file `/iphone-voice-notes/<recordingId>.m4a` and an
 `iphone-voice-notes/recording-received` event on the `/iphone-voice-notes` stream, and a moment
 later Whisper's transcript follows as `iphone-voice-notes/recording-transcribed`. No app to install,
@@ -11,14 +11,14 @@ On another iPhone the same shortcut runs from **Back Tap** (Settings → Accessi
 Back Tap), a Home Screen icon, or Siri ("Voice Note").
 
 The receiver is the package `iterate-iphone-voice-notes`: one element, `iphoneVoiceNotes()`, in the
-`integrations` array of the project's config worker. It has a page of its own, for the project's
+`integrations` array of the mind's config worker. It has a page of its own, for the mind's
 members: the status with a button to set the token, every step of the shortcut with the URL and
-header to copy, and the five newest notes. The project's Integrations page
+header to copy, and the five newest notes. The mind's Integrations page
 in the Dash shows an iPhone voice notes card ("Open it to set the token" until the token exists),
 with an **Open** button to the page and a **Recipe** button to this recipe.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 1. The token (the person makes it up)
@@ -26,8 +26,8 @@ never take a secret in chat). Follow the steps in order.
 The package's page (step 3) can do this step too: its **Set the token** button opens the same
 form, and **Change the token** replaces it later.
 
-The shortcut proves itself with a token in a header, and the project compares it with a secret.
-Nobody hands it out: the person invents it, and it has to be the same in the project and in the
+The shortcut proves itself with a token in a header, and the mind compares it with a secret.
+Nobody hands it out: the person invents it, and it has to be the same in the mind and in the
 shortcut. Best is a password manager that syncs to the phone; tell them:
 
 > Make a new random password of 32+ characters in your password manager (one that syncs to your
@@ -48,12 +48,12 @@ Send them the returned `url`, tell them to paste the token there, and wait until
 saved. Check that `(await itx.secrets.list()).map((s) => s.path)` includes
 `/secrets/iphone-voice-notes`.
 
-## 2. Add the receiver to the project's config repo
+## 2. Add the receiver to the mind's config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values:
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values:
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-iphone-voice-notes";
 const IMPORT = 'import { iphoneVoiceNotes } from "iterate-iphone-voice-notes";';
 const ELEMENT = "iphoneVoiceNotes()";
@@ -61,7 +61,7 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-`iphoneVoiceNotes()` answers the project's `iphone-voice-notes` host (`{ slug }` names another).
+`iphoneVoiceNotes()` answers the mind's `iphone-voice-notes` host (`{ slug }` names another).
 `/webhook` takes the shortcut's uploads; the page at `/` is for members. Its hook transcribes each
 recording with `@cf/openai/whisper-large-v3-turbo` on Workers AI (no key needed). Whisper mishears
 names: `iphoneVoiceNotes({ vocabularyKey: "household/vocabulary" })` primes it with the text kept
@@ -88,13 +88,13 @@ Give the person these taps, on the iPhone:
 3. Add **Get Contents of URL**. URL: the webhook URL from the page (its **Copy** button). Expand it:
    - **Method:** POST
    - **Headers:** one, `X-Voice-Note-Token`, with the token from step 1. No `Content-Type` is
-     needed: without one, the receiver takes the body for M4A. Not `Authorization`: the project's
+     needed: without one, the receiver takes the body for M4A. Not `Authorization`: the mind's
      host answers bearer tokens itself, before the receiver sees them.
    - **Request Body:** File, and choose the **Recorded Audio** variable.
 4. Optional: add **Vibrate Device** at the end. It buzzes once the upload is in; a failed upload
    shows an error banner instead.
 5. Run it once from the editor (the play button) while unlocked, and choose **Always Allow** for
-   the microphone and for the project's domain. Otherwise those prompts come up on the lock screen
+   the microphone and for the mind's domain. Otherwise those prompts come up on the lock screen
    later and stop the shortcut.
 6. **Settings → Action Button**, swipe to **Shortcut**, **Choose a Shortcut**, **Voice Note**.
 
@@ -107,7 +107,7 @@ iOS does not tell a shortcut when the button is released, so a note ends with a 
 ## 5. Hand each note to an agent
 
 The package puts notes on `/iphone-voice-notes` and hands them to no one. For an agent to act on
-each one, add this to the project's own `processEvent` in `worker.ts`, beside its other cases (it
+each one, add this to the mind's own `processEvent` in `worker.ts`, beside its other cases (it
 returns nothing, so the packages' hooks still run), and commit it as any change to the config repo. Name the agent that should get them
 (`await itx.agents.list()` lists them):
 
@@ -133,7 +133,7 @@ if (
   });
 ```
 
-The agent reads the note on its next turn, and the append wakes it for one. A project that routes
+The agent reads the note on its next turn, and the append wakes it for one. A mind that routes
 inputs already (a chief of staff, a triage gate) gives notes the same path as its other messages.
 
 ## 6. Prove it
@@ -173,4 +173,4 @@ Delete the shortcut (and the Action Button's choice) on the iPhone, take `iphone
 import out of `worker.ts`, and delete `/secrets/iphone-voice-notes`. Once that commit is live, take
 the card off with its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "iphone-voice-notes", card: null } })`.
-The recordings stay on `/iphone-voice-notes` and in the project's files.
+The recordings stay on `/iphone-voice-notes` and in the mind's files.

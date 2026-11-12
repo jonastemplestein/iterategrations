@@ -1,7 +1,7 @@
 {
   "name": "iterate-arbor",
   "version": "0.0.0",
-  "description": "Arbor (the school MIS) for an iterate project, as a parent: fetch helpers (arborFetch, arborGet, submitForm), readers for Arbor's page format, the login as the secret's refresh, and the card on the Dash with its page",
+  "description": "Arbor (the school MIS) for an iterate mind, as a parent: fetch helpers (arborFetch, arborGet, submitForm), readers for Arbor's page format, the login as the secret's refresh, and the card on the Dash with its page",
   "type": "module",
   "exports": {
     ".": {

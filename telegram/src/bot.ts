@@ -12,12 +12,12 @@ type Kv = {
   list(prefix?: string): Promise<{ keys: string[] }>;
 };
 
-/** The project, as this package uses it: what a config worker's `itx` already has. */
+/** The mind, as this package uses it: what a config worker's `itx` already has. */
 export type TelegramItx = {
   fetch(request: Request): Promise<Response>;
-  /** The project's own kv: only the root has it (a sub-context's `kv` is denied by default). */
+  /** The mind's own kv: only the root has it (a sub-context's `kv` is denied by default). */
   kv: Kv;
-  /** The project's files, as `sendAnswer` attaches them: whether a file exists and what it is, and
+  /** The mind's files, as `sendAnswer` attaches them: whether a file exists and what it is, and
    *  a short-lived signed URL that Telegram fetches it from. */
   files: {
     get(path: string): {
@@ -43,14 +43,14 @@ export type TelegramItx = {
   };
 };
 
-/** The agents app's root, which the default delivery uses: the project installs the app
+/** The agents app's root, which the default delivery uses: the mind installs the app
  *  (`installAgents`, as the default template does). `TelegramItx` leaves it out because the scope
  *  a worker hands a package is typed without installed apps (iterate/api `IterateContextApiWith`). */
 export type AgentsItx = { agents: { create(path: string): Promise<unknown> } };
 
 /** The stream each bot's updates are recorded on. */
 export const streamOf = (bot: string): string => `/integrations/telegram/${bot}`;
-/** Each bot's own state, in the project's kv: `telegram/<bot>/bot` (its id and username),
+/** Each bot's own state, in the mind's kv: `telegram/<bot>/bot` (its id and username),
  *  `…/allowed/<user id>`, `…/pending/<user id>`, `…/invite/<code>`. */
 export const keyOf = (bot: string, key: string): string => `telegram/${bot}/${key}`;
 /** The names of the connected bots: kv `telegram/bots/<name>`. */

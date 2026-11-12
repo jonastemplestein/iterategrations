@@ -1,15 +1,15 @@
 # Google
 
-A project's own Google OAuth client, with a **Connect Google** page of its own. Each Google account
-connected there is a secret of the project, and the project's code and agents call Google's APIs
+A mind's own Google OAuth client, with a **Connect Google** page of its own. Each Google account
+connected there is a secret of the mind, and the mind's code and agents call Google's APIs
 (Gmail, Calendar, Drive and the rest) as that account. The platform refreshes each account's token:
 the agent only ever sends a placeholder naming the account's secret, and iterate's egress swaps the
 token in.
 
-It is project code: one element, `google()`, in the `integrations` array of the project's config
-worker, which hands it the requests on the project's `google` routing slug, and every event.
+It is mind code: one element, `google()`, in the `integrations` array of the mind's config
+worker, which hands it the requests on the mind's `google` routing slug, and every event.
 
-- **The page** (members only, at the project's `google` address, `/`): the redirect URI to paste
+- **The page** (members only, at the mind's `google` address, `/`): the redirect URI to paste
   into the OAuth client at Google, a link that collects the client (its ID and its secret, on one
   form of iterate's Dash), a **Connect** button, and the connected accounts with Reconnect and
   Disconnect buttons.
@@ -17,33 +17,33 @@ worker, which hands it the requests on the project's `google` routing slug, and 
   iterate's own callback, which stores the account's tokens in the browser that opened the Connect
   link and then sends them here; the page reads what Google granted (`itx.secrets.oauthResult`)
   and lists the account.
-- **The Dash:** the project's Integrations page shows a Google card ("Create an OAuth client and
+- **The Dash:** the mind's Integrations page shows a Google card ("Create an OAuth client and
   paste its secret" until the client is saved, then "Connect an account") and a row per account:
   its address, its scopes, and buttons to the page and to the account's third-party access at
   Google. The card changes when the client is saved or deleted: the package registers it again on
   that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
-- **Gmail as a stream** (if the project wants it): three helpers for the project's code that put
+- **Gmail as a stream** (if the mind wants it): three helpers for the mind's code that put
   an account's mail on a stream, pushed by Gmail: [Gmail: push and sync](#gmail-push-and-sync).
 
 The deployment's own Google client (iterate's, on the Dash's Connect sheet) is another thing: it is
-shared by every project, and the platform keeps it. This package is for a client the project owns,
+shared by every mind, and the platform keeps it. This package is for a client the mind owns,
 with its own consent screen and its own scopes.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `google()` to the
 `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-google";
 const IMPORT = 'import { google } from "iterate-google";';
 const ELEMENT = "google()";
@@ -51,7 +51,7 @@ const MEMBER = "";
 const FILES = {};
 ```
 
-Every account is asked for `openid email profile`, which name it. Ask the person what the project
+Every account is asked for `openid email profile`, which name it. Ask the person what the mind
 should do (read mail, see the calendar, edit a sheet) and name the scopes for it, from Google's
 [list of scopes](https://developers.google.com/identity/protocols/oauth2/scopes):
 `google({ scopes: ["https://www.googleapis.com/auth/gmail.readonly"] })` asks for more. The tokens
@@ -92,19 +92,19 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    `itx.secrets.collectFromUser`, asks for the client ID and the client secret on one form, and
    keeps them as one secret, `/secrets/own-google-app`, pinned to `oauth2.googleapis.com`. The
    client ID is a public field of that secret: the form shows it as plain text and checks its shape
-   (it ends in `.apps.googleusercontent.com`), and the project reads it from its list of secrets.
-   The client secret never passes through the project's code.
+   (it ends in `.apps.googleusercontent.com`), and the mind reads it from its list of secrets.
+   The client secret never passes through the mind's code.
 3. **Connect an account**: the button opens iterate's start link, then Google asks which account,
    and for its consent; iterate stores the tokens and sends them back to the page, which shows the
    account. Connect again for each other account.
 
-Then write the accounts, their secrets and where the page is into the project's `AGENTS.md`.
+Then write the accounts, their secrets and where the page is into the mind's `AGENTS.md`.
 
 ## What the agent gets
 
 Each account is a secret, `/secrets/own-google-<connection>`, whose `accessToken` the platform
 refreshes when Google answers 401 (a Google access token lasts an hour). Send it as a placeholder in
-a plain `fetch`: the project's egress swaps the token in, and only towards the origins the secret is
+a plain `fetch`: the mind's egress swaps the token in, and only towards the origins the secret is
 pinned to. To list Gmail messages (with the `gmail.readonly` scope, and the Gmail API enabled):
 
 ```js
@@ -145,8 +145,8 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 
 ## Gmail: push and sync
 
-Three helpers put a Gmail account's mail on a stream of the project, with no polling: Gmail pushes
-each change, and the project fetches what is new. The project's own code imports them (a run script
+Three helpers put a Gmail account's mail on a stream of the mind, with no polling: Gmail pushes
+each change, and the mind fetches what is new. The mind's own code imports them (a run script
 cannot import a package):
 
 ```ts
@@ -159,7 +159,7 @@ Each call to Gmail goes with the global `fetch` and the account's placeholder,
 holds a Google access token the platform refreshes (iterate's shared Google client keeps one per
 account, `/secrets/google-<connection>`). The account needs a scope that reads mail
 (`google({ scopes: ["https://www.googleapis.com/auth/gmail.readonly"] })`), and the client's Cloud
-project needs the Gmail API.
+mind needs the Gmail API.
 
 - `watchGmail(itx, { secret, path, topicName })` asks Gmail (`users.watch`) to publish each change
   to the account's INBOX and SENT labels to the Pub/Sub topic `topicName`, and records the watch on
@@ -175,35 +175,35 @@ project needs the Gmail API.
   `gmail-sync:<path>`) and adds each new message on `path` as `gmail/message-added`, oldest first,
   at most 25 a call: the rest wait for the next call. The first call starts from the last day's
   mail, and so does a call whose history Gmail no longer keeps (about a week). Attachments, and a
-  body over 256 KiB, are project files under `<path>/<message id>/`. Drafts are skipped.
+  body over 256 KiB, are mind files under `<path>/<message id>/`. Drafts are skipped.
 
 ### At Google Cloud
 
 In the Cloud project of the OAuth client that the account's secret uses
 ([Gmail's push guide](https://developers.google.com/workspace/gmail/api/guides/push)):
 
-1. Turn on the Pub/Sub API and make a topic, `projects/<cloud project>/topics/<topic>`: that is
+1. Turn on the Pub/Sub API and make a topic, `minds/<cloud mind>/topics/<topic>`: that is
    `topicName`.
 2. Let Gmail publish to it: give `gmail-api-push@system.gserviceaccount.com` the **Pub/Sub
    Publisher** role on the topic.
-3. Make a push subscription on the topic. Its endpoint is the project's URL that hands the request
+3. Make a push subscription on the topic. Its endpoint is the mind's URL that hands the request
    to `receiveGmailPush`, with a long random token: `https://<address>/push?token=<token>`. Keep the
-   token in the password vault, never in chat. The project keeps only the token's SHA-256, which is
+   token in the password vault, never in chat. The mind keeps only the token's SHA-256, which is
    no secret: in its kv, or in its code.
 
 The token in the URL is the only proof that a request comes from the subscription. Pub/Sub can also
 sign each push with an OIDC token, which `receiveGmailPush` does not check.
 
-### In the project's worker
+### In the mind's worker
 
-A project with one account connected here, its pushes on the routing slug `gmail-push`, and the
+A mind with one account connected here, its pushes on the routing slug `gmail-push`, and the
 token's hash in kv `gmail-push/token-sha256`:
 
 ```ts
 import { pullGmail, receiveGmailPush, secretOf, watchGmail } from "iterate-google";
 
 const GMAIL = { secret: secretOf("1a2b3c4d"), path: "/integrations/gmail-ada" };
-const TOPIC = "projects/acme-example/topics/gmail-push";
+const TOPIC = "minds/acme-example/topics/gmail-push";
 
 // in fetch
 if (routingSlug === "gmail-push") {
@@ -216,7 +216,7 @@ if (routingSlug === "gmail-push") {
 
 // in processEvent
 switch (event.type) {
-  case "events.iterate.com/project/worker-updated":
+  case "events.iterate.com/mind/worker-updated":
     await watchGmail(itx, { ...GMAIL, topicName: TOPIC });
     await itx.schedules.set({
       key: "gmail-watch",
@@ -253,7 +253,7 @@ topic, and delete kv `gmail-sync:<path>`.
 ## Good to know
 
 - **The redirect URI is iterate's own callback**, `<platform origin>/.secrets/oauth/callback`,
-  the same for every project on the deployment, so a rename or a claimed hostname changes nothing at
+  the same for every mind on the deployment, so a rename or a claimed hostname changes nothing at
   Google. Google refuses a redirect URI that is not registered exactly (`redirect_uri_mismatch`).
   iterate completes a sign-in only in the browser that opened the Connect link, and only for a
   member; the page never receives a code. A client registered with an older version of this
@@ -291,9 +291,9 @@ topic, and delete kv `gmail-sync:<path>`.
   `worker.ts`, and delete `/secrets/own-google-app`. Once that commit is live, take the card off with
   its null, which takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "google", card: null } })`.
-  Then delete the client at Google, or keep it for another project.
+  Then delete the client at Google, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-google`: the secrets
   `/secrets/own-google-app` and `/secrets/own-google-<connection>`, and the kv keys `own-google/…`.
   iterate's shared Google client owns every `/secrets/google-<connection>` and
   `/integrations/google/<connection>`, for any connection name a member or an agent chooses, so a
-  project can use both. The routing slug and the card on the Dash stay `google`.
+  mind can use both. The routing slug and the card on the Dash stay `google`.

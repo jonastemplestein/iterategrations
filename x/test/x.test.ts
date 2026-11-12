@@ -1,8 +1,8 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets (a catalog that
+// Runs against dist, the package as shipped. `fakeMind` is a mind: secrets (a catalog that
 // answers the public fields a set named and never a secret one, a delete of a missing secret
 // refused as SECRET_NOT_SET, and any delete ending the OAuth attempt in flight, as the platform's
 // do), a collection link to a pretend Dash, `beginOAuth` and `completeOAuth` as the platform runs
-// them for a client of the project's own (a signed state, the redirect composed under the ingress,
+// them for a client of the mind's own (a signed state, the redirect composed under the ingress,
 // the client secret's placeholder refused unless its secret is pinned to the token endpoint, the
 // account named at `account`'s endpoint (a pretend X's users/me, called with the new token) and
 // another account refused (`IDENTITY_CONFLICT`) when `expectAccount` names one, and the same
@@ -62,7 +62,7 @@ const pendingKey = (connection: string) => `own-x/pending/${connection}`;
 const PLATFORM = "https://os.example";
 const CALLBACK = `${PLATFORM}/.secrets/oauth/callback`;
 
-function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
+function fakeMind(options: { slug?: string; scopes?: string[]; urls?: string[] } = {}) {
   const secrets: Record<string, { material: any; options: any }> = {};
   const kv: Record<string, string> = {};
   const appended: { path: string; event: any }[] = [];
@@ -237,7 +237,7 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
     }
     return page(attempt.options.next.path);
   };
-  /** The project's egress, a loaded worker's global `fetch`: the platform names every account, so
+  /** The mind's egress, a loaded worker's global `fetch`: the platform names every account, so
    *  the package calls no service, and each call is recorded and refused. */
   const egress = async (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -295,11 +295,11 @@ function fakeProject(options: { slug?: string; scopes?: string[]; urls?: string[
   };
   /** The connection of the last attempt begun. */
   const lastConnection = () => begun.at(-1)!.path.slice("/secrets/own-x-".length);
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) => {
     globalThis.fetch = egress as typeof fetch;
     return integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   };
@@ -390,7 +390,7 @@ const location = (res: Response) => decodeURIComponent(res.headers.get("location
 const card = (status: object, label: string, routingSlug = "x") => ({
   title: "X",
   description:
-    "The project's own X app: X's API as each connected account, with tokens the platform refreshes.",
+    "The mind's own X app: X's API as each connected account, with tokens the platform refreshes.",
   status,
   actions: [{ label, routingSlug, path: "/" }],
 });
@@ -410,46 +410,46 @@ const NO_CLIENT = card(
 );
 const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
 
-/** A project with Ada connected through the page, and her connection. */
+/** A mind with Ada connected through the page, and her connection. */
 async function connected() {
-  const project = fakeProject();
-  await project.setUp();
-  await project.connect(ADA);
-  return { project, connection: project.lastConnection() };
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.connect(ADA);
+  return { mind, connection: mind.lastConnection() };
 }
 
 // ------------------------------------------------------------- the integration
 
 test("every name the package keeps is its own: no secret or kv key the platform's shared X app could own", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  await project.connect(ADA, connection);
-  await project.connect(ADA); // the same account again: the older connection goes
-  project.faults.registry = 1; // leaves a tombstone behind, for a while
-  await project.page("/disconnect", { form: { id: project.lastConnection() } });
-  await project.publish(3);
-  assert.equal(project.written.secrets.size, 3);
-  for (const path of project.written.secrets) assert.match(path, /^\/secrets\/own-x-[0-9a-f]{8}$/);
-  assert.ok(project.written.kv.size >= 6, [...project.written.kv].join(" "));
-  for (const key of project.written.kv) assert.match(key, /^own-x\//);
-  for (const { path } of project.appended) assert.equal(path, "/integrations");
+  const { mind, connection } = await connected();
+  await mind.connect(GRACE);
+  await mind.connect(ADA, connection);
+  await mind.connect(ADA); // the same account again: the older connection goes
+  mind.faults.registry = 1; // leaves a tombstone behind, for a while
+  await mind.page("/disconnect", { form: { id: mind.lastConnection() } });
+  await mind.publish(3);
+  assert.equal(mind.written.secrets.size, 3);
+  for (const path of mind.written.secrets) assert.match(path, /^\/secrets\/own-x-[0-9a-f]{8}$/);
+  assert.ok(mind.written.kv.size >= 6, [...mind.written.kv].join(" "));
+  for (const key of mind.written.kv) assert.match(key, /^own-x\//);
+  for (const { path } of mind.appended) assert.equal(path, "/integrations");
 });
 
 test("it answers its own routing slug, x unless another is given; anything but its page and its landing is a 404", async () => {
   assert.equal(x().routingSlug, "x");
   assert.equal(x({ slug: "twitter" }).routingSlug, "twitter");
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/nope", "/oauth2/callback", "/connectedx", "/webhook", "/oauth2"])
-    assert.equal((await project.page(path)).status, 404, path);
-  assert.equal((await project.page("/nope", { form: {} })).status, 404);
-  assert.equal((await project.page("/connected", { form: {} })).status, 405);
-  // a member's stray path opens the project's scope and releases it, and writes nothing
-  assert.equal(project.scopes.opened, project.scopes.disposed);
-  assert.deepEqual(project.kv, {});
+    assert.equal((await mind.page(path)).status, 404, path);
+  assert.equal((await mind.page("/nope", { form: {} })).status, 404);
+  assert.equal((await mind.page("/connected", { form: {} })).status, 405);
+  // a member's stray path opens the mind's scope and releases it, and writes nothing
+  assert.equal(mind.scopes.opened, mind.scopes.disposed);
+  assert.deepEqual(mind.kv, {});
 });
 
 test("the page and the landing are for members: whatever auth.require answers is sent, and nothing is read or written", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const refused = () => new Response("Sign in\n", { status: 401 });
   for (const [path, form] of [
     ["/", undefined],
@@ -457,32 +457,32 @@ test("the page and the landing are for members: whatever auth.require answers is
     ["/disconnect", { id: "0a1b2c3d" }],
     ["/connected?id=0a1b2c3d", undefined],
   ] as const)
-    assert.equal((await project.page(path, { form }, refused)).status, 401, path);
-  assert.deepEqual(project.kv, {});
-  assert.deepEqual(project.secrets, {});
-  assert.deepEqual(project.begun, []);
-  assert.deepEqual(project.calls, []);
-  assert.equal(project.scopes.opened, 0);
+    assert.equal((await mind.page(path, { form }, refused)).status, 401, path);
+  assert.deepEqual(mind.kv, {});
+  assert.deepEqual(mind.secrets, {});
+  assert.deepEqual(mind.begun, []);
+  assert.deepEqual(mind.calls, []);
+  assert.equal(mind.scopes.opened, 0);
 });
 
 test("each request opens one scope and releases it", async () => {
-  const { project } = await connected();
-  const before = { ...project.scopes };
-  await project.page("/");
-  await project.page("/connected?id=ffffffff");
-  assert.deepEqual(project.scopes, { opened: before.opened + 2, disposed: before.disposed + 2 });
+  const { mind } = await connected();
+  const before = { ...mind.scopes };
+  await mind.page("/");
+  await mind.page("/connected?id=ffffffff");
+  assert.deepEqual(mind.scopes, { opened: before.opened + 2, disposed: before.disposed + 2 });
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page shows the callback URL to register at X, iterate's own, and the website URL from the request's origin and the base path a paths ingress strips, each with a Copy button; a form may lead only here, to iterate's start link and to X", async () => {
-  const project = fakeProject();
-  const res = await project.page("/", {
-    headers: { "x-iterate-base-path": "/projects/iterate/x" },
+  const mind = fakeMind();
+  const res = await mind.page("/", {
+    headers: { "x-iterate-base-path": "/minds/iterate/x" },
   });
   const html = await res.text();
   assert.equal(res.status, 200);
-  for (const url of [CALLBACK, `${ORIGIN}/projects/iterate/x/`])
+  for (const url of [CALLBACK, `${ORIGIN}/minds/iterate/x/`])
     assert.ok(html.includes(`data-copy="${url}"`), url);
   assert.match(html, /User authentication settings/);
   assert.match(html, /Web App, Automated App or Bot/);
@@ -500,13 +500,13 @@ test("the page shows the callback URL to register at X, iterate's own, and the w
 });
 
 test("the page links to the Dash's one form for the client, its ID public beside its secret, which never passes through this code; the form checks the ID's shape as the browser does", async () => {
-  const project = fakeProject();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  const html = await (await mind.page("/")).text();
   assert.ok(html.includes(`href="${DASH_LINK.replace(/&/g, "&amp;")}"`));
   assert.match(html, />Save the client</);
-  assert.match(project.collected[0]!.description, /Keys and tokens/);
+  assert.match(mind.collected[0]!.description, /Keys and tokens/);
   assert.deepEqual(
-    project.collected.map((input) => ({ ...input, description: undefined })),
+    mind.collected.map((input) => ({ ...input, description: undefined })),
     [
       {
         path: "/secrets/own-x-app",
@@ -530,43 +530,40 @@ test("the page links to the Dash's one form for the client, its ID public beside
   const shape = new RegExp(`^(?:${PATTERN})$`, "v");
   for (const id of [CLIENT_ID, "QWJDZEVmR2hJaktsTW5PcFFyU3Q6MTpjaQ"]) assert.match(id, shape);
   for (const value of ["two words", "short", ""]) assert.doesNotMatch(value, shape);
-  await project.setUp();
-  assert.match(await (await project.page("/")).text(), />Replace it</);
+  await mind.setUp();
+  assert.match(await (await mind.page("/")).text(), />Replace it</);
 });
 
 test("the client is read from the catalog's public field: the page shows its ID, Connect sends it, and the kv keeps no copy", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  await mind.setUp();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /Client ID a-made-up-x-client-id/);
   assert.doesNotMatch(html, /has no public client ID/);
-  await project.start();
-  assert.equal(project.begun[0]!.options.clientId, CLIENT_ID);
-  assert.ok(!Object.values(project.kv).some((value) => value.includes(CLIENT_ID)));
+  await mind.start();
+  assert.equal(mind.begun[0]!.options.clientId, CLIENT_ID);
+  assert.ok(!Object.values(mind.kv).some((value) => value.includes(CLIENT_ID)));
 });
 
 test("a secret without the public field is not set up: the page asks to save the client again, and Connect is refused", async () => {
-  const project = fakeProject();
-  project.secrets["/secrets/own-x-app"] = structuredClone(SECRET_ALONE);
-  const html = await (await project.page("/")).text();
+  const mind = fakeMind();
+  mind.secrets["/secrets/own-x-app"] = structuredClone(SECRET_ALONE);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /has no public client ID\. Save the client again/);
   assert.match(html, />Save the client</);
   assert.doesNotMatch(html, /Client ID a-made-up/);
   assert.doesNotMatch(html, /action="connect"/);
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client first/,
-  );
-  assert.deepEqual(project.begun, []);
+  assert.match(location(await mind.page("/connect", { form: {} })), /error=Save the client first/);
+  assert.deepEqual(mind.begun, []);
 });
 
 test("no other site can frame the page's answers or the landing's", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   const answers = [
-    await project.page("/connect", { form: {} }),
-    await project.page("/disconnect", { form: { id: "ffffffff" } }),
-    await project.page("/connected?id=ffffffff"),
-    await project.connect(ADA, connection),
+    await mind.page("/connect", { form: {} }),
+    await mind.page("/disconnect", { form: { id: "ffffffff" } }),
+    await mind.page("/connected?id=ffffffff"),
+    await mind.connect(ADA, connection),
   ];
   for (const res of answers) {
     assert.equal(res.headers.get("x-frame-options"), "DENY", res.headers.get("location")!);
@@ -577,21 +574,18 @@ test("no other site can frame the page's answers or the landing's", async () => 
 // ------------------------------------------------------------------ connect
 
 test("Connect needs the client; then it begins OAuth with X's endpoints, the callback, the scopes, the client's credentials in a Basic header, the client secret's placeholder and users/me, which names the account, sends the person to iterate's start link, and keeps the attempt by its connection", async () => {
-  const project = fakeProject();
-  assert.match(
-    location(await project.page("/connect", { form: {} })),
-    /error=Save the client first/,
-  );
-  assert.deepEqual(project.begun, []);
-  await project.setUp();
-  const res = await project.page("/connect", { form: {} });
+  const mind = fakeMind();
+  assert.match(location(await mind.page("/connect", { form: {} })), /error=Save the client first/);
+  assert.deepEqual(mind.begun, []);
+  await mind.setUp();
+  const res = await mind.page("/connect", { form: {} });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location")!);
   assert.equal(to.origin, PLATFORM);
   assert.match(to.pathname, /^\/\.secrets\/oauth\/start\//);
-  const connection = project.lastConnection();
+  const connection = mind.lastConnection();
   assert.match(connection, /^[0-9a-f]{8}$/);
-  assert.deepEqual(project.begun, [
+  assert.deepEqual(mind.begun, [
     {
       path: `/secrets/own-x-${connection}`,
       options: {
@@ -607,16 +601,13 @@ test("Connect needs the client; then it begins OAuth with X's endpoints, the cal
       },
     },
   ]);
-  const attempt = JSON.parse(project.kv[pendingKey(connection)]!);
+  const attempt = JSON.parse(mind.kv[pendingKey(connection)]!);
   assert.equal(attempt.connection, connection);
-  assert.equal(attempt.nonce, project.platform.attempts[`/secrets/own-x-${connection}`]!.nonce);
+  assert.equal(attempt.nonce, mind.platform.attempts[`/secrets/own-x-${connection}`]!.nonce);
   assert.ok(Math.abs(Date.now() - attempt.at) < 5000);
   // nothing is listed until X comes back
-  assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
-    0,
-  );
-  const html = await (await project.page("/")).text();
+  assert.equal(Object.keys(mind.kv).filter((key) => key.startsWith("own-x/accounts/")).length, 0);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /<form method="post" action="connect">/);
   assert.match(
     html,
@@ -625,60 +616,60 @@ test("Connect needs the client; then it begins OAuth with X's endpoints, the cal
 });
 
 test("scopes and urls ask for more, beside the package's own; the page lists every scope it asks for", async () => {
-  const project = fakeProject({
+  const mind = fakeMind({
     scopes: ["tweet.write", "users.read"],
     urls: ["https://ads-api.x.com", "https://api.x.com"],
   });
-  await project.setUp();
-  await project.start();
-  const { options } = project.begun[0]!;
+  await mind.setUp();
+  await mind.start();
+  const { options } = mind.begun[0]!;
   assert.equal(options.scope, "tweet.read users.read offline.access tweet.write");
   assert.deepEqual(options.urls, [...URLS, "https://ads-api.x.com"]);
-  assert.match(await (await project.page("/")).text(), /<code>tweet\.write<\/code>/);
+  assert.match(await (await mind.page("/")).text(), /<code>tweet\.write<\/code>/);
 });
 
 test("Connect forgets the attempts that never came back, after an hour, and a new connection's pending secret with them", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  await project.start();
-  const stale = project.lastConnection();
-  project.kv[pendingKey(stale)] = JSON.stringify({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.start();
+  const stale = mind.lastConnection();
+  mind.kv[pendingKey(stale)] = JSON.stringify({
     connection: stale,
     nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  await project.start();
-  const fresh = project.lastConnection();
-  await project.start();
-  const next = project.lastConnection();
+  await mind.start();
+  const fresh = mind.lastConnection();
+  await mind.start();
+  const next = mind.lastConnection();
   assert.deepEqual(
-    Object.keys(project.kv)
+    Object.keys(mind.kv)
       .filter((key) => key.startsWith("own-x/pending/"))
       .sort(),
     [pendingKey(fresh), pendingKey(next)].sort(),
   );
   // its delete ended the platform's attempt
-  assert.equal(project.platform.attempts[`/secrets/own-x-${stale}`], undefined);
+  assert.equal(mind.platform.attempts[`/secrets/own-x-${stale}`], undefined);
 });
 
 // --------------------------------------------------------------- the landing
 
 test("iterate's callback completes the attempt and sends the person to the landing, which keeps the account the platform named, registers the card then the row, and shows the page; the package calls no service of its own", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const connection = project.lastConnection();
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const connection = mind.lastConnection();
   const path = `/secrets/own-x-${connection}`;
-  project.x.codes["a-made-up-code"] = ADA;
-  const before = project.registry().length;
-  const res = await project.callback({ state, code: "a-made-up-code" });
+  mind.x.codes["a-made-up-code"] = ADA;
+  const before = mind.registry().length;
+  const res = await mind.callback({ state, code: "a-made-up-code" });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
-  assert.deepEqual(project.completed, [{ path, input: { code: "a-made-up-code", state } }]);
+  assert.deepEqual(mind.completed, [{ path, input: { code: "a-made-up-code", state } }]);
   // the tokens went no further than the pin the package asked for
-  assert.deepEqual(project.secrets[path]!.options.urls, URLS);
-  assert.deepEqual(project.calls, []);
-  const account = JSON.parse(project.kv[`own-x/accounts/${connection}`]!);
+  assert.deepEqual(mind.secrets[path]!.options.urls, URLS);
+  assert.deepEqual(mind.calls, []);
+  const account = JSON.parse(mind.kv[`own-x/accounts/${connection}`]!);
   assert.deepEqual(
     { ...account, at: undefined },
     {
@@ -689,13 +680,13 @@ test("iterate's callback completes the attempt and sends the person to the landi
     },
   );
   assert.ok(Math.abs(Date.now() - Date.parse(account.at)) < 5000);
-  assert.equal(project.kv[pendingKey(connection)], undefined);
+  assert.equal(mind.kv[pendingKey(connection)], undefined);
   // the card first: a row stands under its card alone
-  assert.deepEqual(project.registry().slice(before), [
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONFIGURED, payload: { integration: "x", card: READY } },
     { type: CONNECTION_CONFIGURED, payload: { integration: "x", connection, row: row() } },
   ]);
-  const html = await (await project.page("/?connected=%40fake_ada")).text();
+  const html = await (await mind.page("/?connected=%40fake_ada")).text();
   assert.match(html, /Connected @fake_ada\./);
   assert.ok(html.includes(`<b>@fake_ada</b> <span class="muted"><code>${path}</code>`));
   assert.match(html, /tweet\.read users\.read offline\.access/);
@@ -704,101 +695,95 @@ test("iterate's callback completes the attempt and sends the person to the landi
 });
 
 test("a landing with an unknown, missing or hour-old attempt is refused and writes nothing", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  await project.start();
-  const old = project.lastConnection();
-  project.kv[pendingKey(old)] = JSON.stringify({
+  const mind = fakeMind();
+  await mind.setUp();
+  await mind.start();
+  const old = mind.lastConnection();
+  mind.kv[pendingKey(old)] = JSON.stringify({
     connection: old,
     nonce: "nonce-1",
     at: Date.now() - 61 * 60 * 1000,
   });
-  const kv = structuredClone(project.kv);
-  const secrets = structuredClone(project.secrets);
-  const before = project.registry().length;
+  const kv = structuredClone(mind.kv);
+  const secrets = structuredClone(mind.secrets);
+  const before = mind.registry().length;
   for (const query of ["?id=ffffffff", "?id=", "", "?id=not-a-connection", `?id=${old}`]) {
-    const res = await project.page(`/connected${query}`);
+    const res = await mind.page(`/connected${query}`);
     assert.match(
       location(res),
       /error=iterate came back from a sign-in this page did not start, or that is over an hour old/,
       query,
     );
   }
-  assert.deepEqual(project.kv, kv);
-  assert.deepEqual(project.secrets, secrets);
-  assert.equal(project.registry().length, before);
+  assert.deepEqual(mind.kv, kv);
+  assert.deepEqual(mind.secrets, secrets);
+  assert.equal(mind.registry().length, before);
 });
 
 test("X's no is iterate's callback's to show: the landing is never reached, and nothing is connected", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const res = await project.callback({ error: "access_denied", state });
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const res = await mind.callback({ error: "access_denied", state });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /The provider declined: access_denied/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
-  assert.deepEqual(project.completed, []);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-x-app"]);
+  assert.deepEqual(mind.completed, []);
 });
 
 test("an exchange that fails is iterate's callback's to show: nothing is stored, the landing is never reached, and nothing is listed", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const state = await project.start();
-  const before = project.registry().length;
-  const res = await project.callback({ state, code: "a-code-x-never-issued" });
+  const mind = fakeMind();
+  await mind.setUp();
+  const state = await mind.start();
+  const before = mind.registry().length;
+  const res = await mind.callback({ state, code: "a-code-x-never-issued" });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /the token endpoint answered 400 \(invalid_request\)/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
-  assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
-    0,
-  );
-  assert.equal(project.registry().length, before);
-  assert.match(await (await project.page("/")).text(), /None yet/);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-x-app"]);
+  assert.equal(Object.keys(mind.kv).filter((key) => key.startsWith("own-x/accounts/")).length, 0);
+  assert.equal(mind.registry().length, before);
+  assert.match(await (await mind.page("/")).text(), /None yet/);
 });
 
 test("a platform that names no account (one older than the account endpoint) connects nothing: the new connection's secret goes", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  project.platform.lookups = false;
-  const before = project.registry().length;
-  const res = await project.connect(ADA);
+  const mind = fakeMind();
+  await mind.setUp();
+  mind.platform.lookups = false;
+  const before = mind.registry().length;
+  const res = await mind.connect(ADA);
   assert.match(location(res), /error=The platform named no account for these tokens/);
-  assert.deepEqual(Object.keys(project.secrets), ["/secrets/own-x-app"]);
-  assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
-    0,
-  );
-  assert.equal(project.registry().length, before);
+  assert.deepEqual(Object.keys(mind.secrets), ["/secrets/own-x-app"]);
+  assert.equal(Object.keys(mind.kv).filter((key) => key.startsWith("own-x/accounts/")).length, 0);
+  assert.equal(mind.registry().length, before);
 });
 
 test("an account users/me names no username for is listed by its id, with no Open button", async () => {
-  const project = fakeProject();
-  await project.setUp();
-  const res = await project.connect({ id: "1004", username: "" });
+  const mind = fakeMind();
+  await mind.setUp();
+  const res = await mind.connect({ id: "1004", username: "" });
   assert.equal(res.headers.get("location"), "./?connected=1004");
-  const connection = project.lastConnection();
-  assert.equal(JSON.parse(project.kv[`own-x/accounts/${connection}`]!).account, "1004");
-  const { row: registered } = project.registry().at(-1)!.payload;
+  const connection = mind.lastConnection();
+  assert.equal(JSON.parse(mind.kv[`own-x/accounts/${connection}`]!).account, "1004");
+  const { row: registered } = mind.registry().at(-1)!.payload;
   assert.equal(registered.account, "1004");
   assert.deepEqual(registered.actions, [{ label: "Manage", routingSlug: "x", path: "/" }]);
 });
 
 test("the same account connected twice keeps one row: the older connection's secret and row go", async () => {
-  const { project, connection: older } = await connected();
-  await project.connect(GRACE);
-  const grace = project.lastConnection();
-  const before = project.registry().length;
-  const res = await project.connect(ADA);
-  const newer = project.lastConnection();
+  const { mind, connection: older } = await connected();
+  await mind.connect(GRACE);
+  const grace = mind.lastConnection();
+  const before = mind.registry().length;
+  const res = await mind.connect(ADA);
+  const newer = mind.lastConnection();
   assert.notEqual(newer, older);
   assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
-  assert.equal(project.secrets[`/secrets/own-x-${older}`], undefined);
-  assert.equal(project.kv[`own-x/accounts/${older}`], undefined);
-  assert.equal(project.kv[`own-x/removed/${older}`], undefined, "its null row landed");
-  assert.ok(project.secrets[`/secrets/own-x-${newer}`]);
-  assert.ok(project.secrets[`/secrets/own-x-${grace}`], "another account stays");
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets[`/secrets/own-x-${older}`], undefined);
+  assert.equal(mind.kv[`own-x/accounts/${older}`], undefined);
+  assert.equal(mind.kv[`own-x/removed/${older}`], undefined, "its null row landed");
+  assert.ok(mind.secrets[`/secrets/own-x-${newer}`]);
+  assert.ok(mind.secrets[`/secrets/own-x-${grace}`], "another account stays");
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "x", connection: older, row: null },
@@ -809,7 +794,7 @@ test("the same account connected twice keeps one row: the older connection's sec
       payload: { integration: "x", connection: newer, row: row() },
     },
   ]);
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.equal(html.match(/<b>@fake_ada<\/b>/g)!.length, 1);
   assert.match(html, /<b>@fake_grace<\/b>/);
 });
@@ -817,13 +802,13 @@ test("the same account connected twice keeps one row: the older connection's sec
 // --------------------------------------------------------------- reconnect
 
 test("Reconnect begins OAuth again on the same connection, held to its account (expectAccount, against the id users/me names); the callback keeps the connection", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   const path = `/secrets/own-x-${connection}`;
-  const token = project.secrets[path]!.material.accessToken;
-  const res = await project.connect(ADA, connection);
+  const token = mind.secrets[path]!.material.accessToken;
+  const res = await mind.connect(ADA, connection);
   assert.equal(res.headers.get("location"), "./?connected=%40fake_ada");
-  assert.equal(project.lastConnection(), connection);
-  assert.deepEqual(project.begun.at(-1), {
+  assert.equal(mind.lastConnection(), connection);
+  assert.deepEqual(mind.begun.at(-1), {
     path,
     options: {
       authorizationEndpoint: "https://x.com/i/oauth2/authorize",
@@ -838,56 +823,53 @@ test("Reconnect begins OAuth again on the same connection, held to its account (
       expectAccount: "1001",
     },
   });
-  assert.notEqual(project.secrets[path]!.material.accessToken, token, "new tokens");
-  assert.equal(JSON.parse(project.kv[`own-x/accounts/${connection}`]!).account, "@fake_ada");
-  assert.equal(
-    Object.keys(project.kv).filter((key) => key.startsWith("own-x/accounts/")).length,
-    1,
-  );
-  assert.deepEqual(project.registry().at(-1), {
+  assert.notEqual(mind.secrets[path]!.material.accessToken, token, "new tokens");
+  assert.equal(JSON.parse(mind.kv[`own-x/accounts/${connection}`]!).account, "@fake_ada");
+  assert.equal(Object.keys(mind.kv).filter((key) => key.startsWith("own-x/accounts/")).length, 1);
+  assert.deepEqual(mind.registry().at(-1), {
     type: CONNECTION_CONFIGURED,
     payload: { integration: "x", connection, row: row() },
   });
   // an unknown connection is refused before X is asked
-  const begun = project.begun.length;
+  const begun = mind.begun.length;
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/connect", { form: { id } })),
+      location(await mind.page("/connect", { form: { id } })),
       /error=Unknown account/,
       id,
     );
-  assert.equal(project.begun.length, begun);
+  assert.equal(mind.begun.length, begun);
 });
 
 test("a Reconnect that comes back as another account, even one connected already, is refused by the platform before anything is stored: its callback shows it, and nothing changes", async () => {
-  const { project, connection } = await connected();
-  await project.connect(GRACE);
-  const secrets = structuredClone(project.secrets);
-  const before = project.registry().length;
-  const res = await project.connect(GRACE, connection);
+  const { mind, connection } = await connected();
+  await mind.connect(GRACE);
+  const secrets = structuredClone(mind.secrets);
+  const before = mind.registry().length;
+  const res = await mind.connect(GRACE, connection);
   assert.equal(res.status, 400);
   assert.match(
     await res.text(),
     /the provider authorized a different account \(1002\) than this connection's \(1001\)/,
   );
-  assert.deepEqual(project.secrets, secrets);
-  assert.equal(project.registry().length, before);
-  const html = await (await project.page("/")).text();
+  assert.deepEqual(mind.secrets, secrets);
+  assert.equal(mind.registry().length, before);
+  const html = await (await mind.page("/")).text();
   assert.match(html, /<b>@fake_ada<\/b>/);
   assert.match(html, /<b>@fake_grace<\/b>/);
 });
 
 test("an account reconnected after a removal that did not finish keeps its row at the next publish", async () => {
-  const { project, connection } = await connected();
+  const { mind, connection } = await connected();
   // a Disconnect that stopped after its tombstone: the secret gone, the account still listed
-  delete project.secrets[`/secrets/own-x-${connection}`];
-  project.kv[`own-x/removed/${connection}`] = JSON.stringify({ at: new Date().toISOString() });
-  await project.connect(ADA, connection);
-  assert.equal(project.kv[`own-x/removed/${connection}`], undefined);
-  await project.publish(9);
-  assert.ok(project.kv[`own-x/accounts/${connection}`]);
+  delete mind.secrets[`/secrets/own-x-${connection}`];
+  mind.kv[`own-x/removed/${connection}`] = JSON.stringify({ at: new Date().toISOString() });
+  await mind.connect(ADA, connection);
+  assert.equal(mind.kv[`own-x/removed/${connection}`], undefined);
+  await mind.publish(9);
+  assert.ok(mind.kv[`own-x/accounts/${connection}`]);
   assert.deepEqual(
-    project
+    mind
       .registry()
       .filter((event) => event.payload.connection === connection)
       .at(-1)!.payload.row,
@@ -898,80 +880,80 @@ test("an account reconnected after a removal that did not finish keeps its row a
 // --------------------------------------------------------------- disconnect
 
 test("Disconnect deletes the account's secret and kv entry, takes its row away and registers the card; the app stays authorized at X", async () => {
-  const { project, connection } = await connected();
-  const before = project.registry().length;
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  const before = mind.registry().length;
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-  assert.ok(project.secrets["/secrets/own-x-app"], "the client's secret stays");
-  assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
-  assert.deepEqual(project.registry().slice(before), [
+  assert.equal(mind.secrets[`/secrets/own-x-${connection}`], undefined);
+  assert.ok(mind.secrets["/secrets/own-x-app"], "the client's secret stays");
+  assert.equal(mind.kv[`own-x/accounts/${connection}`], undefined);
+  assert.deepEqual(mind.registry().slice(before), [
     { type: CONNECTION_CONFIGURED, payload: { integration: "x", connection, row: null } },
     { type: CONFIGURED, payload: { integration: "x", card: NO_ACCOUNT } },
   ]);
-  const html = await (await project.page("/")).text();
+  const html = await (await mind.page("/")).text();
   assert.match(html, /The app stays authorized at X/);
   assert.match(html, /None yet/);
   // an unknown one changes nothing
   for (const id of ["ffffffff", "not-a-connection"])
     assert.match(
-      location(await project.page("/disconnect", { form: { id } })),
+      location(await mind.page("/disconnect", { form: { id } })),
       /error=Unknown account/,
     );
 });
 
 test("a Disconnect whose secret cannot be deleted says so, and keeps the account and its row for another try", async () => {
-  const { project, connection } = await connected();
-  const before = project.registry().length;
-  project.faults.deletes = true;
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  const before = mind.registry().length;
+  mind.faults.deletes = true;
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.match(location(res), /error=the secret store is unavailable/);
-  assert.ok(project.secrets[`/secrets/own-x-${connection}`], "the tokens stay, and say so");
-  assert.ok(project.kv[`own-x/accounts/${connection}`]);
-  assert.equal(project.kv[`own-x/removed/${connection}`], undefined);
-  assert.equal(project.registry().length, before, "no row is taken away");
-  project.faults.deletes = false;
+  assert.ok(mind.secrets[`/secrets/own-x-${connection}`], "the tokens stay, and say so");
+  assert.ok(mind.kv[`own-x/accounts/${connection}`]);
+  assert.equal(mind.kv[`own-x/removed/${connection}`], undefined);
+  assert.equal(mind.registry().length, before, "no row is taken away");
+  mind.faults.deletes = false;
   assert.equal(
-    (await project.page("/disconnect", { form: { id: connection } })).headers.get("location"),
+    (await mind.page("/disconnect", { form: { id: connection } })).headers.get("location"),
     "./",
   );
-  assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-  assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
+  assert.equal(mind.secrets[`/secrets/own-x-${connection}`], undefined);
+  assert.equal(mind.kv[`own-x/accounts/${connection}`], undefined);
 });
 
 test("a Disconnect whose secret is already gone finishes", async () => {
-  const { project, connection } = await connected();
-  delete project.secrets[`/secrets/own-x-${connection}`];
-  const res = await project.page("/disconnect", { form: { id: connection } });
+  const { mind, connection } = await connected();
+  delete mind.secrets[`/secrets/own-x-${connection}`];
+  const res = await mind.page("/disconnect", { form: { id: connection } });
   assert.equal(res.headers.get("location"), "./");
-  assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
-  assert.equal(project.registry().at(-2)!.payload.row, null);
+  assert.equal(mind.kv[`own-x/accounts/${connection}`], undefined);
+  assert.equal(mind.registry().at(-2)!.payload.row, null);
 });
 
 test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect again, or the next publish, finishes it", async () => {
   for (const finish of ["disconnect", "publish"] as const) {
-    const { project, connection } = await connected();
-    project.faults.registry = 1;
-    const failed = await project.page("/disconnect", { form: { id: connection } });
+    const { mind, connection } = await connected();
+    mind.faults.registry = 1;
+    const failed = await mind.page("/disconnect", { form: { id: connection } });
     assert.match(location(failed), /error=the registry is unavailable/, finish);
-    assert.equal(project.secrets[`/secrets/own-x-${connection}`], undefined);
-    assert.equal(project.kv[`own-x/accounts/${connection}`], undefined);
+    assert.equal(mind.secrets[`/secrets/own-x-${connection}`], undefined);
+    assert.equal(mind.kv[`own-x/accounts/${connection}`], undefined);
     assert.ok(
-      project.kv[`own-x/removed/${connection}`],
+      mind.kv[`own-x/removed/${connection}`],
       "the tombstone stands until the null row lands",
     );
-    assert.ok(!project.registry().some((event) => event.payload.row === null));
+    assert.ok(!mind.registry().some((event) => event.payload.row === null));
     if (finish === "disconnect") {
-      const again = await project.page("/disconnect", { form: { id: connection } });
+      const again = await mind.page("/disconnect", { form: { id: connection } });
       assert.equal(again.headers.get("location"), "./", "not Unknown account");
-      assert.deepEqual(project.registry().at(-2), {
+      assert.deepEqual(mind.registry().at(-2), {
         type: CONNECTION_CONFIGURED,
         payload: { integration: "x", connection, row: null },
       });
     } else {
-      await project.publish(9);
+      await mind.publish(9);
       assert.deepEqual(
-        project
+        mind
           .registry()
           .filter((event) => event.payload.connection === connection)
           .at(-1),
@@ -982,16 +964,16 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
         },
       );
     }
-    assert.equal(project.kv[`own-x/removed/${connection}`], undefined, finish);
+    assert.equal(mind.kv[`own-x/removed/${connection}`], undefined, finish);
   }
 });
 
 // --------------------------------------------- the Dash's Integrations page
 
 test("the install hook registers the card and a row per account, keyed by the event's path and offset: a retry appends nothing new", async () => {
-  const project = fakeProject();
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind();
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "x:registry:/@5",
@@ -999,13 +981,13 @@ test("the install hook registers the card and a row per account, keyed by the ev
     },
   ]);
 
-  await project.setUp();
-  await project.connect(ADA);
-  const connection = project.lastConnection();
-  await project.publish(5); // the same event again, now set up: its key is spent, and that is fine
-  const before = project.registry().length;
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(9);
-  assert.deepEqual(project.registry().slice(before), [
+  await mind.setUp();
+  await mind.connect(ADA);
+  const connection = mind.lastConnection();
+  await mind.publish(5); // the same event again, now set up: its key is spent, and that is fine
+  const before = mind.registry().length;
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(9);
+  assert.deepEqual(mind.registry().slice(before), [
     {
       type: CONFIGURED,
       idempotencyKey: "x:registry:/@9",
@@ -1020,46 +1002,46 @@ test("the install hook registers the card and a row per account, keyed by the ev
 });
 
 test("the card asks for the client, then for an account, then is ok", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const cardAt = async (offset: number) => {
-    await project.publish(offset);
-    return project.registry().at(-1)!.payload.card;
+    await mind.publish(offset);
+    return mind.registry().at(-1)!.payload.card;
   };
   assert.deepEqual(await cardAt(1), NO_CLIENT);
-  project.secrets["/secrets/own-x-app"] = structuredClone(SECRET_ALONE);
+  mind.secrets["/secrets/own-x-app"] = structuredClone(SECRET_ALONE);
   assert.deepEqual(
     await cardAt(2),
     NO_CLIENT,
     "the secret without its public client ID is no client",
   );
-  await project.setUp();
+  await mind.setUp();
   assert.deepEqual(await cardAt(3), NO_ACCOUNT);
-  await project.connect(ADA);
-  await project.publish(4);
+  await mind.connect(ADA);
+  await mind.publish(4);
   assert.deepEqual(
-    project.registry().find((event) => event.idempotencyKey === "x:registry:/@4")!.payload.card,
+    mind.registry().find((event) => event.idempotencyKey === "x:registry:/@4")!.payload.card,
     READY,
   );
 });
 
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
-  const project = fakeProject({ slug: "twitter" });
-  await project.publish(1);
+  const mind = fakeMind({ slug: "twitter" });
+  await mind.publish(1);
   assert.deepEqual(
-    project.registry()[0]!.payload.card,
+    mind.registry()[0]!.payload.card,
     card(
       { kind: "attention", text: "Create an OAuth client and paste its secret" },
       "Connect",
       "twitter",
     ),
   );
-  await project.setUp();
-  await project.start();
-  assert.deepEqual(project.begun[0]!.options.next, {
+  await mind.setUp();
+  await mind.start();
+  assert.deepEqual(mind.begun[0]!.options.next, {
     routingSlug: "twitter",
-    path: `/connected?id=${project.lastConnection()}`,
+    path: `/connected?id=${mind.lastConnection()}`,
   });
-  const count = project.appended.length;
+  const count = mind.appended.length;
   for (const event of [
     // another secret's fact, the client's own on its secret's path, and a fact with no payload
     { type: "events.iterate.com/secret/set", path: "/", payload: { path: "/secrets/other" } },
@@ -1071,27 +1053,27 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
     { type: "events.iterate.com/secret/deleted", path: "/" },
     { type: "events.iterate.com/integration/configured", path: "/integrations" },
   ])
-    await project.integration.processEvent!({ event: { ...event, offset: 2 }, itx: project.itx });
-  assert.equal(project.appended.length, count);
+    await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
+  assert.equal(mind.appended.length, count);
 });
 
 test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
-    project.integration.processEvent!({
+    mind.integration.processEvent!({
       event: { type, path: "/", offset, payload },
-      itx: project.itx,
+      itx: mind.itx,
     });
-  await project.setUp();
+  await mind.setUp();
   for (let attempt = 0; attempt < 2; attempt++)
     await fact("events.iterate.com/secret/set", 7, {
       path: "/secrets/own-x-app",
       urls: ["https://api.x.com"],
       public: { clientId: CLIENT_ID },
     });
-  delete project.secrets["/secrets/own-x-app"];
+  delete mind.secrets["/secrets/own-x-app"];
   await fact("events.iterate.com/secret/deleted", 8, { path: "/secrets/own-x-app" });
-  assert.deepEqual(project.registry(), [
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "x:registry:/@7",
@@ -1107,12 +1089,12 @@ test("the client saved or deleted on the Dash registers the card again, keyed by
 
 test("a long username and many scopes are cut to the registry's limits; a username X would never give has no Open button", async () => {
   const long = { id: "1003", username: "u".repeat(250) };
-  const project = fakeProject({
+  const mind = fakeMind({
     scopes: Array.from({ length: 30 }, (_, at) => `made.up.scope.number.${at}`),
   });
-  await project.setUp();
-  await project.connect(long);
-  const { row: registered } = project.registry().at(-1)!.payload;
+  await mind.setUp();
+  await mind.connect(long);
+  const { row: registered } = mind.registry().at(-1)!.payload;
   assert.equal(registered.account.length, 200);
   assert.ok(registered.account.endsWith("…"));
   assert.deepEqual(registered.actions, [{ label: "Manage", routingSlug: "x", path: "/" }]);

@@ -1,8 +1,8 @@
 // herdr.test.ts — the lend over a pretend Herdr (a Unix socket that speaks Herdr's wire: one JSON line
 // a request, closed after the answer, `events.subscribe` the one connection that stays open) and a
-// pretend project: a call reaches the socket and answers its result; Herdr's events land as herdr/<kind>
+// pretend mind: a call reaches the socket and answers its result; Herdr's events land as herdr/<kind>
 // (the news durable, focus ephemeral, scroll never asked for); a pane that appears ends the connection
-// and the next one subscribes to it; a dropped connection is dialed again; and a project that comes
+// and the next one subscribes to it; a dropped connection is dialed again; and a mind that comes
 // back is given a fresh snapshot, since what happened while it was away is lost.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -75,8 +75,8 @@ function pretendHerdr() {
   };
 }
 
-/** A project that keeps what is appended to a stream, and fails on request. */
-function pretendProject() {
+/** A mind that keeps what is appended to a stream, and fails on request. */
+function pretendMind() {
   const events: HerdrEvent[] = [];
   let failures = 0;
   const itx: Itx = {
@@ -84,7 +84,7 @@ function pretendProject() {
       append: async (...batch) => {
         if (failures > 0) {
           failures--;
-          throw new Error("the project is unreachable");
+          throw new Error("the mind is unreachable");
         }
         events.push(...batch);
         return {};
@@ -110,7 +110,7 @@ afterEach(() => {
 async function started() {
   const herdr = pretendHerdr();
   await herdr.listening;
-  const project = pretendProject();
+  const mind = pretendMind();
   const bridge = createBridge({
     logPath: "/integrations/herdr/test",
     socket: herdr.path,
@@ -120,16 +120,16 @@ async function started() {
     bridge.stop();
     herdr.close();
   });
-  const lent = (await bridge.provide({ itx: project.itx })) as {
+  const lent = (await bridge.provide({ itx: mind.itx })) as {
     call(method: string, params?: unknown): Promise<any>;
   };
-  return { herdr, project, bridge, lent };
+  return { herdr, mind, bridge, lent };
 }
 
 test("with a key of its own, news goes through the key's append and focus is not sent", async () => {
   const herdr = pretendHerdr();
   await herdr.listening;
-  const project = pretendProject();
+  const mind = pretendMind();
   const signed: { path: string; event: { type: string; payload?: Record<string, unknown> } }[] = [];
   const bridge = createBridge({
     logPath: "/integrations/herdr/test",
@@ -141,7 +141,7 @@ test("with a key of its own, news goes through the key's append and focus is not
     herdr.close();
   });
   await bridge.provide({
-    itx: project.itx,
+    itx: mind.itx,
     append: async (path, event) => void signed.push({ path, event }),
   });
   await until(() => signed.length === 1, "the snapshot");
@@ -162,7 +162,7 @@ test("with a key of its own, news goes through the key's append and focus is not
     ],
   );
   // nothing goes through the key's itx: it lends and does nothing else
-  assert.equal(project.events.length, 0);
+  assert.equal(mind.events.length, 0);
 });
 
 test("the real lend imports without connecting: a default export and a description", () => {
@@ -195,9 +195,9 @@ test("call answers Herdr's result, and refuses what a call cannot carry", async 
 });
 
 test("events land as herdr/<kind>: news durable, focus ephemeral, scroll never asked for", async () => {
-  const { herdr, project } = await started();
+  const { herdr, mind } = await started();
   await until(
-    () => herdr.live().length === 1 && project.events.length === 1,
+    () => herdr.live().length === 1 && mind.events.length === 1,
     "the connection and the snapshot",
   );
 
@@ -208,9 +208,9 @@ test("events land as herdr/<kind>: news durable, focus ephemeral, scroll never a
   assert.deepEqual(subscriptions.at(-1), { type: "pane.agent_status_changed", pane_id: "w1:p1" });
 
   // the snapshot comes first: what is true now
-  assert.equal(project.events[0]!.type, "herdr/snapshot");
-  assert.equal(project.events[0]!.ephemeral, undefined);
-  assert.deepEqual((project.events[0]!.payload.data as any).snapshot.workspaces, [
+  assert.equal(mind.events[0]!.type, "herdr/snapshot");
+  assert.equal(mind.events[0]!.ephemeral, undefined);
+  assert.deepEqual((mind.events[0]!.payload.data as any).snapshot.workspaces, [
     { workspace_id: "w1" },
   ]);
 
@@ -219,10 +219,10 @@ test("events land as herdr/<kind>: news durable, focus ephemeral, scroll never a
     event: "pane.agent_status_changed",
     data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
   });
-  await until(() => project.events.length === 2, "the status");
-  assert.equal(project.events[1]!.type, "herdr/pane_agent_status_changed");
-  assert.equal(project.events[1]!.ephemeral, undefined);
-  assert.deepEqual(project.events[1]!.payload, {
+  await until(() => mind.events.length === 2, "the status");
+  assert.equal(mind.events[1]!.type, "herdr/pane_agent_status_changed");
+  assert.equal(mind.events[1]!.ephemeral, undefined);
+  assert.deepEqual(mind.events[1]!.payload, {
     event: "pane_agent_status_changed",
     data: { pane_id: "w1:p1", workspace_id: "w1", agent_status: "done", agent: "claude" },
   });
@@ -232,14 +232,14 @@ test("events land as herdr/<kind>: news durable, focus ephemeral, scroll never a
     event: "workspace_focused",
     data: { type: "workspace_focused", workspace_id: "w1" },
   });
-  await until(() => project.events.length === 3, "the focus");
-  assert.equal(project.events[2]!.type, "herdr/workspace_focused");
-  assert.equal(project.events[2]!.ephemeral, true);
-  assert.deepEqual(project.events[2]!.payload.data, { workspace_id: "w1" });
+  await until(() => mind.events.length === 3, "the focus");
+  assert.equal(mind.events[2]!.type, "herdr/workspace_focused");
+  assert.equal(mind.events[2]!.ephemeral, true);
+  assert.deepEqual(mind.events[2]!.payload.data, { workspace_id: "w1" });
 });
 
 test("a pane that appears ends the connection, and the next one subscribes to it", async () => {
-  const { herdr, project } = await started();
+  const { herdr, mind } = await started();
   await until(() => herdr.live().length === 1, "the first connection");
   herdr.setPanes([{ pane_id: "w1:p1" }, { pane_id: "w1:p2" }]);
   herdr.pushEvent({
@@ -251,45 +251,45 @@ test("a pane that appears ends the connection, and the next one subscribes to it
     "a connection that follows the new pane",
   );
   assert.equal(herdr.live().length, 1);
-  assert.ok(project.events.some((e) => e.type === "herdr/pane_created"));
-  assert.equal(project.events.filter((e) => e.type === "herdr/snapshot").length, 2);
+  assert.ok(mind.events.some((e) => e.type === "herdr/pane_created"));
+  assert.equal(mind.events.filter((e) => e.type === "herdr/snapshot").length, 2);
 });
 
 test("a tab that closes takes its panes with it: a fresh snapshot follows", async () => {
-  const { herdr, project } = await started();
+  const { herdr, mind } = await started();
   await until(
-    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 1,
+    () => mind.events.filter((e) => e.type === "herdr/snapshot").length === 1,
     "the first snapshot",
   );
   // Herdr says `tab_closed`, and no `pane_closed` for the panes in it
   herdr.setPanes([]);
   herdr.pushEvent({ event: "tab_closed", data: { type: "tab_closed", tab_id: "w1:t1" } });
   await until(
-    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 2,
+    () => mind.events.filter((e) => e.type === "herdr/snapshot").length === 2,
     "the snapshot after the tab closed",
   );
-  assert.ok(project.events.some((e) => e.type === "herdr/tab_closed"));
+  assert.ok(mind.events.some((e) => e.type === "herdr/tab_closed"));
 });
 
 test("a dropped connection is dialed again, with a fresh snapshot", async () => {
-  const { herdr, project } = await started();
+  const { herdr, mind } = await started();
   await until(
-    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 1,
+    () => mind.events.filter((e) => e.type === "herdr/snapshot").length === 1,
     "the first snapshot",
   );
   herdr.drop();
   await until(
-    () => project.events.filter((e) => e.type === "herdr/snapshot").length === 2,
+    () => mind.events.filter((e) => e.type === "herdr/snapshot").length === 2,
     "a second snapshot",
   );
   await until(() => herdr.live().length === 1, "the connection again");
 });
 
-test("a project that comes back is given a fresh snapshot, and what it missed is lost", async () => {
+test("a mind that comes back is given a fresh snapshot, and what it missed is lost", async () => {
   const herdr = pretendHerdr();
   await herdr.listening;
-  const project = pretendProject();
-  project.failNext(1000); // the project is away
+  const mind = pretendMind();
+  mind.failNext(1000); // the mind is away
   const bridge = createBridge({
     logPath: "/integrations/herdr/test",
     socket: herdr.path,
@@ -299,16 +299,16 @@ test("a project that comes back is given a fresh snapshot, and what it missed is
     bridge.stop();
     herdr.close();
   });
-  await bridge.provide({ itx: project.itx });
+  await bridge.provide({ itx: mind.itx });
   await until(() => herdr.live().length === 1, "the connection");
   herdr.pushEvent({
     event: "tab_renamed",
     data: { type: "tab_renamed", tab_id: "w1:t1", label: "x" },
   });
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(project.events.length, 0);
-  project.failNext(0);
-  await bridge.provide({ itx: project.itx }); // the project's next connection
-  await until(() => project.events.length === 1, "the snapshot");
-  assert.equal(project.events[0]!.type, "herdr/snapshot");
+  assert.equal(mind.events.length, 0);
+  mind.failNext(0);
+  await bridge.provide({ itx: mind.itx }); // the mind's next connection
+  await until(() => mind.events.length === 1, "the snapshot");
+  assert.equal(mind.events[0]!.type, "herdr/snapshot");
 });

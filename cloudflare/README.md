@@ -1,15 +1,15 @@
 # Cloudflare
 
-A project's own Cloudflare OAuth client, with a **Connect Cloudflare** page of its own. Each person
-connected there is a secret of the project, and the project's code and agents call Cloudflare's API
+A mind's own Cloudflare OAuth client, with a **Connect Cloudflare** page of its own. Each person
+connected there is a secret of the mind, and the mind's code and agents call Cloudflare's API
 as that person, on the one account they picked at consent: Workers, D1, KV, R2, containers, routes
 and the rest, as far as the scopes go. The platform refreshes each connection's token: the code only
 ever sends a placeholder naming the connection's secret, and iterate's egress swaps the token in.
 
-It is project code: one element, `cloudflare()`, in the `integrations` array of the project's config
-worker, which hands it the requests on the project's `cloudflare` routing slug, and every event.
+It is mind code: one element, `cloudflare()`, in the `integrations` array of the mind's config
+worker, which hands it the requests on the mind's `cloudflare` routing slug, and every event.
 
-- **The page** (members only, at the project's `cloudflare` address, `/`): the redirect URI and the
+- **The page** (members only, at the mind's `cloudflare` address, `/`): the redirect URI and the
   request that registers an OAuth client with it, a link that collects the client (its ID and its
   secret, on one form of iterate's Dash), a **Connect** button, and the connections with Reconnect
   and Disconnect buttons, each with the Cloudflare account its token reaches.
@@ -17,7 +17,7 @@ worker, which hands it the requests on the project's `cloudflare` routing slug, 
   to iterate's own callback, which stores the tokens in the browser that opened the Connect link
   and then sends them here; the page reads what Cloudflare granted (`itx.secrets.oauthResult`) and
   lists the connection.
-- **The Dash:** the project's Integrations page shows a Cloudflare card ("Create an OAuth client
+- **The Dash:** the mind's Integrations page shows a Cloudflare card ("Create an OAuth client
   and paste its secret" until the client is saved, then "Connect an account") and a row per
   connection: the person's address, the account their token reaches, the scopes, and buttons to the
   page and to their profile at Cloudflare. The card changes when the client is saved or deleted: the
@@ -25,25 +25,25 @@ worker, which hands it the requests on the project's `cloudflare` routing slug, 
   facts.
 
 The deployment's own Cloudflare client (iterate's, on the Dash's Connect sheet, and the one people
-sign in with) is another thing: it is shared by every project, and the platform keeps it. This
-package is for a client the project owns, with its own scopes: a deploy of iterate's platform into
+sign in with) is another thing: it is shared by every mind, and the platform keeps it. This
+package is for a client the mind owns, with its own scopes: a deploy of iterate's platform into
 the person's account, for one.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It pins the package
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It pins the package
 (built by this repo's CI and served by pkg.pr.new, never npm), adds the import and `cloudflare()` to
 the `integrations` array of `worker.ts`, probes the result as a worker, and commits it.
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-cloudflare";
 const IMPORT = 'import { cloudflare } from "iterate-cloudflare";';
 const ELEMENT = "cloudflare()";
@@ -52,7 +52,7 @@ const FILES = {};
 ```
 
 Every connection is asked for `user-details.read offline_access`, which name the person and bring
-a refresh token. Ask what the project should do and name the scopes for it, from Cloudflare's
+a refresh token. Ask what the mind should do and name the scopes for it, from Cloudflare's
 [list of scopes](https://developers.cloudflare.com/fundamentals/api/reference/permissions/):
 `cloudflare({ scopes: ["workers-scripts.read"] })` asks for more. `DEPLOY_SCOPES`, which the package
 exports, is everything a deploy of iterate's platform into the account needs (the Worker, its
@@ -84,7 +84,7 @@ which account the person grants access to, and sends them back.
 ## Use it
 
 A connection is a secret, `/secrets/own-cloudflare-<connection>`, whose placeholder a request to
-Cloudflare's API carries in its header; the project's egress swaps the token in. `listAccounts(itx)`
+Cloudflare's API carries in its header; the mind's egress swaps the token in. `listAccounts(itx)`
 answers each connection with the account its token reaches, by id, which every API route names:
 
 ```ts

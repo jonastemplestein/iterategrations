@@ -258,10 +258,10 @@ function connect(options: { secret: string; sessionUrl?: string }) {
   return { account, call, callMany, mailboxes, byRole, identities, upload };
 }
 
-/** A JMAP account for the project's own code: Fastmail's, unless `sessionUrl` names another server.
+/** A JMAP account for the mind's own code: Fastmail's, unless `sessionUrl` names another server.
  *  Its token is the `token` field of `secret`, sent as the placeholder
  *  `getSecret("<secret>", { field: "token" })`. In every worker the platform loads, the global
- *  `fetch` is the project's egress, which swaps the token in toward the origins the secret is pinned
+ *  `fetch` is the mind's egress, which swaps the token in toward the origins the secret is pinned
  *  to. Every request goes to the session URL's origin, so that origin is the one pin it needs. */
 export function mailbox(options: { secret: string; sessionUrl?: string }): JmapMailbox {
   const { account, call, callMany, mailboxes, byRole, identities, upload } = connect(options);

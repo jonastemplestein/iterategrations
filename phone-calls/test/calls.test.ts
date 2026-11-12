@@ -1,5 +1,5 @@
 // calls.test.ts — the phone lend over a pretend `jeeves-phone serve` (fake-bridge.mjs) and a
-// pretend project: a caller the line does not vouch for, and a stranger, are turned away; a known
+// pretend mind: a caller the line does not vouch for, and a stranger, are turned away; a known
 // caller gets its voice call first, a press on that caller's own voice device (provisioned once),
 // and is picked up only then, with that caller's greeting and a
 // brief that says the caller is unverified; a note in kv (the phone's, else WhatsApp's) changes
@@ -49,12 +49,12 @@ async function until<T>(what: string, look: () => T | undefined | false): Promis
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** A project whose voice app provisions devices and accepts every press a moment after it, and
+/** A mind whose voice app provisions devices and accepts every press a moment after it, and
  *  whose appends, kv and agent messages are kept; `whatsapp` is what itx.whatsappCalls.status()
  *  answers. */
-function pretendProject() {
+function pretendMind() {
   const listeners = new Map<string, (events: unknown[]) => void>();
-  const project = {
+  const mind = {
     /** Deliver events to the subscription on `path`, as the platform would. */
     say: (path: string, events: unknown[]) => listeners.get(path)?.(events),
     subscribed: [] as { path: string; name?: string }[],
@@ -73,21 +73,21 @@ function pretendProject() {
     notes: new Map<string, string>(),
     whatsapp: null as null | { with: string },
     itx: {
-      whatsappCalls: { status: async () => project.whatsapp },
+      whatsappCalls: { status: async () => mind.whatsapp },
       kv: {
-        get: async (key: string) => project.notes.get(key) ?? null,
-        put: async (key: string, value: string) => void project.notes.set(key, value),
-        delete: async (key: string) => void project.notes.delete(key),
+        get: async (key: string) => mind.notes.get(key) ?? null,
+        put: async (key: string, value: string) => void mind.notes.set(key, value),
+        delete: async (key: string) => void mind.notes.delete(key),
       },
       voice: {
         ensureVoiceDevice: async ({ client }: { client: string }) => {
-          project.provisioned.push(client);
+          mind.provisioned.push(client);
           return { path: `/voice/${client}`, agentPath: `/agents/voice/${client}` };
         },
       },
       cd: (path: string) => ({
         append: async (event: { type: string; payload: Record<string, any> }) => {
-          project.events.push({ path, type: event.type, payload: event.payload });
+          mind.events.push({ path, type: event.type, payload: event.payload });
           const { activation } = event.payload;
           // the relay accepts a press, and a call's end comes back through the subscription
           if (event.type === "events.iterate.com/voice-agent/call-started")
@@ -112,12 +112,12 @@ function pretendProject() {
           return {};
         },
         appendOffsets: async (event: { type: string; payload: Record<string, any> }) => {
-          project.events.push({ path, type: event.type, payload: event.payload });
+          mind.events.push({ path, type: event.type, payload: event.payload });
           return [0];
         },
         waitForEvent: (filter: Record<string, unknown>) =>
           new Promise((resolve, reject) =>
-            project.waits.push({
+            mind.waits.push({
               path,
               filter,
               answer: () => resolve({}),
@@ -125,7 +125,7 @@ function pretendProject() {
             }),
           ),
         readEvents: async (afterOffset?: number) => {
-          project.reads.push({ path, afterOffset });
+          mind.reads.push({ path, afterOffset });
           return { events: [], scannedThroughOffset: afterOffset ?? 0, atHead: true };
         },
         subscribe: async ({
@@ -135,37 +135,37 @@ function pretendProject() {
           target: (events: unknown[]) => void;
           name?: string;
         }) => {
-          project.subscribed.push({ path, name });
+          mind.subscribed.push({ path, name });
           listeners.set(path, target);
           return { [Symbol.dispose]() {} };
         },
       }),
       agents: {
         get: (to: string) => ({
-          message: async (text: string) => void project.messages.push({ to, text }),
+          message: async (text: string) => void mind.messages.push({ to, text }),
         }),
       },
     },
   };
-  return project;
+  return mind;
 }
 
 test("phone calls in and out, with an unverified caller ID and one call at a time across lends", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const { default: provide } = await import("../calls.ts");
-  const lent = await provide({ itx: project.itx as never });
+  const lent = await provide({ itx: mind.itx as never });
   // the device of each person the lend answers is provisioned when it starts, before any call
-  await until("the answered people's devices", () => project.provisioned.length === 2);
-  assert.deepEqual(project.provisioned, ["phone-447700900001", "phone-447700900002"]);
+  await until("the answered people's devices", () => mind.provisioned.length === 2);
+  assert.deepEqual(mind.provisioned, ["phone-447700900001", "phone-447700900002"]);
   const recorded = (type: string) =>
-    project.events.filter((event) => event.type === `phone-calls/${type}`);
+    mind.events.filter((event) => event.type === `phone-calls/${type}`);
   // what the lend gave the voice to say, on the caller's relay
   const spoken = () =>
-    project.events
+    mind.events
       .filter((event) => event.type === "events.iterate.com/voice-agent/words-given")
       .map((event) => [event.path, event.payload.text]);
   const briefOf = (client: string) =>
-    project.events.findLast(
+    mind.events.findLast(
       (event) =>
         event.type === "events.iterate.com/agent/context-added" &&
         event.path === `/agents/voice/${client}`,
@@ -215,7 +215,7 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
     /rang your phone number \(a real telephone line, not WhatsApp\)/,
   );
   assert.match(briefOf("phone-447700900001"), /a caller's number can be faked/);
-  assert.equal(JSON.parse(project.notes.get("calls/busy")!).lend, "phoneCalls");
+  assert.equal(JSON.parse(mind.notes.get("calls/busy")!).lend, "phoneCalls");
   assert.equal(lent.status()?.with, "+447700900001");
   lineSays({ event: "ended", callId: "in-2", reason: "the person hung up", answered: true });
   const ended = await until("the call's end", () => recorded("call-ended")[0]);
@@ -225,10 +225,10 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   assert.equal(ended.payload.streamPath, "/agents/voice/phone-447700900001");
   assert.match(ended.payload.activations[0], /^[0-9a-f]{32}$/);
   assert.equal(lent.status(), null);
-  await until("the busy flag cleared", () => !project.notes.has("calls/busy"));
+  await until("the busy flag cleared", () => !mind.notes.has("calls/busy"));
 
   // notes: WhatsApp's is read when the phone has none; the phone's own wins
-  project.notes.set(
+  mind.notes.set(
     "whatsapp-calls/answer/447700900002",
     JSON.stringify({
       opening: "The WhatsApp note.",
@@ -242,10 +242,7 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   assert.match(briefOf("phone-447700900002"), /Brief from WhatsApp\./);
   lineSays({ event: "ended", callId: "in-3", reason: "the person hung up", answered: true });
   await until("its end", () => recorded("call-ended").length === 2);
-  project.notes.set(
-    "phone-calls/answer/447700900002",
-    JSON.stringify({ opening: "The phone note." }),
-  );
+  mind.notes.set("phone-calls/answer/447700900002", JSON.stringify({ opening: "The phone note." }));
   lineSays({ event: "incoming", callId: "in-4", number: "447700900002", from: "+447700900002" });
   await until("the phone note's greeting", () => spoken().length === 3);
   assert.equal(spoken()[2]![1], "The phone note.");
@@ -253,11 +250,11 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   await until("its end", () => recorded("call-ended").length === 3);
 
   // a WhatsApp call in progress: nothing picked up, nothing placed
-  project.whatsapp = { with: "+447700900002" };
+  mind.whatsapp = { with: "+447700900002" };
   lineSays({ event: "incoming", callId: "in-5", number: "447700900001", from: "07700900001" });
   await until("turned away while busy", () => bridgeHeard().find((l) => l.reject === "in-5"));
   await assert.rejects(lent.call({ to: "+44 7700 900001" }), /a WhatsApp call is in progress/);
-  project.whatsapp = null;
+  mind.whatsapp = null;
 
   // a placed call: rung once its voice is on the line, reported to who asked (anyone may be rung)
   assert.match(
@@ -287,10 +284,10 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
     "a household number hears no recording notice",
   );
   assert.deepEqual(lent.hangup(), { hungUp: true, callId: "out-1" });
-  await until("the report", () => project.messages[0]);
-  assert.equal(project.messages[0]!.to, "/agents/family-chief-of-staff");
+  await until("the report", () => mind.messages[0]);
+  assert.equal(mind.messages[0]!.to, "/agents/family-chief-of-staff");
   assert.match(
-    project.messages[0]!.text,
+    mind.messages[0]!.text,
     /^\[phone call to \+447700900002 ended after \d+ s: hung up\]/,
   );
 
@@ -303,13 +300,13 @@ test("phone calls in and out, with an unverified caller ID and one call at a tim
   const testEnd = await until("the test call's end", () => recorded("call-ended")[4]);
   assert.equal(testEnd.payload.test, true);
   assert.equal(testEnd.payload.from, "?phonetest");
-  assert.equal(project.messages.length, 1, "a test call reports to nobody");
+  assert.equal(mind.messages.length, 1, "a test call reports to nobody");
   // five calls with three callers: each caller's device was provisioned once
-  assert.deepEqual(project.provisioned, ["phone-447700900001", "phone-447700900002", "phone-test"]);
+  assert.deepEqual(mind.provisioned, ["phone-447700900001", "phone-447700900002", "phone-test"]);
 });
 
 test("a call carries over a lost link, and ends once both sides have said goodbye", async () => {
-  const first = pretendProject();
+  const first = pretendMind();
   const { default: provide } = await import("../calls.ts");
   await provide({ itx: first.itx as never });
   lineSays({ event: "incoming", callId: "in-7", number: "447700900001", from: "07700900001" });
@@ -329,7 +326,7 @@ test("a call carries over a lost link, and ends once both sides have said goodby
   ]);
 
   // the link is lost: \`iterate provide\` reconnects, and the call carries over to the new link
-  const second = pretendProject();
+  const second = pretendMind();
   await provide({ itx: second.itx as never });
   await until("the call's subscription on the new link", () =>
     second.subscribed.find((row) => row.path === path),
@@ -368,48 +365,48 @@ test("a call carries over a lost link, and ends once both sides have said goodby
 }, 15_000);
 
 test("a call to someone outside the household opens with the recording notice", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const { default: provide } = await import("../calls.ts");
-  const lent = await provide({ itx: project.itx as never });
+  const lent = await provide({ itx: mind.itx as never });
   const placed = await lent.call({
     to: "+44 7700 900009",
     opening: "Good afternoon. Jeeves here.",
   });
   await until("the opening", () =>
-    project.events.find((event) => event.type === "events.iterate.com/voice-agent/words-given"),
+    mind.events.find((event) => event.type === "events.iterate.com/voice-agent/words-given"),
   );
-  const said = project.events.find(
+  const said = mind.events.find(
     (event) => event.type === "events.iterate.com/voice-agent/words-given",
   )!;
   assert.equal(
     said.payload.text,
     "Good afternoon. Jeeves here. Please note that this call is recorded.",
   );
-  const brief = project.events.find(
+  const brief = mind.events.find(
     (event) =>
       event.type === "events.iterate.com/agent/context-added" && event.path === placed.streamPath,
   )!;
   assert.match(brief.payload.content, /This call is recorded, and your opening told them so/);
   lent.hangup();
   await until("its end", () =>
-    project.events.find((event) => event.type === "phone-calls/call-ended"),
+    mind.events.find((event) => event.type === "phone-calls/call-ended"),
   );
 });
 
 test("a call keeps its agent ready from before the phone rings until it ends", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const { default: provide } = await import("../calls.ts");
-  const lent = await provide({ itx: project.itx as never });
+  const lent = await provide({ itx: mind.itx as never });
   const agent = "/agents/voice/phone-447700900021";
   const warmUp = "events.iterate.com/agent/warm-up-requested";
   const asks = () =>
-    project.events.filter((event) => event.type === warmUp && event.path === agent).length;
-  const waits = () => project.waits.filter((wait) => wait.path === agent);
+    mind.events.filter((event) => event.type === warmUp && event.path === agent).length;
+  const waits = () => mind.waits.filter((wait) => wait.path === agent);
   const rang = () => bridgeHeard().filter((line) => line.call === "+447700900021").length;
   // the line rings and answers at once here, so note what it had heard at the first ask
   let rangAtFirstAsk: number | undefined;
-  const { cd } = project.itx;
-  project.itx.cd = (path: string) => {
+  const { cd } = mind.itx;
+  mind.itx.cd = (path: string) => {
     const context = cd(path);
     if (path !== agent) return context;
     return {
@@ -447,7 +444,7 @@ test("a call keeps its agent ready from before the phone rings until it ends", a
   // the call ends: the open wait lapses, and nothing more is asked
   lent.hangup();
   await until("the end", () =>
-    project.events.find(
+    mind.events.find(
       (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
     ),
   );
@@ -457,13 +454,13 @@ test("a call keeps its agent ready from before the phone rings until it ends", a
 }, 15_000);
 
 test("a lost link never spins: an ask that cannot be sent waits its turn, and the call goes on", async () => {
-  const project = pretendProject();
+  const mind = pretendMind();
   const { default: provide } = await import("../calls.ts");
-  const lent = await provide({ itx: project.itx as never });
+  const lent = await provide({ itx: mind.itx as never });
   const agent = "/agents/voice/phone-447700900022";
-  const { cd } = project.itx;
+  const { cd } = mind.itx;
   const asked: number[] = [];
-  project.itx.cd = (path: string) => {
+  mind.itx.cd = (path: string) => {
     const context = cd(path);
     if (path !== agent) return context;
     return {
@@ -483,7 +480,7 @@ test("a lost link never spins: an ask that cannot be sent waits its turn, and th
   assert.ok(asked.length >= 3 && asked.length <= 5, `asked ${String(asked.length)} times in 2.5 s`);
   assert.deepEqual(lent.hangup(), { hungUp: true, callId });
   await until("the end", () =>
-    project.events.find(
+    mind.events.find(
       (event) => event.type === "phone-calls/call-ended" && event.payload.callId === callId,
     ),
   );

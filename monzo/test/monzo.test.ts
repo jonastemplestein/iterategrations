@@ -1,4 +1,4 @@
-// Runs against dist, the package as shipped. `fakeProject` is a project: secrets, and streams that
+// Runs against dist, the package as shipped. `fakeMind` is a mind: secrets, and streams that
 // keep what is appended to them and refuse a key used twice for another event (as the platform
 // does; the same event again is a no-op). `host` is the worker hosting the package: a scope per
 // `getItx`, counted, and a member gate that refuses unless `member` is set.
@@ -15,10 +15,7 @@ const CONFIGURED = "events.iterate.com/integration/configured";
 const ORIGIN = "https://monzo--iterate.example";
 const RECIPE = "https://github.com/jonastemplestein/iterategrations/tree/main/monzo";
 
-function fakeProject(
-  secrets: Record<string, string> = SECRETS,
-  options: { member?: boolean } = {},
-) {
+function fakeMind(secrets: Record<string, string> = SECRETS, options: { member?: boolean } = {}) {
   const appended: { path: string; event: any }[] = [];
   const scopes = { opened: 0, disposed: 0 };
   const itx: any = {
@@ -59,10 +56,10 @@ function fakeProject(
         headers: basePath ? { "x-iterate-base-path": basePath } : {},
       }),
     );
-  /** The platform's `project/worker-updated` on `/`, at `offset`: the install hook. */
+  /** The platform's `mind/worker-updated` on `/`, at `offset`: the install hook. */
   const publish = (offset: number) =>
     integration.processEvent!({
-      event: { type: "events.iterate.com/project/worker-updated", path: "/", offset },
+      event: { type: "events.iterate.com/mind/worker-updated", path: "/", offset },
       itx,
     });
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
@@ -84,23 +81,23 @@ const post = (path: string, body: unknown) =>
   });
 
 test("it answers the monzo routing slug; a webhook is public, so no member is asked for, and each request opens one scope and releases it", async () => {
-  const project = fakeProject();
-  assert.equal(project.integration.routingSlug, "monzo");
-  const res = await project.serve(
+  const mind = fakeMind();
+  assert.equal(mind.integration.routingSlug, "monzo");
+  const res = await mind.serve(
     post("/webhook/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
   );
   assert.equal(res.status, 200);
-  await project.serve(post("/webhook/nope/nope", {}));
-  assert.deepEqual(project.scopes, { opened: 2, disposed: 2 });
+  await mind.serve(post("/webhook/nope/nope", {}));
+  assert.deepEqual(mind.scopes, { opened: 2, disposed: 2 });
 });
 
 test("a transaction.created for an account becomes one event on that account's stream, the transaction untouched", async () => {
-  const project = fakeProject();
-  const res = await project.serve(
+  const mind = fakeMind();
+  const res = await mind.serve(
     post("/webhook/joint-account/joint-secret", { type: "transaction.created", data: transaction }),
   );
   assert.equal(res.status, 200);
-  assert.deepEqual(project.appended, [
+  assert.deepEqual(mind.appended, [
     {
       path: "/monzo/joint-account",
       event: {
@@ -110,20 +107,20 @@ test("a transaction.created for an account becomes one event on that account's s
       },
     },
   ]);
-  await project.serve(
+  await mind.serve(
     post("/webhook/jonas-personal/personal-secret", {
       type: "transaction.created",
       data: { ...transaction, id: "tx_0002" },
     }),
   );
   assert.deepEqual(
-    project.appended.map((a) => a.path),
+    mind.appended.map((a) => a.path),
     ["/monzo/joint-account", "/monzo/jonas-personal"],
   );
 });
 
 test("an account's secret opens only that account: the other's, a wrong one, an unknown or malformed account, or nothing is a 404 that stores nothing", async () => {
-  const project = fakeProject(SECRETS, { member: true });
+  const mind = fakeMind(SECRETS, { member: true });
   for (const path of [
     "/webhook/joint-account/personal-secret",
     "/webhook/jonas-personal/joint-secret",
@@ -137,33 +134,33 @@ test("an account's secret opens only that account: the other's, a wrong one, an 
     "/../joint-secret",
     "/Joint-Account/joint-secret",
   ]) {
-    const res = await project.serve(post(path, { type: "transaction.created", data: transaction }));
+    const res = await mind.serve(post(path, { type: "transaction.created", data: transaction }));
     assert.equal(res.status, 404, path);
   }
-  assert.deepEqual(project.appended, []);
+  assert.deepEqual(mind.appended, []);
 });
 
 test("a trailing path after the secret is fine; other event types are answered 200 and ignored; garbage is not stored", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   const url = "/webhook/joint-account/joint-secret";
-  const trailing = await project.serve(
+  const trailing = await mind.serve(
     post(`${url}/anything`, { type: "transaction.created", data: transaction }),
   );
   assert.equal(trailing.status, 200);
-  assert.equal(project.appended.length, 1);
-  const other = await project.serve(post(url, { type: "balance.changed", data: {} }));
+  assert.equal(mind.appended.length, 1);
+  const other = await mind.serve(post(url, { type: "balance.changed", data: {} }));
   assert.deepEqual(await other.json(), { ok: true, ignored: "balance.changed" });
-  assert.equal((await project.serve(post(url, "not json"))).status, 200);
+  assert.equal((await mind.serve(post(url, "not json"))).status, 200);
   assert.equal(
-    (await project.serve(post(url, { type: "transaction.created", data: {} }))).status,
+    (await mind.serve(post(url, { type: "transaction.created", data: {} }))).status,
     400,
   );
-  assert.equal(project.appended.length, 1);
+  assert.equal(mind.appended.length, 1);
 });
 
 test("only POST is accepted", async () => {
-  const project = fakeProject();
-  const res = await project.serve(
+  const mind = fakeMind();
+  const res = await mind.serve(
     new Request("https://monzo--iterate.example/webhook/joint-account/joint-secret"),
   );
   assert.equal(res.status, 405);
@@ -184,9 +181,9 @@ const card = (status: object) => ({
 });
 
 test("the install hook registers the card, keyed by the event's path and offset: attention until the sign-in exists, ok after", async () => {
-  const project = fakeProject({ ...SECRETS });
-  for (let attempt = 0; attempt < 2; attempt++) await project.publish(5);
-  assert.deepEqual(project.registry(), [
+  const mind = fakeMind({ ...SECRETS });
+  for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
+  assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
       idempotencyKey: "monzo:registry:/@5",
@@ -196,11 +193,11 @@ test("the install hook registers the card, keyed by the event's path and offset:
       },
     },
   ]);
-  project.secrets["/secrets/monzo"] = "the sign-in";
-  await project.publish(5); // the same event again, now signed in: its key is spent, and that is fine
-  assert.equal(project.registry().length, 1);
-  await project.publish(9);
-  assert.deepEqual(project.registry()[1], {
+  mind.secrets["/secrets/monzo"] = "the sign-in";
+  await mind.publish(5); // the same event again, now signed in: its key is spent, and that is fine
+  assert.equal(mind.registry().length, 1);
+  await mind.publish(9);
+  assert.deepEqual(mind.registry()[1], {
     type: CONFIGURED,
     idempotencyKey: "monzo:registry:/@9",
     payload: { integration: "monzo", card: card({ kind: "ok" }) },
@@ -208,39 +205,36 @@ test("the install hook registers the card, keyed by the event's path and offset:
 });
 
 test("the hook ignores every other event", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const type of ["monzo/transaction-created", "events.iterate.com/secret/set"])
-    await project.integration.processEvent!({
+    await mind.integration.processEvent!({
       event: { type, path: "/monzo/joint-account", offset: 3 },
       itx: {} as any,
     });
-  assert.deepEqual(project.appended, []);
+  assert.deepEqual(mind.appended, []);
 });
 
 // ------------------------------------------------------------------- the page
 
 test("the page is for members: a non-member gets what auth.require answers, and nothing is read", async () => {
-  const project = fakeProject();
+  const mind = fakeMind();
   for (const path of ["/", "/nope"]) {
-    const res = await project.page(path);
+    const res = await mind.page(path);
     assert.equal(res.status, 401, path);
     assert.equal(await res.text(), "Sign in\n");
   }
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });
 
 test("the page shows the sign-in, the accounts the webhook secrets name, and the webhook URL's shape with a Copy button, with the base path a paths ingress strips; never a secret's value", async () => {
-  const project = fakeProject(
-    { ...SECRETS, "/secrets/monzo-webhook-Not_A_Name": "x" },
-    { member: true },
-  );
-  let res = await project.page("/");
+  const mind = fakeMind({ ...SECRETS, "/secrets/monzo-webhook-Not_A_Name": "x" }, { member: true });
+  let res = await mind.page("/");
   let html = await res.text();
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
   assert.match(html, /<h1>Monzo<\/h1>/);
   assert.match(html, /Set up by your coding agent: see the recipe/);
-  const hint = `Set up Monzo in my iterate project. Follow the recipe at ${RECIPE}`;
+  const hint = `Set up Monzo in my iterate mind. Follow the recipe at ${RECIPE}`;
   assert.ok(html.includes(`data-copy="${hint}"`), hint);
   assert.ok(html.includes(`data-copy="${ORIGIN}/webhook/&lt;account&gt;/&lt;secret&gt;"`));
   assert.ok(html.includes(`href="${RECIPE}"`));
@@ -248,26 +242,23 @@ test("the page shows the sign-in, the accounts the webhook secrets name, and the
   assert.deepEqual(accounts, ["joint-account", "jonas-personal"]);
   for (const value of Object.values(SECRETS)) assert.ok(!html.includes(value), value);
 
-  project.secrets["/secrets/monzo"] = "a-made-up-sign-in";
-  res = await project.page("/", "/projects/iterate/monzo");
+  mind.secrets["/secrets/monzo"] = "a-made-up-sign-in";
+  res = await mind.page("/", "/minds/iterate/monzo");
   html = await res.text();
-  assert.match(
-    html,
-    /Signed in\. The project has the sign-in secret <code>\/secrets\/monzo<\/code>/,
-  );
+  assert.match(html, /Signed in\. The mind has the sign-in secret <code>\/secrets\/monzo<\/code>/);
   assert.doesNotMatch(html, /coding agent/);
   assert.ok(
     html.includes(
-      `data-copy="https://os.iterate.example/projects/iterate/monzo/webhook/&lt;account&gt;/&lt;secret&gt;"`,
+      `data-copy="https://os.iterate.example/minds/iterate/monzo/webhook/&lt;account&gt;/&lt;secret&gt;"`,
     ),
   );
   assert.ok(!html.includes("a-made-up-sign-in"));
-  const empty = await fakeProject({}, { member: true }).page("/");
+  const empty = await fakeMind({}, { member: true }).page("/");
   assert.match(await empty.text(), /None yet/);
 });
 
 test("the page sends a CSP with its one nonce'd script, no form, and no frame, and X-Frame-Options DENY", async () => {
-  const res = await fakeProject(SECRETS, { member: true }).page("/");
+  const res = await fakeMind(SECRETS, { member: true }).page("/");
   const html = await res.text();
   const csp = res.headers.get("content-security-policy")!;
   assert.match(csp, /default-src 'none'/);
@@ -282,9 +273,9 @@ test("the page sends a CSP with its one nonce'd script, no form, and no frame, a
 });
 
 test("a member's stray path is a 404 that reads nothing", async () => {
-  const project = fakeProject(SECRETS, { member: true });
+  const mind = fakeMind(SECRETS, { member: true });
   for (const path of ["/nope", "/webhook", "/oauth2/callback"])
-    assert.equal((await project.page(path)).status, 404, path);
-  assert.equal((await project.serve(post("/", {}))).status, 404);
-  assert.deepEqual(project.scopes, { opened: 0, disposed: 0 });
+    assert.equal((await mind.page(path)).status, 404, path);
+  assert.equal((await mind.serve(post("/", {}))).status, 404);
+  assert.deepEqual(mind.scopes, { opened: 0, disposed: 0 });
 });

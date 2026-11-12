@@ -12,7 +12,7 @@ const GRAPHQL_URL = "https://www.waitrose.com/api/graphql-prod/graph/live";
 
 /** `fetch` with the headers every Waitrose call needs merged in, and `content-type:
  *  application/json` when there is a body. Headers in `init` win. In every worker the platform
- *  loads, the global `fetch` is the project's egress. */
+ *  loads, the global `fetch` is the mind's egress. */
 export function waitroseFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(
     init.body ? { ...HEADERS, "content-type": "application/json" } : HEADERS,

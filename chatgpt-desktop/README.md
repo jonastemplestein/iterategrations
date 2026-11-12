@@ -1,6 +1,6 @@
 # ChatGPT desktop
 
-The agent of the ChatGPT desktop app (OpenAI's ChatGPT app with Codex), lent to an iterate project
+The agent of the ChatGPT desktop app (OpenAI's ChatGPT app with Codex), lent to an iterate mind
 from the computer it runs on: [`iterate provide`](https://github.com/iterate/iterate/tree/main/packages/cli#provide)
 lends it as `itx.jonas.chatgptDesktop`. That agent does website tasks in the app's in-app browser.
 It depends on no client: the app serves its own agent tools on a Unix socket, so `node:net` is the
@@ -37,8 +37,8 @@ async (itx) => {
 };
 ```
 
-**It lends a browser agent with the app's logins.** Whoever can use the project can send it to any
-website as the app's signed-in account. Share it only with a project you trust.
+**It lends a browser agent with the app's logins.** Whoever can use the mind can send it to any
+website as the app's signed-in account. Share it only with a mind you trust.
 
 ## How it works
 
@@ -80,7 +80,7 @@ desktop app running and signed in on the same computer (Linux tested; the app's 
 same on macOS).
 
 ```sh
-node "$(dirname "$(readlink -f "$(command -v iterate)")")/../bin/iterate.js" provide chatgpt-desktop/src/chatgpt-desktop.ts --name jonas.chatgptDesktop --project <your project>
+node "$(dirname "$(readlink -f "$(command -v iterate)")")/../bin/iterate.js" provide chatgpt-desktop/src/chatgpt-desktop.ts --name jonas.chatgptDesktop --mind <your mind>
 ```
 
 `CHATGPT_DESKTOP_LABEL` says whose app it is in the description a model reads. Stop with Ctrl-C.

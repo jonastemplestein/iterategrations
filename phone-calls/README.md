@@ -1,11 +1,11 @@
 # Phone calls
 
-Real phone calls between a person and an iterate project's voice agent, both ways, on the
-project's own phone number: an [Andrews & Arnold](https://www.aa.net.uk) VoIP number, registered as
+Real phone calls between a person and an iterate mind's voice agent, both ways, on the
+mind's own phone number: an [Andrews & Arnold](https://www.aa.net.uk) VoIP number, registered as
 a SIP phone from your computer.
 
 - **Out**: an agent calls `itx.phoneCalls.call({ to, opening, brief, reportTo })` and the person's
-  phone rings, from the project's number.
+  phone rings, from the mind's number.
 - **In**: a person the lend answers rings the number, and the call is picked up. Anyone else is
   turned away, to the number's own fallback (voicemail, if the number has it).
 
@@ -25,13 +25,13 @@ from 16 kHz PCM16 (`codec.go`: a 63-tap low-pass, then every other sample, and b
 
 **A caller ID is a claim.** On the phone network a caller's number can be faked. The lend still
 answers only the numbers it was given, but the call's agent is told that it cannot be sure who is
-on the line, so a project should never take a phone yes for money, deleting or writing to others.
+on the line, so a mind should never take a phone yes for money, deleting or writing to others.
 A caller the line itself marks untrusted (a free call from the internet, see below) never counts
 as any number.
 
 ## Run it
 
-You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a project with the
+You need Go 1.25 or later, Node 22.18 or later, an `iterate` CLI with `provide`, a mind with the
 voice app installed on a build with `itx.voice.ensureVoiceDevice`, and this
 repository.
 
@@ -42,7 +42,7 @@ export PHONE_SIP_NUMBER=+447700900000              # the number, in E.164: the S
 export PHONE_SIP_PASSWORD_FILE=~/.config/aa-sip-password   # a 0600 file with the number's password
 export PHONE_CALLS_ALLOWED=447700900001,447700900002       # who may be rung, and whose calls are picked up
 export PHONE_CALLS_ANSWER_WITH='{"447700900001":"At your service, sir.","default":"Hello."}'
-iterate provide phone-calls/calls.ts --name phoneCalls --project <your project>
+iterate provide phone-calls/calls.ts --name phoneCalls --mind <your mind>
 ```
 
 `PHONE_CALLS_ANSWER_WITH` falls back to `WHATSAPP_CALLS_ANSWER_WITH`. Keep it running with a loop,
@@ -60,7 +60,7 @@ it starts and checks it every five minutes (it exits when it changed, and the le
 again). This needs a NAT that keeps a socket's port (most home routers do); `PHONE_SIP_EXTERNAL_HOST`
 sets the address by hand.
 
-## What the project gets
+## What the mind gets
 
 ```js
 const { callId, streamPath } = await itx.phoneCalls.call({
@@ -100,7 +100,7 @@ say -o hello.wav --data-format=LEI16@8000 "Hello Jeeves, this is a test call, pl
 placed call for free: `{"call":"*105"}` on `serve`'s stdin rings the speaking clock.
 
 ```sh
-pnpm test        # calls.ts over a pretend jeeves-phone and a pretend project
+pnpm test        # calls.ts over a pretend jeeves-phone and a pretend mind
 pnpm test:go     # the codec, the playout queue, and the bridge against a SIP peer on loopback
 ```
 

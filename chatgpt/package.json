@@ -1,7 +1,7 @@
 {
   "name": "iterate-chatgpt",
   "version": "0.0.0",
-  "description": "Bring your own ChatGPT for an iterate project: a Connect ChatGPT page, and model requests paid by the subscription",
+  "description": "Bring your own ChatGPT for an iterate mind: a Connect ChatGPT page, and model requests paid by the subscription",
   "type": "module",
   "exports": {
     ".": {

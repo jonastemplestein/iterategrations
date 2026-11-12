@@ -91,7 +91,7 @@ const COLLECT_DESCRIPTION = `Your Google OAuth client: its ID and its secret.
 - **Client ID:** Google showed it when you created the client. It ends in \`.apps.googleusercontent.com\`.
 - **Client secret:** beside the client ID. It starts with \`GOCSPX-\`. If it is lost, add a new secret on the client's page in the [Google Cloud console](https://console.cloud.google.com/apis/credentials).
 
-The platform sends the secret only to Google's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the project's code.`;
+The platform sends the secret only to Google's token endpoint, when it exchanges a code for an account's tokens and when it refreshes them. It never passes through the mind's code.`;
 
 /** The client's two fields: its ID, public, in the shape Google gives it (HTML's `pattern`, which
  *  the browser compiles with the `v` flag), and its secret. */
@@ -139,7 +139,7 @@ async function render(
     <p>Open <a href="https://console.cloud.google.com/apis/credentials">console.cloud.google.com/apis/credentials</a>, the Google Cloud console's <b>APIs &amp; Services</b>, <b>Credentials</b>, in a Cloud project of your own. Press <b>Create credentials</b>, then <b>OAuth client ID</b>, and fill in:</p>
     <ul>
       <li><b>Application type:</b> Web application.</li>
-      <li><b>Name:</b> any name; the project's is a good one.</li>
+      <li><b>Name:</b> any name; the mind's is a good one.</li>
       <li><b>Authorized redirect URIs:</b> add this one, exactly: iterate's own callback, which stores each account's tokens and then sends you back here.${copyRow(callback)}</li>
     </ul>
     <p>Press <b>Create</b>. Google shows the <b>Client ID</b> and the <b>Client secret</b>: keep them for step 2.</p>
@@ -151,13 +151,13 @@ async function render(
       app
         ? `<p class="ok">Client ID ${esc(app.clientId)}</p>`
         : incomplete
-          ? `<p class="warn">The project's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
+          ? `<p class="warn">The mind's secret <code>${APP_SECRET}</code> has no public client ID. Save the client again: the form asks for the ID and the secret together.</p>`
           : ""
     }
     ${
       typeof link === "string"
         ? `<p><a class="button" href="${esc(link)}">${app ? "Replace it" : "Save the client"}</a></p>${copyRow(link)}`
-        : `<p class="error">The project could not make the link: ${esc(link.failed)}</p>`
+        : `<p class="error">The mind could not make the link: ${esc(link.failed)}</p>`
     }
     <p class="muted">The link opens a page of iterate's Dash, which asks for the client ID and the client secret, and keeps them as <code>${APP_SECRET}</code>, pinned to oauth2.googleapis.com. The secret never passes through this page.</p>
   </section>`;
@@ -206,7 +206,7 @@ export async function servePage(
     const flash = error
       ? `<p class="error">${esc(error)}</p>`
       : connected
-        ? `<p class="ok">Connected ${esc(connected)}. The project's code and agents can now call Google's APIs as this account.</p>`
+        ? `<p class="ok">Connected ${esc(connected)}. The mind's code and agents can now call Google's APIs as this account.</p>`
         : "";
     // iterate's one callback: what Google is told to come back to, on the platform's origin, where
     // Connect's start link leads first

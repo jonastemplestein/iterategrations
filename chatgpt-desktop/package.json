@@ -2,7 +2,7 @@
   "name": "iterate-chatgpt-desktop",
   "private": true,
   "version": "0.0.0",
-  "description": "The ChatGPT desktop app's agent and its in-app browser, lent to an iterate project from your own computer with `iterate provide`",
+  "description": "The ChatGPT desktop app's agent and its in-app browser, lent to an iterate mind from your own computer with `iterate provide`",
   "type": "module",
   "scripts": {
     "test": "vp test"

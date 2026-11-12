@@ -1,13 +1,13 @@
 # Yoto
 
-Give an iterate project's agents the person's [Yoto](https://yoto.com) players and library: list
+Give an iterate mind's agents the person's [Yoto](https://yoto.com) players and library: list
 players, play a card, set the volume and its limit, build a playlist from audio files, upload
 cover art. Nothing to receive and no package: Yoto has no webhooks (live player status is MQTT, which
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) doesn't do), so this recipe is only the
 connection. Yoto is reached through zero-trust-mcp, the small Worker that keeps no credentials.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a Yoto developer app
@@ -44,7 +44,7 @@ async (itx) => {
 };
 ```
 
-Players back is the proof. Then write the connection down for the project's agents.
+Players back is the proof. Then write the connection down for the mind's agents.
 
 ## What the tools do
 
@@ -59,7 +59,7 @@ have the arguments and the limits.
 
 - Commands report that Yoto _accepted_ them, not that the player did them.
 - `set_volume` is a percentage (0–100) of the current playback; `set_volume_limit` is 0–16 steps.
-- Audio and images come in as public HTTPS URLs, up to 20 MiB and 5 MiB. A project file works: mint
+- Audio and images come in as public HTTPS URLs, up to 20 MiB and 5 MiB. A mind file works: mint
   a link with `itx.files.get(path).url()` (valid for a week) and pass it as the URL.
 - Streaming cards need internet on the player during playback.
 - Not validated against a real Yoto account at the time of writing (the server's tests use a fake

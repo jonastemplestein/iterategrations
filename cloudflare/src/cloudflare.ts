@@ -17,17 +17,17 @@ export {
 export type { Account, App, CloudflareAccount, CloudflareItx, OAuthOptions } from "./app.js";
 
 /** The worker that hosts the package, as iterate/sdk `Integration.fetch` is handed it:
- *  `using itx = host.getItx()` is the project's scope for one block, and `host.auth.require` the
+ *  `using itx = host.getItx()` is the mind's scope for one block, and `host.auth.require` the
  *  gate of a members-only page. */
 export type IntegrationHost = {
   getItx(): CloudflareItx & Disposable;
   auth: { require(request: Request): Response | null };
 };
 
-/** One durable event of the project, as `processEvent` is handed it. */
+/** One durable event of the mind, as `processEvent` is handed it. */
 export type IntegrationEvent = { type: string; path: string; offset: number; payload?: unknown };
 
-/** What a project's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
+/** What a mind's worker hosts beside its own code (iterate/sdk `Integration`), declared here so
  *  the package builds and tests without iterate. */
 export type Integration = {
   routingSlug?: string;
@@ -39,14 +39,14 @@ const unique = (list: string[]): string[] => [
   ...new Set(list.map((item) => item.trim()).filter(Boolean)),
 ];
 
-/** A project's own Cloudflare OAuth client, as an integration its worker hosts:
+/** A mind's own Cloudflare OAuth client, as an integration its worker hosts:
  *  `const integrations: Integration[] = [cloudflare()];`
  *
  *  On its routing slug it answers, for members only, the Connect Cloudflare page at `/` and the
  *  landing iterate's callback sends the person to once it stored a person's tokens, `/connected`;
  *  any other path is a 404. Cloudflare comes back to iterate's own callback, the redirect URI the
  *  page shows. Its install hook
- *  (`project/worker-updated`) lists it on the Dash's Integrations page: the card, and a row per
+ *  (`mind/worker-updated`) lists it on the Dash's Integrations page: the card, and a row per
  *  connected person with the account their token reaches. The client's secret set or deleted on
  *  the Dash registers the card again.
  *

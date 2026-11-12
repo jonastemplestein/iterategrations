@@ -1,8 +1,8 @@
-// WHAT THE PROJECT'S OWN CODE NEEDS TO ANSWER IN A CHAT: one Bot API call, a long text in pieces,
+// WHAT THE MIND'S OWN CODE NEEDS TO ANSWER IN A CHAT: one Bot API call, a long text in pieces,
 // and an agent's answer with files. An agent's run script cannot import a package, so it calls the
-// Bot API with plain `fetch` (the README's "Calling Telegram"); a project's `worker.ts` and the
+// Bot API with plain `fetch` (the README's "Calling Telegram"); a mind's `worker.ts` and the
 // files it imports can import these. Each call goes with the global `fetch`: in every worker the
-// platform loads, the project's egress, which swaps the bot's token in for its placeholder toward
+// platform loads, the mind's egress, which swaps the bot's token in for its placeholder toward
 // api.telegram.org and nowhere else. https://core.telegram.org/bots/api
 import { call, placeholder, type TelegramItx } from "./bot.js";
 
@@ -71,7 +71,7 @@ const SENDERS: Record<MediaKind, [method: string, field: string]> = {
 };
 
 /** An attached file as `sendAnswer` found it: what it is and where Telegram fetches it, or null
- *  when there is no such project file. */
+ *  when there is no such mind file. */
 type Attached = {
   path: string;
   caption: string;
@@ -80,7 +80,7 @@ type Attached = {
 
 /** An answer to a Telegram chat. `to` is the bot, the chat and the forum topic in it, if any (a
  *  `telegram/message-accepted` payload's `bot`, `chat.id` and `threadId`). `answer` is the words,
- *  and the project files to attach (`itx.files`), each with a caption of its own.
+ *  and the mind files to attach (`itx.files`), each with a caption of its own.
  *
  *  The words go first, as messages of at most `MESSAGE_LIMIT` characters (`splitText`). Then each
  *  file goes as the photo, video, voice note, audio or document its content type and name say:

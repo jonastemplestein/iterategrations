@@ -68,7 +68,7 @@ const hasContent = (message: Message): boolean =>
   message.location !== undefined;
 
 /** What the agent is told: where, who, what, the files, and how to answer. An agent's script cannot
- *  import packages, and its global `fetch` is the project's egress, so the answer is a plain `fetch`
+ *  import packages, and its global `fetch` is the mind's egress, so the answer is a plain `fetch`
  *  with the token placeholder. */
 function describe(bot: string, info: BotInfo, message: Message): string {
   const group = message.chat.type !== "private";
@@ -98,10 +98,10 @@ const once = (append: Promise<unknown>): Promise<unknown> =>
   });
 
 /** Who handles an accepted message: this package's own agent for each chat (`agents`, the default),
- *  or the project (`events`): the package records `telegram/message-accepted` and routes nothing. */
+ *  or the mind (`events`): the package records `telegram/message-accepted` and routes nothing. */
 export type Deliver = "agents" | "events";
 
-/** The `telegram/message-accepted` payload: what a project routes on. Written only for a person who
+/** The `telegram/message-accepted` payload: what a mind routes on. Written only for a person who
  *  is let in, and never for a service message. */
 function accepted(
   bot: string,
@@ -189,7 +189,7 @@ async function route(
     return;
   }
 
-  // The project routes (its own agents, its own replies): the event is all it needs
+  // The mind routes (its own agents, its own replies): the event is all it needs
   if (deliver === "events") {
     await once(
       itx.cd(streamOf(bot)).append({

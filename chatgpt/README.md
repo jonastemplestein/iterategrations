@@ -3,21 +3,21 @@
 Bring your own ChatGPT: a **Connect ChatGPT** page of its own, and Responses API requests that a
 ChatGPT plan pays for (Plus or Pro), not an API key.
 
-It is project code: one element, `chatgpt()`, in the `integrations` array of the project's config
+It is mind code: one element, `chatgpt()`, in the `integrations` array of the mind's config
 worker. It uses OpenAI's
 [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for open-source
 tools. There is no OAuth app to register: the page signs in as `dynamic_agent_client`, and OpenAI
 registers a public client for that person during the consent. The tokens are one secret,
 `/secrets/chatgpt`, pinned to `api.openai.com` and `auth.openai.com`. The package ships no API
-client: project code and agents call OpenAI with plain `fetch` and a placeholder for the token, and
+client: mind code and agents call OpenAI with plain `fetch` and a placeholder for the token, and
 iterate's egress swaps in the real token ([Calling the Responses API](#calling-the-responses-api)).
 When OpenAI answers 401, the platform runs the secret's exchange code (in `src/auth.ts`), which
 trades the refresh token for a new token and keeps the rotated refresh token.
 
-- **The page** (members only, at the project's `chatgpt` address): a Connect button, the consent
+- **The page** (members only, at the mind's `chatgpt` address): a Connect button, the consent
   link and a box for the address OpenAI sends the browser to, who is connected and their plan, a
   **Test it** button, a Disconnect button, and a usage snippet.
-- **The Dash:** the project's Integrations page shows a ChatGPT card ("Connect ChatGPT" until it is
+- **The Dash:** the mind's Integrations page shows a ChatGPT card ("Connect ChatGPT" until it is
   connected, with a button to the page) and, once connected, the account's row: its address and
   plan. The package registers both again after every publish, and whenever the page connects or
   disconnects. The Dash takes nothing away itself: Disconnect appends the row's null, and if that
@@ -26,16 +26,16 @@ trades the refresh token for a new token and keeps the rotated refresh token.
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-project's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
+mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
 never take a secret in chat: the person signs in at OpenAI, and nothing here asks for a password).
 
 ### 1. The package, in the config repo
 
-Run the script in [add-to-a-project.md](../add-to-a-project.md) with these values. It adds the import
+Run the script in [add-to-a-mind.md](../add-to-a-mind.md) with these values. It adds the import
 and `chatgpt()` to the `integrations` array of `worker.ts`:
 
 ```js
-// the values for add-to-a-project.md
+// the values for add-to-a-mind.md
 const PACKAGE = "iterate-chatgpt";
 const IMPORT = 'import { chatgpt } from "iterate-chatgpt";';
 const ELEMENT = "chatgpt()";
@@ -69,9 +69,9 @@ preview for those. A Team or Business workspace may be refused.
 
 Then press **Test it** on the page: it asks one model for one word.
 
-### 3. Make the project's own model calls use it
+### 3. Make the mind's own model calls use it
 
-The package makes the connection. A project whose code calls `https://api.openai.com/v1/responses`
+The package makes the connection. A mind whose code calls `https://api.openai.com/v1/responses`
 with `Bearer getSecret("/secrets/openai")` switches to the plan in two places. The header names the
 plan's token:
 
@@ -85,9 +85,9 @@ from the stream.
 
 ## Calling the Responses API
 
-Read this before the first call. The package exports no API client. Project code, a `run` script or
+Read this before the first call. The package exports no API client. Mind code, a `run` script or
 an agent calls OpenAI's Responses API with `fetch`. In every worker the platform loads (the
-project's config worker, a `run` script) the global `fetch` is the project's egress.
+mind's config worker, a `run` script) the global `fetch` is the mind's egress.
 
 - **Endpoint:** `POST https://api.openai.com/v1/responses`.
 - **Token:** the header
@@ -112,7 +112,7 @@ A plan's token differs from api.openai.com's own docs
 - It does not take image generation, file search, the code interpreter, computer use or hosted MCP
   tools. Function tools go in a `namespace` tool, or in an `additional_tools` input item.
 
-This `run` script asks one question and returns the answer. Project code uses the same lines.
+This `run` script asks one question and returns the answer. Mind code uses the same lines.
 
 ```js
 async () => {
@@ -164,11 +164,11 @@ has begun, as `response.failed`.
   `/secrets/openai` for them.
 - **Plus or Pro, personal, in a preview.** OpenAI says that to offer this in a paid or hosted app,
   you fill in [its interest form](https://openai.com/form/sign-in-with-chatgpt-interest). A person
-  using their own plan in their own project is the open-source case.
+  using their own plan in their own mind is the open-source case.
 - **Why a paste.** OpenAI sends a public client back only to a loopback address, so the browser
-  cannot reach the project. The page asks for the address instead. The address holds a code that
+  cannot reach the mind. The page asks for the address instead. The address holds a code that
   works once, and the page keeps the PKCE verifier, so a pasted address is useless to anyone else.
-- **One connection per project:** `/secrets/chatgpt`. Connecting again replaces it. Each connection
+- **One connection per mind:** `/secrets/chatgpt`. Connecting again replaces it. Each connection
   is a new app in the person's ChatGPT settings, where they can set its weekly limit and remove it.
 - **A refresh token can die.** If the person removes the app in ChatGPT, a request answers 401 and
   the refresh says "connect ChatGPT again": press **Connect ChatGPT** again.

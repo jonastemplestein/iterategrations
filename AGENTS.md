@@ -22,7 +22,7 @@ Use stand-ins in code, tests, comments and docs:
 - people: invented first names (Sam, Ada, Grace);
 - IP addresses: `192.0.2.0/24`, `198.51.100.0/24` and `203.0.113.0/24` (RFC 5737).
 
-A real value belongs in the private project (its secrets and its config repo) or in the local
+A real value belongs in the private mind (its secrets and its config repo) or in the local
 configuration of the computer that lends an integration. Code reads it at runtime, for example from
 an environment variable.
 

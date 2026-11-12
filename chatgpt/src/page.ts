@@ -50,7 +50,7 @@ const TEST_MODEL = "gpt-6.1-sol";
 const AUTHORIZATION = `Bearer getSecret("${SECRET}", { field: "accessToken" })`;
 const README = "https://github.com/jonastemplestein/iterategrations/tree/main/chatgpt";
 
-const USAGE = `// project code, a run script, an agent: the global fetch is the project's egress
+const USAGE = `// mind code, a run script, an agent: the global fetch is the mind's egress
 const response = await fetch("${RESOURCE}/responses", {
   method: "POST",
   headers: {
@@ -107,11 +107,11 @@ async function card(itx: ChatgptItx): Promise<string> {
     const account = await readAccount(itx);
     return `<section>
       <h2>Connected <span class="muted">${esc(account?.email ?? "")}${account?.plan ? ` · ${esc(account.plan)}` : ""}</span></h2>
-      <p>This project can make model requests with that ChatGPT plan. The tokens are the secret <code>${SECRET}</code>, only ever sent to api.openai.com and OpenAI's sign-in, and refreshed on their own.</p>
+      <p>This mind can make model requests with that ChatGPT plan. The tokens are the secret <code>${SECRET}</code>, only ever sent to api.openai.com and OpenAI's sign-in, and refreshed on their own.</p>
       <p>${post("test", "Test it")} ${post("disconnect", "Disconnect", true)}</p>
     </section>
     <section><h2>Use it</h2>
-    <p>Project code and agents call the Responses API with plain <code>fetch</code> and a placeholder for the token. The project's egress puts the real token in.</p>
+    <p>Mind code and agents call the Responses API with plain <code>fetch</code> and a placeholder for the token. The mind's egress puts the real token in.</p>
     <pre>${esc(USAGE)}</pre>
     <p class="muted">The answer is server-sent events. <a href="${README}#calling-the-responses-api" target="_blank" rel="noopener">The README</a> reads them into text, and lists the fields a plan's token refuses. Requests count against the plan's usage. Only the Responses API takes this token: voice, Realtime and transcription do not.</p></section>`;
   }
@@ -132,7 +132,7 @@ async function card(itx: ChatgptItx): Promise<string> {
     </section>`;
   return `<section>
     <h2>Connect ChatGPT</h2>
-    <p>Sign in with the ChatGPT account whose plan should pay for this project's model requests. You sign in at OpenAI: this project never sees your password.</p>
+    <p>Sign in with the ChatGPT account whose plan should pay for this mind's model requests. You sign in at OpenAI: this mind never sees your password.</p>
     <p>${post("start", "Connect ChatGPT")}</p>
     <p class="muted">It uses OpenAI's Sign in with ChatGPT. OpenAI offers the plan's usage for Plus and Pro personal accounts, in a preview. A Team or Business workspace may be refused.</p>
   </section>`;
