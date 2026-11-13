@@ -63,7 +63,7 @@ function fakeMind(secrets: Record<string, string> = SECRETS, options: { member?:
       itx,
     });
   const registry = () => appended.filter((a) => a.path === "/integrations").map((a) => a.event);
-  return { integration, appended, scopes, serve, page, publish, registry, secrets };
+  return { integration, itx, appended, scopes, serve, page, publish, registry, secrets };
 }
 
 const transaction = {
@@ -168,19 +168,37 @@ test("only POST is accepted", async () => {
 
 // --------------------------------------------- the Dash's Integrations page
 
-const card = (status: object) => ({
+/** The card: set up (`status`), or not yet: no status, and the setup step first. */
+const card = (status?: object) => ({
   title: "Monzo",
   description:
     "Every Monzo transaction as a monzo/transaction-created event, on a stream per account (/monzo/<name>), from a webhook per account.",
   icon: "https://www.google.com/s2/favicons?domain=monzo.com&sz=64",
-  status,
-  actions: [
-    { label: "Open", routingSlug: "monzo", path: "/" },
-    { label: "Recipe", url: RECIPE },
-  ],
+  ...(status && { status }),
+  actions: status
+    ? [
+        { label: "Open", routingSlug: "monzo", path: "/" },
+        { label: "Recipe", url: RECIPE },
+      ]
+    : [
+        { label: "Set up", url: RECIPE },
+        { label: "Open", routingSlug: "monzo", path: "/" },
+      ],
 });
 
-test("the install hook registers the card, keyed by the event's path and offset: attention until the sign-in exists, ok after", async () => {
+const ROW_CONFIGURED = "events.iterate.com/integration/connection-configured";
+/** An account's row, as the hook registers it at `at`. */
+const accountRow = (name: string, at: string) => ({
+  type: ROW_CONFIGURED,
+  idempotencyKey: `monzo:registry:${name}:${at}`,
+  payload: {
+    integration: "monzo",
+    connection: name,
+    row: { account: name, status: { kind: "ok" }, actions: [] },
+  },
+});
+
+test("the install hook registers the card and a row per account's webhook secret, keyed by the event's path and offset: no status until the sign-in exists, ok after", async () => {
   const mind = fakeMind({ ...SECRETS });
   for (let attempt = 0; attempt < 2; attempt++) await mind.publish(5);
   assert.deepEqual(mind.registry(), [
@@ -189,19 +207,48 @@ test("the install hook registers the card, keyed by the event's path and offset:
       idempotencyKey: "monzo:registry:/@5",
       payload: {
         integration: "monzo",
-        card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        card: card(),
       },
     },
+    accountRow("joint-account", "/@5"),
+    accountRow("jonas-personal", "/@5"),
   ]);
   mind.secrets["/secrets/monzo"] = "the sign-in";
   await mind.publish(5); // the same event again, now signed in: its key is spent, and that is fine
-  assert.equal(mind.registry().length, 1);
+  assert.equal(mind.registry().length, 3);
   await mind.publish(9);
-  assert.deepEqual(mind.registry()[1], {
+  assert.deepEqual(mind.registry()[3], {
     type: CONFIGURED,
     idempotencyKey: "monzo:registry:/@9",
     payload: { integration: "monzo", card: card({ kind: "ok" }) },
   });
+});
+
+test("an account's webhook secret deleted takes its row away, at once on its fact on its own context", async () => {
+  const mind = fakeMind({ ...SECRETS, "/secrets/monzo": "the sign-in" });
+  delete mind.secrets["/secrets/monzo-webhook-joint-account"];
+  // the registry, as the Dash reads it: both rows still stand
+  (mind.itx as any).integrations = {
+    list: async () => ({
+      connections: { "monzo/joint-account": {}, "monzo/jonas-personal": {}, "x/0a0b0c0d": {} },
+    }),
+  };
+  await mind.integration.processEvent!({
+    event: {
+      type: "events.iterate.com/secret/deleted",
+      path: "/secrets/monzo-webhook-joint-account",
+      offset: 4,
+    },
+    itx: mind.itx,
+  });
+  assert.deepEqual(mind.registry().slice(1), [
+    accountRow("jonas-personal", "/secrets/monzo-webhook-joint-account@4"),
+    {
+      type: ROW_CONFIGURED,
+      idempotencyKey: "monzo:registry:joint-account:/secrets/monzo-webhook-joint-account@4",
+      payload: { integration: "monzo", connection: "joint-account", row: null },
+    },
+  ]);
 });
 
 test("the hook ignores every other event", async () => {

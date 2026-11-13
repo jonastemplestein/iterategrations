@@ -1,6 +1,14 @@
 import type { GithubItx } from "./app.js";
 import { servePage, serveCallback } from "./page.js";
-import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
+import {
+  goneConnectionOf,
+  isAppFact,
+  registerAll,
+  registerCard,
+  registerGone,
+  uninstalledOf,
+  WORKER_UPDATED,
+} from "./registry.js";
 import { receiveDelivery } from "./webhook.js";
 
 export { APP_SECRET, PIN, placeholder, secretOf, streamOf } from "./app.js";
@@ -32,7 +40,8 @@ export type Integration = {
  *  setup URL at `/oauth2/callback`, and, for GitHub, the App's webhook at `/webhook` (checked with
  *  the App's webhook secret). Its install hook (`mind/worker-updated`) lists it on the Dash's
  *  Integrations page: the card, and a row per installation. The App's secret set or deleted on the
- *  Dash registers the card again.
+ *  Dash registers the card again. An installation's secret deleted anywhere, or the App
+ *  uninstalled at GitHub (its `installation` delivery with action `deleted`), takes its row away.
  *
  *  - `slug`: the routing slug to answer on. Default `github`. */
 export function github(options: { slug?: string } = {}): Integration {
@@ -54,8 +63,12 @@ export function github(options: { slug?: string } = {}): Integration {
     },
     async processEvent({ event, itx }) {
       const at = `${event.path}@${event.offset}`;
+      const gone = goneConnectionOf(event);
+      const uninstalled = uninstalledOf(event);
       if (event.type === WORKER_UPDATED) await registerAll(itx, routingSlug, at);
       else if (isAppFact(event)) await registerCard(itx, routingSlug, `github:registry:${at}`);
+      else if (gone) await registerGone(itx, routingSlug, gone, at);
+      else if (uninstalled) await registerGone(itx, routingSlug, uninstalled, at, true);
     },
   };
 }

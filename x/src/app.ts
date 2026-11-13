@@ -71,6 +71,12 @@ export type XItx = {
     /** The redirect URI to register at X: the platform's one callback. */
     oauthCallbackUrl(): Promise<string>;
   };
+  /** The registry the Dash's Integrations page draws (`/integrations`), as folded: the install
+   *  hook reads it to take away a row it no longer keeps. Optional, so a mind without it still
+   *  registers everything else. */
+  integrations?: {
+    list(): Promise<{ connections: Record<string, unknown> }>;
+  };
   cd(path: string): {
     append(event: {
       type: string;

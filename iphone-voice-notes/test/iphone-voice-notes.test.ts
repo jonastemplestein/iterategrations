@@ -274,16 +274,22 @@ test("a transcription that fails still lands, with no transcript and the error",
 
 // --------------------------------------------- the Dash's Integrations page
 
-const card = (status: object) => ({
+/** The card: set up (`status`), or not yet: no status, and the setup step first. */
+const card = (status?: object) => ({
   title: "iPhone voice notes",
   description:
     "Hold the iPhone's Action Button and speak: each recording lands as an audio file and, transcribed, as an iphone-voice-notes/recording-transcribed event on /iphone-voice-notes.",
   icon: "https://www.google.com/s2/favicons?domain=apple.com&sz=64",
-  status,
-  actions: [
-    { label: "Open", routingSlug: "iphone-voice-notes", path: "/" },
-    { label: "Recipe", url: RECIPE },
-  ],
+  ...(status && { status }),
+  actions: status
+    ? [
+        { label: "Open", routingSlug: "iphone-voice-notes", path: "/" },
+        { label: "Recipe", url: RECIPE },
+      ]
+    : [
+        { label: "Set up", routingSlug: "iphone-voice-notes", path: "/" },
+        { label: "Recipe", url: RECIPE },
+      ],
 });
 
 test("the install hook registers the card, keyed by the event's path and offset: attention until the token exists, ok after", async () => {
@@ -295,7 +301,7 @@ test("the install hook registers the card, keyed by the event's path and offset:
       idempotencyKey: "iphone-voice-notes:registry:/@5",
       payload: {
         integration: "iphone-voice-notes",
-        card: card({ kind: "attention", text: "Open it to set the token" }),
+        card: card(),
       },
     },
   ]);

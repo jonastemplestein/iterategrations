@@ -330,6 +330,6 @@ export function createBridge(input: { logPath: string; socket: string; retryMs?:
 }
 
 /** One line of at most 500 characters, which is what the platform takes of a lend's description. */
-export const description = `${LABEL}. call(method, params) is Herdr's socket API, documented at https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/docs/next/website/src/content/docs/socket-api.mdx : call("agent.list"), call("agent.prompt", { target, text }), call("pane.read", { pane_id, source: "recent" }), call("session.snapshot"). Events land on ${LOG_PATH} as herdr/<kind>: news is durable, focus and layout are ephemeral (name the type to get one).`;
+export const description = `${LABEL}: a Herdr workspace, lent from a computer. call(method, params) is Herdr's socket API, documented at https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/docs/next/website/src/content/docs/socket-api.mdx : call("agent.list"), call("agent.prompt", { target, text }), call("pane.read", { pane_id, source: "recent" }). Events land on ${LOG_PATH} as herdr/<kind>: news is durable, focus and layout are ephemeral (name the type to get one).`;
 
 export default createBridge({ logPath: LOG_PATH, socket: socketPath() }).provide;

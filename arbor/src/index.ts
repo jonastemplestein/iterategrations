@@ -52,9 +52,9 @@ const ACCOUNT = "/secrets/arbor";
  *  hook. */
 const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
-/** What the platform appends when a secret is set or deleted: first on the secret's own path, then
- *  on `/`, where the catalog folds it. The card says which site the account is for, so the copy on
- *  `/` for the account's secret registers it again. */
+/** What the platform appends when a secret is set or deleted: on the secret's own context,
+ *  `/secrets/<name>` (`event.path`). The card says which site the account is for, so the
+ *  account's secret's fact registers it again. */
 const SECRET_FACTS = new Set([
   "events.iterate.com/secret/set",
   "events.iterate.com/secret/deleted",
@@ -90,18 +90,17 @@ const cardOf = ({ saved, site }: { saved: boolean; site: string | null }) => ({
   title: TITLE,
   description: DESCRIPTION,
   icon: "https://www.google.com/s2/favicons?domain=arbor-education.com&sz=64",
-  status:
-    saved && site
+  // set up: the school's site; saved with no site: say so; not yet: no status, and the recipe
+  // first, the one thing to do
+  ...(saved && {
+    status: site
       ? { kind: "ok", text: hostOf(site) }
-      : {
-          kind: "attention",
-          text: saved
-            ? "The account has no school site: see the recipe"
-            : "Set up by your coding agent: see the recipe",
-        },
+      : { kind: "attention", text: "The account has no school site: see the recipe" },
+  }),
   actions: [
+    ...(saved ? [] : [{ label: "Set up", url: RECIPE }]),
     { label: "Open", routingSlug: SLUG, path: "/" },
-    { label: "Recipe", url: RECIPE },
+    ...(saved ? [{ label: "Recipe", url: RECIPE }] : []),
   ],
 });
 
@@ -130,10 +129,7 @@ export function arbor(): Integration {
       });
     },
     async processEvent({ event, itx }) {
-      const fact =
-        event.path === "/" &&
-        SECRET_FACTS.has(event.type) &&
-        (event.payload as { path?: unknown } | null | undefined)?.path === ACCOUNT;
+      const fact = SECRET_FACTS.has(event.type) && event.path === ACCOUNT;
       if (event.type !== WORKER_UPDATED && !fact) return;
       const account = await readAccount(itx);
       // The platform retries an event, so this card may have landed already, perhaps with what was

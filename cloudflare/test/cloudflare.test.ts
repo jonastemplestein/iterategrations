@@ -369,10 +369,13 @@ function assertFits(event: any) {
     if (!payload.card) return;
     const { card } = payload;
     for (const key of Object.keys(card))
-      assert.ok(["title", "description", "status", "actions"].includes(key), key);
+      assert.ok(
+        ["title", "description", "icon", "section", "status", "actions"].includes(key),
+        key,
+      );
     assert.ok(card.title.length >= 1 && card.title.length <= 80);
     assert.ok((card.description ?? "").length <= 400);
-    status(card.status);
+    if (card.status) status(card.status);
     assert.ok(card.actions.length <= 4);
     card.actions.forEach(action);
   } else {
@@ -383,7 +386,7 @@ function assertFits(event: any) {
     for (const key of Object.keys(row))
       assert.ok(["account", "status", "actions", "details"].includes(key), key);
     assert.ok(row.account.length >= 1 && row.account.length <= 200, row.account);
-    status(row.status);
+    if (row.status) status(row.status);
     assert.ok(row.actions.length <= 4);
     row.actions.forEach(action);
     const details = Object.entries(row.details ?? {});
@@ -396,11 +399,12 @@ function assertFits(event: any) {
 }
 
 const location = (res: Response) => decodeURIComponent(res.headers.get("location") ?? "");
-const card = (status: object, label: string, routingSlug = "cloudflare") => ({
+const card = (status: object | undefined, label: string, routingSlug = "cloudflare") => ({
   title: "Cloudflare",
+  icon: "https://www.google.com/s2/favicons?domain=cloudflare.com&sz=64",
   description:
-    "The mind's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent (its Workers, D1, KV, R2 and the rest), with tokens the platform refreshes.",
-  status,
+    "The mind's own Cloudflare OAuth client: Cloudflare's API as each connected person, on the account they picked at consent, with tokens the platform refreshes.",
+  ...(status && { status }),
   actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (person: Person = ADA, routingSlug = "cloudflare") => ({
@@ -410,14 +414,12 @@ const row = (person: Person = ADA, routingSlug = "cloudflare") => ({
     { label: "Manage", routingSlug, path: "/" },
     { label: "Open", url: "https://dash.cloudflare.com/profile" },
   ],
-  details: { Account: `${person.company} (acc-${person.id})`, Scopes: SCOPES.join(" ") },
+  details: { Account: person.company },
 });
-const READY = card({ kind: "ok" }, "Manage");
-const NO_CLIENT = card(
-  { kind: "attention", text: "Create an OAuth client and paste its secret" },
-  "Connect",
-);
-const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
+const READY = card({ kind: "ok", text: "Connected" }, "Add account");
+/** Nothing set up: no status, and the one button is the next step. */
+const NO_CLIENT = card(undefined, "Set up");
+const NO_ACCOUNT = card(undefined, "Connect an account");
 
 /** A mind with Ada connected through the page, and her connection. */
 async function connected() {
@@ -651,7 +653,7 @@ test("a connection whose /accounts does not answer still stands, with no account
   await mind.connect(ADA);
   const account = JSON.parse(mind.kv[`own-cloudflare/accounts/${mind.lastConnection()}`]!);
   assert.deepEqual(account.accounts, []);
-  assert.equal(mind.registry().at(-1)!.payload.row.details.Account, "none listed");
+  assert.equal(mind.registry().at(-1)!.payload.row.details, undefined, "no account to name");
   assert.match(await (await mind.page("/")).text(), /on none listed/);
 });
 

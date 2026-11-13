@@ -110,9 +110,10 @@ const cardOf = (slug: string, saved: boolean) => ({
   title: TITLE,
   description: DESCRIPTION,
   icon: "https://www.google.com/s2/favicons?domain=apple.com&sz=64",
-  status: saved ? { kind: "ok" } : { kind: "attention", text: "Open it to set the token" },
+  // set up: "OK"; not yet: no status, and the page that sets the token is the one thing to do
+  ...(saved && { status: { kind: "ok" } }),
   actions: [
-    { label: "Open", routingSlug: slug, path: "/" },
+    { label: saved ? "Open" : "Set up", routingSlug: slug, path: "/" },
     { label: "Recipe", url: RECIPE },
   ],
 });
@@ -304,7 +305,12 @@ export function iphoneVoiceNotes(options: IphoneVoiceNotesOptions = {}): Integra
         );
         return;
       }
-      if (event.type !== WORKER_UPDATED) return;
+      // the publish, or its secret set or deleted: the fact lands on the secret's own context
+      const fact =
+        (event.type === "events.iterate.com/secret/set" ||
+          event.type === "events.iterate.com/secret/deleted") &&
+        event.path === TOKEN_SECRET;
+      if (event.type !== WORKER_UPDATED && !fact) return;
       // The platform retries an event, so this card may have landed already, perhaps with what was
       // true then (IDEMPOTENCY_CONFLICT): not an error, and the next publish registers it again.
       await itx

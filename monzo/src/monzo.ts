@@ -8,6 +8,12 @@ export type MonzoItx = {
     list(): Promise<{ path: string }[]>;
     verifyEquals(path: string, input: { value: string }): Promise<boolean>;
   };
+  /** The registry the Dash's Integrations page draws (`/integrations`), as folded: the hook reads
+   *  it to take away the row of an account whose webhook secret is gone. Optional, so a mind
+   *  without it still registers everything else. */
+  integrations?: {
+    list(): Promise<{ connections: Record<string, unknown> }>;
+  };
   cd(path: string): {
     append(event: {
       type: string;
@@ -61,12 +67,12 @@ const cardOf = (signedIn: boolean) => ({
   title: TITLE,
   description: DESCRIPTION,
   icon: "https://www.google.com/s2/favicons?domain=monzo.com&sz=64",
-  status: signedIn
-    ? { kind: "ok" }
-    : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
+  // set up: "OK"; not yet: no status, and the recipe first, the one thing to do
+  ...(signedIn && { status: { kind: "ok" } }),
   actions: [
+    ...(signedIn ? [] : [{ label: "Set up", url: RECIPE }]),
     { label: "Open", routingSlug: SLUG, path: "/" },
-    { label: "Recipe", url: RECIPE },
+    ...(signedIn ? [{ label: "Recipe", url: RECIPE }] : []),
   ],
 });
 
@@ -136,8 +142,9 @@ async function receive(request: Request, itx: MonzoItx): Promise<Response> {
  *
  *  On the `monzo` routing slug it answers Monzo's webhook at `/webhook/<account name>/<secret>` and,
  *  for members only, its page at `/`; any other path is a 404. Its install hook
- *  (`mind/worker-updated`) lists it on the Dash's Integrations page. Each account's row is
- *  appended by the recipe's script that registers the account's webhook. */
+ *  (`mind/worker-updated`, and a Monzo secret set or deleted) lists it on the Dash's Integrations
+ *  page: the card, and a row per account whose webhook secret exists. An account's row goes when
+ *  its secret does. */
 export function monzo(): Integration {
   return {
     routingSlug: SLUG,
@@ -162,15 +169,52 @@ export function monzo(): Integration {
       });
     },
     async processEvent({ event, itx }) {
-      if (event.type !== WORKER_UPDATED) return;
-      const { signedIn } = await setupOf(itx);
+      // the publish, or a Monzo secret set or deleted (the sign-in, or an account's webhook
+      // secret): the fact lands on the secret's own context, `/secrets/<name>`
+      const fact =
+        (event.type === "events.iterate.com/secret/set" ||
+          event.type === "events.iterate.com/secret/deleted") &&
+        (event.path === SIGN_IN ||
+          (event.path.startsWith(WEBHOOK_SECRETS) &&
+            !event.path.includes("/", WEBHOOK_SECRETS.length)));
+      if (event.type !== WORKER_UPDATED && !fact) return;
+      const at = `${event.path}@${event.offset}`;
+      const { signedIn, accounts } = await setupOf(itx);
+      const registry = itx.cd("/integrations");
       await once(
-        itx.cd("/integrations").append({
+        registry.append({
           type: "events.iterate.com/integration/configured",
-          idempotencyKey: `monzo:registry:${event.path}@${event.offset}`,
+          idempotencyKey: `monzo:registry:${at}`,
           payload: { integration: "monzo", card: cardOf(signedIn) },
         }),
       );
+      // a row per account whose webhook secret exists, by its name; a row that is well needs no
+      // words, and Monzo's account id is no fact a person reads
+      for (const name of accounts)
+        await once(
+          registry.append({
+            type: "events.iterate.com/integration/connection-configured",
+            idempotencyKey: `monzo:registry:${name}:${at}`,
+            payload: {
+              integration: "monzo",
+              connection: name,
+              row: { account: name, status: { kind: "ok" }, actions: [] },
+            },
+          }),
+        );
+      // and a null for each row of an account whose secret is gone
+      const registered = itx.integrations ? (await itx.integrations.list()).connections : {};
+      for (const key of Object.keys(registered)) {
+        const name = key.slice("monzo/".length);
+        if (key.startsWith("monzo/") && !accounts.includes(name))
+          await once(
+            registry.append({
+              type: "events.iterate.com/integration/connection-configured",
+              idempotencyKey: `monzo:registry:${name}:${at}`,
+              payload: { integration: "monzo", connection: name, row: null },
+            }),
+          );
+      }
     },
   };
 }

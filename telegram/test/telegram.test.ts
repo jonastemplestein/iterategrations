@@ -764,12 +764,12 @@ test("the package exports the integration and the helpers a mind's own code answ
 
 // --------------------------------------------- the Dash's Integrations page
 
-const card = (status: object, label: string, routingSlug = "telegram") => ({
+const card = (status: object | undefined, label: string, routingSlug = "telegram") => ({
   title: "Telegram",
   description:
-    "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
+    "A Telegram bot for private chats and groups, each handed to an agent; invite links let people in.",
   icon: "https://www.google.com/s2/favicons?domain=telegram.org&sz=64",
-  status,
+  ...(status && { status }),
   actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (people: string, routingSlug = "telegram") => ({
@@ -790,7 +790,10 @@ test("the install hook registers the card and a row per bot it knows, keyed by t
     {
       type: CONFIGURED,
       idempotencyKey: "telegram:registry:/@5",
-      payload: { integration: "telegram", card: card({ kind: "ok" }, "Manage") },
+      payload: {
+        integration: "telegram",
+        card: card({ kind: "ok", text: "Connected" }, "Add a bot"),
+      },
     },
     {
       type: CONNECTION_CONFIGURED,
@@ -820,7 +823,7 @@ test("with no bot the card asks for one; a hook retried after a change does not 
       idempotencyKey: "telegram:registry:/@5",
       payload: {
         integration: "telegram",
-        card: card({ kind: "attention", text: "Connect a bot" }, "Connect"),
+        card: card(undefined, "Connect a bot"),
       },
     },
   ]);
@@ -843,7 +846,10 @@ test("connecting a bot registers the card again and then its row (a row stands u
   assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
-      payload: { integration: "telegram", card: card({ kind: "ok" }, "Manage") },
+      payload: {
+        integration: "telegram",
+        card: card({ kind: "ok", text: "Connected" }, "Add a bot"),
+      },
     },
     {
       type: CONNECTION_CONFIGURED,
@@ -880,7 +886,7 @@ test("connecting a bot registers the card again and then its row (a row stands u
       type: CONFIGURED,
       payload: {
         integration: "telegram",
-        card: card({ kind: "attention", text: "Connect a bot" }, "Connect"),
+        card: card(undefined, "Connect a bot"),
       },
     },
   ]);
@@ -889,7 +895,10 @@ test("connecting a bot registers the card again and then its row (a row stands u
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const mind = fakeMind(undefined, "tg");
   await mind.page("/connect", { form: { token: TOKEN } });
-  assert.deepEqual(mind.registry()[0]!.payload.card, card({ kind: "ok" }, "Manage", "tg"));
+  assert.deepEqual(
+    mind.registry()[0]!.payload.card,
+    card({ kind: "ok", text: "Connected" }, "Add a bot", "tg"),
+  );
   assert.deepEqual(mind.registry()[1]!.payload.row, row("0 people", "tg"));
   const before = mind.appended.length;
   for (const type of ["telegram/update", "events.iterate.com/agent/context-added"])
@@ -959,10 +968,7 @@ test("a Disconnect whose row cannot be taken away leaves a tombstone: Disconnect
           payload: { integration: "telegram", connection: BOT, row: null },
         },
       );
-      assert.deepEqual(
-        mind.registry().at(-1)!.payload.card,
-        card({ kind: "attention", text: "Connect a bot" }, "Connect"),
-      );
+      assert.deepEqual(mind.registry().at(-1)!.payload.card, card(undefined, "Connect a bot"));
     }
     assert.equal(mind.kv[`telegram/removed/${BOT}`], undefined, finish);
   }

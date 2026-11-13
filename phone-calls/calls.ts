@@ -47,7 +47,7 @@ import { createInterface } from "node:readline";
 import { connectVoiceDevice, type VoiceCall, type VoiceDevice } from "@iterate-com/voice/call";
 
 export const description =
-  "Phone calls on the agents' own number: call({ to, opening, brief, reportTo }) rings the person's phone and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(), lines(). Call __describe() first.";
+  "Phone calls both ways on the agents' own number, lent from a computer. call({ to, opening, brief, reportTo }) rings the person's phone and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(), lines(). Call __describe() first.";
 
 const LOG_PATH = "/integrations/phone-calls";
 const BRIDGE = process.env.PHONE_CALLS_BIN || join(import.meta.dirname, "jeeves-phone");

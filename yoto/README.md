@@ -8,8 +8,7 @@ recipe does not do). The recipe is the sign-in and one file, [`yoto.ts`](yoto.ts
 config repo gets a copy of.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a Yoto developer client
 
@@ -124,6 +123,10 @@ async (itx) => itx.config.yoto("list_players");
 
 Players back is the proof. A few seconds after the commit the method may not answer yet: try again.
 Then write the connection down for the mind's agents: the players' names and ids, and the tools.
+
+This recipe has no package and no install hook, so it registers no card on the Integrations page:
+`(await itx.integrations.list()).integrations` has no Yoto card, and that is right. The sign-in's
+secret, `/secrets/yoto`, is on the Dash's secrets page.
 
 ## What the tools do
 

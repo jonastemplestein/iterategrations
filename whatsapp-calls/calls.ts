@@ -35,7 +35,7 @@ import { createInterface } from "node:readline";
 import { connectVoiceDevice, type VoiceCall, type VoiceDevice } from "@iterate-com/voice/call";
 
 export const description =
-  "WhatsApp voice calls from the agents' own number: call({ to, opening, brief, reportTo }) rings the person on WhatsApp and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(). Call __describe() first.";
+  "WhatsApp voice calls both ways on the agents' own number, lent from a computer. call({ to, opening, brief, reportTo }) rings the person on WhatsApp and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(). Call __describe() first.";
 
 const LOG_PATH = "/integrations/whatsapp-calls";
 const BRIDGE = process.env.JEEVES_CALL_BIN || join(import.meta.dirname, "jeeves-call");

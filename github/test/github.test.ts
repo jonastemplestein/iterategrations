@@ -239,11 +239,12 @@ function fakeMind(options: { slug?: string } = {}) {
 }
 
 const location = (res: Response) => decodeURIComponent(res.headers.get("location") ?? "");
-const card = (status: object, label: string, routingSlug = "github") => ({
+const card = (status: object | undefined, label: string, routingSlug = "github") => ({
   title: "GitHub",
   description:
     "The mind's own GitHub App: each installation's webhook deliveries as events, and GitHub's API as the installation, with tokens the platform mints.",
-  status,
+  icon: "https://www.google.com/s2/favicons?domain=github.com&sz=64",
+  ...(status && { status }),
   actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (routingSlug = "github") => ({
@@ -253,13 +254,11 @@ const row = (routingSlug = "github") => ({
     { label: "Manage", routingSlug, path: "/" },
     { label: "Open", url: "https://github.com/acme" },
   ],
-  details: { Installation: "42" },
 });
-const READY = card({ kind: "ok" }, "Manage");
-const NOT_READY = card(
-  { kind: "attention", text: "Create a GitHub App and paste its secrets" },
-  "Connect",
-);
+const READY = card({ kind: "ok", text: "Connected" }, "Install on another account");
+/** The App saved, nothing installed: no status, and the one button is the next step. */
+const NO_INSTALLATION = card(undefined, "Install");
+const NOT_READY = card(undefined, "Set up");
 
 /** A mind with installation 42 connected through the page. */
 async function connected() {
@@ -788,7 +787,6 @@ test("an existing installation connected by its id is proved and listed; a bad i
             { label: "Manage", routingSlug: "github", path: "/" },
             { label: "Open", url: "https://github.com/acme-org" },
           ],
-          details: { Installation: "77" },
         },
       },
     },
@@ -907,7 +905,7 @@ test("disconnect deletes the installation's secret and kv entry, takes its row a
       type: CONNECTION_CONFIGURED,
       payload: { integration: "github", connection: "42", row: null },
     },
-    { type: CONFIGURED, payload: { integration: "github", card: READY } },
+    { type: CONFIGURED, payload: { integration: "github", card: NO_INSTALLATION } },
   ]);
   const html = await (await mind.page("/")).text();
   assert.match(html, /The App stays installed at GitHub/);
@@ -1045,35 +1043,34 @@ test("the install hook registers the card and a row per installation it knows, k
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const mind = fakeMind({ slug: "gh" });
   await mind.publish(1);
-  assert.deepEqual(
-    mind.registry()[0]!.payload.card,
-    card({ kind: "attention", text: "Create a GitHub App and paste its secrets" }, "Connect", "gh"),
-  );
+  assert.deepEqual(mind.registry()[0]!.payload.card, card(undefined, "Set up", "gh"));
   const count = mind.appended.length;
   for (const event of [
     { type: "github/delivery-received", path: "/integrations/own-github/42" },
-    // another secret's fact, the App's own on its secret's path, and a fact with no payload
+    // root-path copies (the platform appends none), another secret's fact, and one deeper
     {
       type: "events.iterate.com/secret/set",
       path: "/",
-      payload: { path: "/secrets/own-github-42" },
-    },
-    {
-      type: "events.iterate.com/secret/set",
-      path: "/secrets/own-github-app",
       payload: { path: "/secrets/own-github-app" },
     },
-    { type: "events.iterate.com/secret/deleted", path: "/" },
+    {
+      type: "events.iterate.com/secret/deleted",
+      path: "/",
+      payload: { path: "/secrets/own-github-42" },
+    },
+    { type: "events.iterate.com/secret/set", path: "/secrets/other" },
+    { type: "events.iterate.com/secret/deleted", path: "/secrets/own-github-app/deeper" },
   ])
     await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
   assert.equal(mind.appended.length, count);
 });
 
-test("the App saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
+test("the App saved or deleted on the Dash registers the card again, keyed by its secret's fact on its own context: a retry appends nothing new", async () => {
   const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
     mind.integration.processEvent!({
-      event: { type, path: "/", offset, payload },
+      // the fact lands on the secret's own context
+      event: { type, path: (payload as { path: string }).path, offset, payload },
       itx: mind.itx,
     });
   await mind.setUp();
@@ -1088,13 +1085,71 @@ test("the App saved or deleted on the Dash registers the card again, keyed by it
   assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
-      idempotencyKey: "github:registry:/@7",
-      payload: { integration: "github", card: READY },
+      idempotencyKey: "github:registry:/secrets/own-github-app@7",
+      payload: { integration: "github", card: NO_INSTALLATION },
     },
     {
       type: CONFIGURED,
-      idempotencyKey: "github:registry:/@8",
+      idempotencyKey: "github:registry:/secrets/own-github-app@8",
       payload: { integration: "github", card: NOT_READY },
     },
   ]);
+});
+
+test("an installation's secret deleted outside the page, or the App uninstalled at GitHub, takes its row away; the card never asks for setup above a working row", async () => {
+  const mind = await connected();
+  // the App's secret as an older form saved it: no public ID or slug
+  mind.secrets["/secrets/own-github-app"]!.options.public = [];
+  await mind.publish(4);
+  assert.deepEqual(
+    mind.registry().find((event) => event.idempotencyKey === "github:registry:/@4")!.payload.card,
+    READY,
+  );
+  const hook = (event: object) =>
+    mind.integration.processEvent!({ event: event as any, itx: mind.itx });
+  // GitHub's uninstall, as the webhook recorded it on the installation's stream
+  const uninstall = {
+    type: "github/delivery-received",
+    path: "/integrations/own-github/42",
+    offset: 3,
+    payload: {
+      installationId: "42",
+      delivery: { id: "d-1", name: "installation" },
+      body: { action: "deleted", installation: { id: 42 } },
+    },
+  };
+  for (let attempt = 0; attempt < 2; attempt++) await hook(uninstall);
+  assert.equal(mind.secrets["/secrets/own-github-42"], undefined);
+  assert.equal(mind.kv["own-github/installations/42"], undefined);
+  assert.equal(mind.kv["own-github/removed/42"], undefined, "its null row landed");
+  assert.deepEqual(mind.registry().slice(-2), [
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: "github:registry:gone:42:/integrations/own-github/42@3",
+      payload: { integration: "github", connection: "42", row: null },
+    },
+    {
+      type: CONFIGURED,
+      idempotencyKey: "github:registry:/integrations/own-github/42@3",
+      payload: { integration: "github", card: NOT_READY },
+    },
+  ]);
+
+  // a secret deleted on the Dash
+  const other = await connected();
+  delete other.secrets["/secrets/own-github-42"];
+  await other.integration.processEvent!({
+    event: {
+      type: "events.iterate.com/secret/deleted",
+      path: "/secrets/own-github-42",
+      offset: 6,
+    },
+    itx: other.itx,
+  });
+  assert.equal(other.kv["own-github/installations/42"], undefined);
+  assert.deepEqual(other.registry().at(-2)!.payload, {
+    integration: "github",
+    connection: "42",
+    row: null,
+  });
 });

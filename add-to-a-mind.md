@@ -1,12 +1,12 @@
 # Adding a package to a mind
 
-The recipes for `pebble/`, `iphone-voice-notes/`, `waitrose/`, `monzo/`, `jmap/`, `telegram/`, `chatgpt/` and `github/` all
-end the same way: the package goes into the mind's config repo (`/repos/config`), as a dependency
+The recipes for `pebble/`, `iphone-voice-notes/`, `waitrose/`, `arbor/`, `monzo/`, `jmap/`,
+`telegram/`, `chatgpt/`, `github/`, `google/`, `x/` and `cloudflare/` all end the same way: the package goes into the mind's config repo (`/repos/config`), as a dependency
 and as one element of the `integrations` array in `worker.ts`. This is the one script that does it,
 so a recipe gives only its own values.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
+mind's root).
 To write and publish a package of your own, read [adding-an-integration.md](adding-an-integration.md).
 
 ## What it does
@@ -22,6 +22,8 @@ To write and publish a package of your own, read [adding-an-integration.md](addi
 4. Commits once, with `parent` set to the tip it read (so it is refused if someone committed meanwhile,
    and you run it again), and waits for the platform's answer: `mind/worker-updated`, or
    `mind/worker-update-failed`, in which case the commit is not live.
+5. **Checks the Integrations page.** Once the commit is live, the package's install hook registers
+   its card. The script waits for it and returns it with its rows.
 
 A `worker.ts` from before the array (the default template's, until October 2026) gets it: the
 `Integration` type in its `iterate/sdk` import, the array before `export default class`, the
@@ -46,6 +48,7 @@ Replace the first block with the values a recipe gives (`PACKAGE`, `IMPORT`, `EL
 async (itx) => {
   // ── 1. This recipe's values ──────────────────────────────────────────────
   const PACKAGE = "iterate-telegram";
+  const INTEGRATION = "telegram"; // its card's name on the Integrations page: the recipe says
   const IMPORT = 'import { telegram } from "iterate-telegram";'; // one import per line
   const ELEMENT = "telegram()"; // its element of worker.ts's `integrations` array
   const MEMBER = ""; // goes at the top of the worker's class (a method agents call); "" for none
@@ -214,7 +217,22 @@ async (itx) => {
     afterOffset: 0,
     timeoutMs: 100_000,
   });
-  return { commitOid, sha, note, outcome: outcome.type, error: outcome.payload?.error }; // worker-update-failed: NOT live
+  if (outcome.type !== "events.iterate.com/mind/worker-updated")
+    return { commitOid, sha, note, outcome: outcome.type, error: outcome.payload?.error }; // NOT live
+
+  // ── 6. The Integrations page: the card the install hook registered, and its rows ──
+  let page = {};
+  for (let tries = 0; tries < 10 && !page.card; tries++) {
+    const { integrations, connections } = await itx.integrations.list();
+    page = {
+      card: integrations[INTEGRATION],
+      rows: Object.fromEntries(
+        Object.entries(connections).filter(([key]) => key.startsWith(`${INTEGRATION}/`)),
+      ),
+    };
+    if (!page.card) await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return { commitOid, sha, note, outcome: outcome.type, page };
 };
 ```
 
@@ -225,6 +243,13 @@ it, and nothing on a recipe's own host runs. If it fails, nothing was committed:
 
 Once it is live, the platform's `mind/worker-updated` runs each package's install hook, and the
 mind's Integrations page in the Dash shows the package's card, with a link to its page.
+
+**Last step, before you tell the person it is done:** read `page` in the result. It must hold the
+card the recipe names (its title; no status and a first button "Set up" or "Connect" before setup,
+a status once something is connected) and a row for each connection the recipe says exists. No
+card after a live commit: the install hook threw, so read the worker's logs for that event. A row
+that should not be there: append its `null`, as the recipe's removal says. Each recipe's own steps
+end with the same check, in its own terms.
 
 ## By hand
 
@@ -263,6 +288,8 @@ curl -sI https://pkg.pr.new/jonastemplestein/iterategrations/<package>@main | gr
 
 - Commit all of it in one `commitFiles` with `parent` set to the tip you read. A commit to `main`
   publishes.
+- Then check the Integrations page: `await itx.integrations.list()` holds the package's card (and
+  its rows) once the commit is live.
 
 Or copy a package's source into the repo instead (each recipe says which files). You then own the
 copy, and nothing is pinned.
@@ -270,4 +297,24 @@ copy, and nothing is pinned.
 ## Updating later
 
 Run the script again: it pins the newest `main`. To stay on a build you have tested, set `sha` yourself.
-A package is never on npm.
+A package is never on npm. Its last step checks the Integrations page again: a newer package may
+draw its card differently.
+
+## Taking a package out
+
+Take its element and import out of `worker.ts`, and the dependency out of `package.json`, in one
+commit. The Dash takes nothing away itself: once that commit is live, append the card's `null`,
+which takes its rows with it, and check that it is gone:
+
+```js
+async (itx) => {
+  const INTEGRATION = "telegram";
+  await itx.cd("/integrations").append({
+    type: "events.iterate.com/integration/configured",
+    payload: { integration: INTEGRATION, card: null },
+  });
+  return (await itx.integrations.list()).integrations[INTEGRATION] ?? "gone";
+};
+```
+
+Each recipe says which secrets and kv keys to delete as well.

@@ -17,17 +17,17 @@ trades the refresh token for a new token and keeps the rotated refresh token.
 - **The page** (members only, at the mind's `chatgpt` address): a Connect button, the consent
   link and a box for the address OpenAI sends the browser to, who is connected and their plan, a
   **Test it** button, a Disconnect button, and a usage snippet.
-- **The Dash:** the mind's Integrations page shows a ChatGPT card ("Connect ChatGPT" until it is
-  connected, with a button to the page) and, once connected, the account's row: its address and
-  plan. The package registers both again after every publish, and whenever the page connects or
-  disconnects. The Dash takes nothing away itself: Disconnect appends the row's null, and if that
-  append fails, the next publish appends it again.
+- **The Integrations page** (the Dash): a ChatGPT card under "This mind's own". Until it is
+  connected it has no status, and its one button is **Connect**. Once connected it says "Connected"
+  and the account has a row: its address, a green dot, its plan, and **Manage** (the page). The
+  package registers both again after every publish, whenever the page connects or disconnects, and
+  when `/secrets/chatgpt` is set or deleted anywhere. The Dash takes nothing away itself:
+  Disconnect appends the row's null, and if that append fails, the next publish appends it again.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat: the person signs in at OpenAI, and nothing here asks for a password).
+mind's root; never take a secret in chat: the person signs in at OpenAI, and nothing here asks for a password).
 
 ### 1. The package, in the config repo
 
@@ -68,6 +68,19 @@ The person needs a **personal Plus or Pro** ChatGPT account. OpenAI offers the p
 preview for those. A Team or Business workspace may be refused.
 
 Then press **Test it** on the page: it asks one model for one word.
+
+Before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("chatgpt/"));
+  return { card: integrations.chatgpt, rows: Object.fromEntries(rows) };
+};
+```
+
+The **ChatGPT** card says "Connected", with one row, `chatgpt/account` (the address, a green dot,
+the plan, **Manage**). No row: the sign-in did not finish; press **Connect ChatGPT** again.
 
 ### 3. Make the mind's own model calls use it
 
@@ -175,7 +188,9 @@ has begun, as `response.failed`.
 - **Not built:** revoking the app at OpenAI on Disconnect (the revoke call needs the token in the
   request body, which egress never fills in), a second plan, and counting a request's cost.
 - **Disconnect** deletes `/secrets/chatgpt` first. If it cannot be deleted, the page says so and
-  ChatGPT stays connected, so Disconnect again can finish.
+  ChatGPT stays connected, so Disconnect again can finish. After it, the card has no status and the
+  row is gone (check it as in step 2).
 - **Removing it.** Disconnect on the page, take `chatgpt()` and its import out of `worker.ts`, and
   once that commit is live take the card off with its null, which takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "chatgpt", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.chatgpt` is gone.

@@ -20,15 +20,15 @@ ever sends a placeholder naming the secret. Telegram puts the token in the URL p
   rest as context.
 - **Invites:** a one-time link, `t.me/<bot>?start=<code>`. The person opens it and taps Start. The bot
   says "You're in." Nobody types a user id. That is how a wife, a colleague or a second phone joins.
-- **The Dash:** the mind's Integrations page shows a Telegram card ("Connect a bot" until there is
-  one) and a row per bot: its username, how many people are let in, and buttons to the page and to
-  the bot in Telegram.
+- **The Integrations page** (the Dash): a Telegram card under "This mind's own". With no bot it has
+  no status, and its one button is **Connect a bot**. With a bot it says "Connected" (or how many),
+  its button is **Add a bot**, and each bot has a row: its username, a green dot, how many people
+  are let in, **Manage** (the page) and **Open** (the bot in Telegram).
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one element of
+mind's root; never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
@@ -95,6 +95,21 @@ other ways: Edit, Administrators, Add Administrator in the group; or `/setprivac
 the bot, **Disable**, then remove and re-add the bot.) The page asks Telegram which it is.
 
 Then write the bot's username and where its page is into the mind's `AGENTS.md`.
+
+### 4. Check the Integrations page
+
+Before you tell the person it is done, read what the page shows:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("telegram/"));
+  return { card: integrations.telegram, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Telegram** card says "Connected", with a row for the bot (`@<username>`, a green dot, "Let in:
+1 person" or more, **Manage**, **Open**). No row: the bot is not connected; open the page again.
 
 ## What the agent gets
 
@@ -233,11 +248,12 @@ file, and a voice note only for an Ogg file of at most 1 MB: a larger one arrive
 
 ## Removing it
 
-Disconnect each bot on the page, then take `telegram()` and its import out of `worker.ts`. The Dash
+Disconnect each bot on the page (its row goes: check it with step 4's script), then take `telegram()` and its import out of `worker.ts`. The Dash
 takes nothing away itself, so once that commit is live, take the card off with its null, which
 takes any row left with it:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "telegram", card: null } })`. Who was let in stays in the
 kv under `telegram/<bot>/`, for a bot connected again; delete those keys to forget them too.
+Check that `(await itx.integrations.list()).integrations.telegram` is gone.
 
 ## When the mind has agents of its own
 

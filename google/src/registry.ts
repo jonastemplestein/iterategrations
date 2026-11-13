@@ -6,6 +6,7 @@ import {
   readApp,
   REMOVED,
   scopesShown,
+  secretOf,
   type Account,
   type GoogleItx,
 } from "./app.js";
@@ -20,20 +21,34 @@ import {
  *  hook. */
 export const WORKER_UPDATED = "events.iterate.com/mind/worker-updated";
 
-/** What the platform appends when a secret is set or deleted: first on the secret's own path, then
- *  on `/`, where the catalog (`secrets.list()`) folds it. */
+/** What the platform appends when a secret is set or deleted: on the secret's own context,
+ *  `/secrets/<name>` (`event.path`), and nowhere else. */
 const SECRET_FACTS = new Set([
   "events.iterate.com/secret/set",
   "events.iterate.com/secret/deleted",
 ]);
 
-/** Whether an event is the client's secret set or deleted, on `/`. A person saves the client on the
- *  Dash, never through this package, so this fact is the moment its card changes. The copy on the
- *  secret's own path lands before the catalog has it: the hook passes it over. */
+/** The secret of an account that was deleted, by its connection: a `secret/deleted` on the secret's
+ *  own context, `/secrets/own-google-<connection>`. Disconnect deletes it too, and then finds
+ *  no account left; a deletion on the Dash, or anywhere else, leaves an account with no tokens,
+ *  and its row goes (`registerGone`). */
+export const goneConnectionOf = (event: {
+  type: string;
+  path: string;
+  payload?: unknown;
+}): string | null => {
+  if (event.type !== "events.iterate.com/secret/deleted") return null;
+  const { path } = event;
+  const connection = typeof path === "string" ? path.slice(secretOf("").length) : "";
+  return typeof path === "string" && path === secretOf(connection) && CONNECTION.test(connection)
+    ? connection
+    : null;
+};
+
+/** Whether an event is the client's secret set or deleted, on that secret's own context. A person saves the client on the
+ *  Dash, never through this package, so this fact is the moment its card changes. */
 export const isAppFact = (event: { type: string; path: string; payload?: unknown }): boolean =>
-  event.path === "/" &&
-  SECRET_FACTS.has(event.type) &&
-  (event.payload as { path?: unknown } | null | undefined)?.path === APP_SECRET;
+  SECRET_FACTS.has(event.type) && event.path === APP_SECRET;
 
 /** The package's name on the Dash. */
 const INTEGRATION = "google";
@@ -60,11 +75,13 @@ async function append(
   }
 }
 
-/** Registers the card: whether the client is saved (its ID public beside its secret), whether an
- *  account is connected, and the button to the page on `slug`. */
+/** Registers the card. Its status is the accounts', never the setup's: once an account is
+ *  connected the card says so, whatever the catalog says of the client (an account keeps working
+ *  with a client saved before the form asked for its ID). Before that it has no status, and its one
+ *  button is the next step on the page at `slug`: the Dash draws it as the thing to do. */
 export async function registerCard(itx: GoogleItx, slug: string, key?: string): Promise<void> {
-  const ready = Boolean(await readApp(itx));
-  const connected = ready && (await itx.kv.list(ACCOUNTS)).keys.length > 0;
+  const accounts = (await itx.kv.list(ACCOUNTS)).keys.length;
+  const ready = accounts > 0 || Boolean(await readApp(itx));
   await append(
     itx,
     "events.iterate.com/integration/configured",
@@ -74,30 +91,59 @@ export async function registerCard(itx: GoogleItx, slug: string, key?: string): 
         title: "Google",
         description:
           "The mind's own Google OAuth client: Google's APIs (Gmail, Calendar, Drive and the rest) as each connected account, with tokens the platform refreshes.",
-        status: connected
-          ? { kind: "ok" }
-          : {
-              kind: "attention",
-              text: ready ? "Connect an account" : "Create an OAuth client and paste its secret",
-            },
-        actions: [{ label: connected ? "Manage" : "Connect", routingSlug: slug, path: "/" }],
+        icon: "https://www.google.com/s2/favicons?domain=google.com&sz=64",
+        ...(accounts > 0 && {
+          status: { kind: "ok", text: accounts === 1 ? "Connected" : `${accounts} accounts` },
+        }),
+        actions: [
+          {
+            label: accounts > 0 ? "Add account" : ready ? "Connect an account" : "Set up",
+            routingSlug: slug,
+            path: "/",
+          },
+        ],
       },
     },
     key,
   );
 }
 
-/** One connection's row: the account's address, the scopes Google granted, and buttons to the page
- *  and to the account's third-party access at Google, where it can take the access away. */
-const rowOf = (slug: string, account: Account) => ({
-  account: fit(account.account),
-  status: { kind: "ok" },
-  actions: [
-    { label: "Manage", routingSlug: slug, path: "/" },
-    { label: "Open", url: "https://myaccount.google.com/permissions" },
-  ],
-  details: { Scopes: fit(scopesShown(account.scopes).join(" ")) },
-});
+/** What Google's scopes let the mind do, in plain words, for a row: "mail, calendar". The scopes
+ *  that only name the account say nothing, and a scope with no word here is left out. */
+const ABILITIES: [RegExp, string][] = [
+  [/^(?:gmail\.|https:\/\/mail\.google\.com\/)/, "mail"],
+  [/^calendar/, "calendar"],
+  [/^drive/, "drive"],
+  [/^(?:contacts|directory)/, "contacts"],
+  [/^spreadsheets/, "sheets"],
+  [/^documents/, "docs"],
+  [/^tasks/, "tasks"],
+  [/^photoslibrary/, "photos"],
+  [/^youtube/, "YouTube"],
+];
+export const abilitiesOf = (scopes: string[]): string[] => [
+  ...new Set(
+    scopesShown(scopes).flatMap((scope) =>
+      ABILITIES.filter(([pattern]) => pattern.test(scope)).map(([, word]) => word),
+    ),
+  ),
+];
+
+/** One connection's row: the account's address, what its scopes let the mind do, and buttons to
+ *  the page and to the account's third-party access at Google, where it can take the access away.
+ *  A row that is well needs no words: the Dash shows its dot. */
+const rowOf = (slug: string, account: Account) => {
+  const can = abilitiesOf(account.scopes);
+  return {
+    account: fit(account.account),
+    status: { kind: "ok" },
+    actions: [
+      { label: "Manage", routingSlug: slug, path: "/" },
+      { label: "Open", url: "https://myaccount.google.com/permissions" },
+    ],
+    ...(can.length && { details: { Can: fit(can.join(", ")) } }),
+  };
+};
 
 /** Sets a connection's row as the kv has it, or takes it away (null) when the kv has none. */
 export async function registerRow(
@@ -136,10 +182,29 @@ export async function registerRemoval(
   await itx.kv.delete(`${REMOVED}${connection}`);
 }
 
+/** An account whose secret is gone, here or anywhere: it has no tokens, so it goes, by the same
+ *  tombstone as a disconnect. Nothing happens when the kv has no such account (Disconnect took it
+ *  away already) or the secret is back (connected again). */
+export async function registerGone(
+  itx: GoogleItx,
+  slug: string,
+  connection: string,
+  at: string,
+): Promise<void> {
+  if (!(await itx.kv.get(`${ACCOUNTS}${connection}`))) return;
+  if ((await itx.secrets.list()).some((secret) => secret.path === secretOf(connection))) return;
+  await itx.kv.put(`${REMOVED}${connection}`, JSON.stringify({ at: new Date().toISOString() }));
+  await itx.kv.delete(`${ACCOUNTS}${connection}`);
+  await registerRemoval(itx, slug, connection, `google:registry:gone:${connection}:${at}`);
+  await registerCard(itx, slug, `google:registry:${at}`);
+}
+
 /** The install hook's registration, each fact keyed by the triggering event (`at` is its path and
  *  offset), so a retry appends nothing new. First the removals that did not finish: a tombstone's
  *  kv entry goes if it is still there, then its null row, under a key of its own (the row's may be
- *  spent on this event already). Then the card, and a row per account the kv keeps. */
+ *  spent on this event already). Then each account whose secret the catalog no longer has: it goes
+ *  the same way. Then the card, a row per account the kv keeps, and a null for each row the
+ *  registry holds of an account the kv does not (`itx.integrations.list()`, where the mind has it). */
 export async function registerAll(itx: GoogleItx, slug: string, at: string): Promise<void> {
   for (const key of (await itx.kv.list(REMOVED)).keys) {
     const connection = key.slice(REMOVED.length);
@@ -147,7 +212,28 @@ export async function registerAll(itx: GoogleItx, slug: string, at: string): Pro
     await itx.kv.delete(`${ACCOUNTS}${connection}`);
     await registerRemoval(itx, slug, connection, `google:registry:removed:${connection}:${at}`);
   }
-  await registerCard(itx, slug, `google:registry:${at}`);
+  const held = new Set((await itx.secrets.list()).map((secret) => secret.path));
   for (const { connection } of await listAccounts(itx))
+    if (!held.has(secretOf(connection))) {
+      await itx.kv.put(`${REMOVED}${connection}`, JSON.stringify({ at: new Date().toISOString() }));
+      await itx.kv.delete(`${ACCOUNTS}${connection}`);
+      await registerRemoval(itx, slug, connection, `google:registry:removed:${connection}:${at}`);
+    }
+  await registerCard(itx, slug, `google:registry:${at}`);
+  const kept = new Set<string>();
+  for (const { connection } of await listAccounts(itx)) {
+    kept.add(connection);
     await registerRow(itx, slug, connection, `google:registry:${connection}:${at}`);
+  }
+  const registered = itx.integrations ? (await itx.integrations.list()).connections : {};
+  for (const key of Object.keys(registered)) {
+    const connection = key.slice(`${INTEGRATION}/`.length);
+    if (key.startsWith(`${INTEGRATION}/`) && !kept.has(connection))
+      await append(
+        itx,
+        "events.iterate.com/integration/connection-configured",
+        { integration: INTEGRATION, connection, row: null },
+        `google:registry:${connection}:${at}`,
+      );
+  }
 }

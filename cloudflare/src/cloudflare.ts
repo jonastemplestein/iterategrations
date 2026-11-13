@@ -1,6 +1,13 @@
 import { LANDING, SCOPES, URLS, type CloudflareItx, type Settings } from "./app.js";
 import { serveLanding, servePage } from "./page.js";
-import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
+import {
+  goneConnectionOf,
+  isAppFact,
+  registerAll,
+  registerCard,
+  registerGone,
+  WORKER_UPDATED,
+} from "./registry.js";
 
 export {
   APP_PIN,
@@ -48,7 +55,7 @@ const unique = (list: string[]): string[] => [
  *  page shows. Its install hook
  *  (`mind/worker-updated`) lists it on the Dash's Integrations page: the card, and a row per
  *  connected person with the account their token reaches. The client's secret set or deleted on
- *  the Dash registers the card again.
+ *  the Dash registers the card again, and a person's secret deleted anywhere takes the row away.
  *
  *  - `slug`: the routing slug to answer on. Default `cloudflare`.
  *  - `scopes`: more scopes to ask Cloudflare for, beside `user-details.read offline_access`, which
@@ -75,9 +82,11 @@ export function cloudflare(
     },
     async processEvent({ event, itx }) {
       const at = `${event.path}@${event.offset}`;
+      const gone = goneConnectionOf(event);
       if (event.type === WORKER_UPDATED) await registerAll(itx, settings.slug, at);
       else if (isAppFact(event))
         await registerCard(itx, settings.slug, `cloudflare:registry:${at}`);
+      else if (gone) await registerGone(itx, settings.slug, gone, at);
     },
   };
 }

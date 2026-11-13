@@ -238,19 +238,21 @@ async function registerRemoval(itx: TelegramItx, bot: string, key?: string): Pro
 /** The package's name on the Dash's Integrations page. */
 const INTEGRATION = "telegram";
 
-/** The card: whether a bot is connected, and the button to the page. */
-const cardOf = (slug: string, connected: boolean): Card => ({
+/** The card: how many bots are connected, and the button to the page. With no bot it has no
+ *  status, and its one button, the next step, is the thing the Dash draws to do. A bot's own row
+ *  has Manage; the card's button adds another. */
+const cardOf = (slug: string, bots: number): Card => ({
   title: "Telegram",
   description:
-    "A Telegram bot for private chats and groups, each handed to an agent. Invite links let people in.",
+    "A Telegram bot for private chats and groups, each handed to an agent; invite links let people in.",
   icon: "https://www.google.com/s2/favicons?domain=telegram.org&sz=64",
-  status: connected ? { kind: "ok" } : { kind: "attention", text: "Connect a bot" },
-  actions: [{ label: connected ? "Manage" : "Connect", routingSlug: slug, path: "/" }],
+  ...(bots > 0 && { status: { kind: "ok", text: bots === 1 ? "Connected" : `${bots} bots` } }),
+  actions: [{ label: bots > 0 ? "Add a bot" : "Connect a bot", routingSlug: slug, path: "/" }],
 });
 
 /** Registers the card, as the connected bots make it. */
 export async function registerCard(itx: TelegramItx, slug: string, key?: string): Promise<void> {
-  await setCard(itx, INTEGRATION, cardOf(slug, (await listBots(itx)).length > 0), key);
+  await setCard(itx, INTEGRATION, cardOf(slug, (await listBots(itx)).length), key);
 }
 
 /** Sets a connected bot's row: its username, a link to the page and one to the bot, and how many

@@ -1,6 +1,13 @@
 import { LANDING, SCOPES, URLS, type XItx, type Settings } from "./app.js";
 import { serveLanding, servePage } from "./page.js";
-import { isAppFact, registerAll, registerCard, WORKER_UPDATED } from "./registry.js";
+import {
+  goneConnectionOf,
+  isAppFact,
+  registerAll,
+  registerCard,
+  registerGone,
+  WORKER_UPDATED,
+} from "./registry.js";
 
 export { APP_PIN, APP_SECRET, SCOPES, URLS, placeholder, secretOf } from "./app.js";
 export type { Account, App, XItx, OAuthOptions } from "./app.js";
@@ -35,7 +42,8 @@ const unique = (list: string[]): string[] => [
  *  iterate's callback sends the person to once it stored an account's tokens, `/connected`; any
  *  other path is a 404. X comes back to iterate's own callback, the redirect URI the page shows. Its install hook (`mind/worker-updated`) lists it
  *  on the Dash's Integrations page: the card, and a row per connected account. The client's secret
- *  set or deleted on the Dash registers the card again.
+ *  set or deleted on the Dash registers the card again, and an account's secret deleted anywhere
+ *  takes its row away.
  *
  *  - `slug`: the routing slug to answer on. Default `x`.
  *  - `scopes`: more scopes to ask X for, beside `tweet.read users.read offline.access`, which name
@@ -61,8 +69,10 @@ export function x(
     },
     async processEvent({ event, itx }) {
       const at = `${event.path}@${event.offset}`;
+      const gone = goneConnectionOf(event);
       if (event.type === WORKER_UPDATED) await registerAll(itx, settings.slug, at);
       else if (isAppFact(event)) await registerCard(itx, settings.slug, `x:registry:${at}`);
+      else if (gone) await registerGone(itx, settings.slug, gone, at);
     },
   };
 }

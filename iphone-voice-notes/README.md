@@ -14,12 +14,12 @@ The receiver is the package `iterate-iphone-voice-notes`: one element, `iphoneVo
 `integrations` array of the mind's config worker. It has a page of its own, for the mind's
 members: the status with a button to set the token, every step of the shortcut with the URL and
 header to copy, and the five newest notes. The mind's Integrations page
-in the Dash shows an iPhone voice notes card ("Open it to set the token" until the token exists),
-with an **Open** button to the page and a **Recipe** button to this recipe.
+in the Dash shows an iPhone voice notes card under "This mind's own": no status and a **Set up**
+button to the page until the token exists, then "OK" with an **Open** button. It has a **Recipe**
+button to this recipe, and changes when the token is set or deleted.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 1. The token (the person makes it up)
 
@@ -151,6 +151,18 @@ async (itx) => {
 };
 ```
 
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("iphone-voice-notes/"));
+  return { card: integrations["iphone-voice-notes"], rows: Object.fromEntries(rows) };
+};
+```
+
+The **iPhone voice notes** card says "OK"; it has no rows. No status: the token is not saved, so set it on the page (step 3).
+
 ## The events
 
 On `/iphone-voice-notes`, each once per recording (the id is the audio's SHA-256, so the same
@@ -174,4 +186,5 @@ Delete the shortcut (and the Action Button's choice) on the iPhone, take `iphone
 import out of `worker.ts`, and delete `/secrets/iphone-voice-notes`. Once that commit is live, take
 the card off with its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "iphone-voice-notes", card: null } })`.
+Check that `(await itx.integrations.list()).integrations["iphone-voice-notes"]` is gone.
 The recordings stay on `/iphone-voice-notes` and in the mind's files.

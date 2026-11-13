@@ -17,23 +17,26 @@ worker, which hands it the requests on the mind's `google` routing slug, and eve
   iterate's own callback, which stores the account's tokens in the browser that opened the Connect
   link and then sends them here; the page reads what Google granted (`itx.secrets.oauthResult`)
   and lists the account.
-- **The Dash:** the mind's Integrations page shows a Google card ("Create an OAuth client and
-  paste its secret" until the client is saved, then "Connect an account") and a row per account:
-  its address, its scopes, and buttons to the page and to the account's third-party access at
-  Google. The card changes when the client is saved or deleted: the package registers it again on
-  that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
+- **The Integrations page** (the Dash): a Google card under "This mind's own", with Google's mark.
+  Before anything is connected it has no status, and its one button is the next step: **Set up**
+  until the client is saved, then **Connect an account**. Once an account is connected it says
+  "Connected" (or how many), its button is **Add account**, and each account has a row: its
+  address, a green dot, what its scopes let the mind do in plain words ("Can: mail, calendar"),
+  **Manage** (the page) and **Open** (its third-party access at Google). A row goes when the
+  account's secret goes: Disconnect, or the secret deleted on the Dash, and at the latest at the
+  next publish.
 - **Gmail as a stream** (if the mind wants it): three helpers for the mind's code that put
   an account's mail on a stream, pushed by Gmail: [Gmail: push and sync](#gmail-push-and-sync).
 
-The deployment's own Google client (iterate's, on the Dash's Connect sheet) is another thing: it is
+The deployment's own Google client (iterate Cloud's, under the "iterate Cloud" heading of the
+Integrations page) is another thing: it is
 shared by every mind, and the platform keeps it. This package is for a client the mind owns,
 with its own consent screen and its own scopes.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one element of
+mind's root; never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
@@ -99,6 +102,21 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    account. Connect again for each other account.
 
 Then write the accounts, their secrets and where the page is into the mind's `AGENTS.md`.
+
+### 3. Check the Integrations page
+
+Before you tell the person it is done, read what the page shows:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("google/"));
+  return { card: integrations.google, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Google** card says "Connected" (or how many are connected), with a row per account (its address, a green dot, "Can: …", **Manage**, **Open**). Before the client is saved it has no status and one button, **Set up**; then **Connect an account**. A row
+that the page does not list: publish the config repo again, and the install hook takes it away.
 
 ## What the agent gets
 
@@ -287,10 +305,11 @@ topic, and delete kv `gmail-sync:<path>`.
   could not be told to take away is taken away by Disconnect again, or at the next publish: until
   then `own-google/removed/<connection>` in the kv marks it. The access stays granted at Google until
   the account removes it at <https://myaccount.google.com/permissions>.
-- **Removing it.** Disconnect each account on the page, take `google()` and its import out of
+- **Removing it.** Disconnect each account on the page (each row goes; check it as in step 3), take `google()` and its import out of
   `worker.ts`, and delete `/secrets/own-google-app`. Once that commit is live, take the card off with
   its null, which takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "google", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.google` is gone.
   Then delete the client at Google, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-google`: the secrets
   `/secrets/own-google-app` and `/secrets/own-google-<connection>`, and the kv keys `own-google/…`.

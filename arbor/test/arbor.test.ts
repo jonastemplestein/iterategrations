@@ -980,16 +980,22 @@ function mind(secrets: Record<string, Record<string, unknown> | undefined>) {
   return { itx, appended };
 }
 
-const card = (status: object) => ({
+/** The card: set up (`status`), or not yet: no status, and the setup step first. */
+const card = (status?: object) => ({
   title: "Arbor",
   description:
     "Arbor, the school's MIS, as a parent sees it (children, meals, messages, calendar, attendance, payments, clubs and trips): agents and the mind's code call it with fetch and the token's placeholder.",
   icon: "https://www.google.com/s2/favicons?domain=arbor-education.com&sz=64",
-  status,
-  actions: [
-    { label: "Open", routingSlug: "arbor", path: "/" },
-    { label: "Recipe", url: RECIPE },
-  ],
+  ...(status && { status }),
+  actions: status
+    ? [
+        { label: "Open", routingSlug: "arbor", path: "/" },
+        { label: "Recipe", url: RECIPE },
+      ]
+    : [
+        { label: "Set up", url: RECIPE },
+        { label: "Open", routingSlug: "arbor", path: "/" },
+      ],
 });
 
 test("arbor() answers the arbor routing slug; its install hook registers the card, keyed by the event's path and offset, ok once the account's secret has its site", async () => {
@@ -1008,16 +1014,12 @@ test("arbor() answers the arbor routing slug; its install hook registers the car
   await publish(5); // the same event again, now with the secret: its key is spent, and that is fine
   await publish(6);
   secrets["/secrets/arbor"] = { site: SITE };
+  // a copy on `/`: the platform appends none there, so it is passed over
   await publish(7, "events.iterate.com/secret/set", { path: "/secrets/arbor" });
   await integration.processEvent!({
-    event: {
-      type: "events.iterate.com/secret/set",
-      path: "/secrets/arbor",
-      offset: 1,
-      payload: { path: "/secrets/arbor" },
-    },
+    event: { type: "events.iterate.com/secret/set", path: "/secrets/arbor", offset: 7 },
     itx,
-  }); // the copy on the secret's own path comes before the catalog has it: passed over
+  }); // the fact on the secret's own context registers the card
   await publish(8, "events.iterate.com/secret/set", { path: "/secrets/other" });
   await publish(9, "events.iterate.com/itx/woken");
   assert.deepEqual(
@@ -1030,7 +1032,7 @@ test("arbor() answers the arbor routing slug; its install hook registers the car
       {
         path: "/integrations",
         key: "arbor:registry:/@5",
-        card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        card: card(),
       },
       {
         path: "/integrations",
@@ -1039,7 +1041,7 @@ test("arbor() answers the arbor routing slug; its install hook registers the car
       },
       {
         path: "/integrations",
-        key: "arbor:registry:/@7",
+        key: "arbor:registry:/secrets/arbor@7",
         card: card({ kind: "ok", text: "example-primary.uk.arbor.education" }),
       },
     ],

@@ -1,6 +1,6 @@
 import type { ChatgptItx } from "./auth.js";
 import { servePage } from "./page.js";
-import { register, WORKER_UPDATED } from "./registry.js";
+import { isSecretFact, register, WORKER_UPDATED } from "./registry.js";
 
 export type { Account, ChatgptItx } from "./auth.js";
 
@@ -28,7 +28,9 @@ export type Integration = {
  *
  *  On its routing slug it answers, for members only, the Connect ChatGPT page at `/`; any other
  *  path is a 404. Its install hook (`mind/worker-updated`) lists it on the Dash's Integrations
- *  page: the card, and the connected account's row.
+ *  page: the card, and the connected account's row. The connection's secret set or deleted
+ *  anywhere (its fact on `/secrets/chatgpt`) registers both again, so a secret deleted on the Dash takes the row
+ *  away.
  *
  *  - `slug`: the routing slug to answer on. Default `chatgpt`. */
 export function chatgpt(options: { slug?: string } = {}): Integration {
@@ -42,7 +44,7 @@ export function chatgpt(options: { slug?: string } = {}): Integration {
       return await servePage(request, itx, routingSlug);
     },
     async processEvent({ event, itx }) {
-      if (event.type === WORKER_UPDATED)
+      if (event.type === WORKER_UPDATED || isSecretFact(event))
         await register(itx, routingSlug, `${event.path}@${event.offset}`);
     },
   };

@@ -70,6 +70,23 @@ deploy that erases it, a long outage). To ride those out, run it in a loop:
 while true; do iterate provide whatsapp/src/whatsapp.ts --mind <your mind>; sleep 15; done
 ```
 
+### On the Integrations page
+
+A bridge registers no card on the Integrations page: when it stops, nothing would take the card
+away. While it is connected, the mind lists the lend itself under the heading "Lent by a
+computer": the card's title is `itx.whatsapp`, and its description is the lend's own, cut to its first
+sentence and to 200 characters. The rule leaves the list when the program stops. The description
+begins `<WHATSAPP_ACCOUNT>: WhatsApp messages, lent from a computer.` (`WHATSAPP_ACCOUNT` names whose account it is; unset, "A WhatsApp account"). With `--name whatsappPersonal`, the name is `itx.whatsappPersonal`.
+
+Last, before you tell the person it is done, check that it is lent:
+
+```js
+async (itx) => (await itx.rewriteRules.list()).find((rule) => rule.match === "itx.whatsapp");
+```
+
+A rule whose target is `itx.builtins.rpcStubs.get('whatsapp')` is the live lend, with its
+`description`. No rule: the bridge is not connected, so read its output.
+
 ## Without an account: the dummy
 
 `whatsapp/src/dummy.ts` is the same lend over a pretend WhatsApp that talks to nobody: Baileys'

@@ -148,6 +148,23 @@ most once in 12 hours for a mind.
 - Herdr's docs say plugins "must stop detached background processes before their parent command or pane
   exits" when an installation is replaced; a linked checkout is left alone, and `stop` ends them.
 
+### On the Integrations page
+
+A bridge registers no card on the Integrations page: when it stops, nothing would take the card
+away. While it is connected, the mind lists the lend itself under the heading "Lent by a
+computer": the card's title is `itx.<you>.herdr`, and its description is the lend's own, cut to its first
+sentence and to 200 characters. The rule leaves the list when the program stops. The description
+begins `<HERDR_LABEL>: a Herdr workspace, lent from a computer.` (`HERDR_LABEL` says whose; unset, "Herdr"). The plugin lends each target under the name its `targets` line gives.
+
+Last, before you tell the person it is done, check that it is lent:
+
+```js
+async (itx) => (await itx.rewriteRules.list()).find((rule) => rule.match === "itx.<you>.herdr");
+```
+
+A rule whose target is `itx.builtins.rpcStubs.get('<you>.herdr')` is the live lend, with its
+`description`. No rule: the bridge is not connected, so read its output.
+
 ## Good to know
 
 - **`call`, not `invoke`.** `invoke(expression)` is the platform's own dispatch method on every
