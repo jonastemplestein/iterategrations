@@ -24,6 +24,10 @@
 //	                         stun.aa.net.uk (stun.go), and checked every five minutes
 //	PHONE_SIP_STUN           "0": no STUN, the local address in Contact and SDP (no NAT)
 //	PHONE_SIP_EXPIRY         seconds a registration lasts, 300 unless set
+//	PHONE_SIP_KEEPALIVE_SECONDS
+//	                         seconds between keepalives (CRLF CRLF) from the SIP port to the
+//	                         registrar's servers, which keep a NAT's mapping open: 15 unless set,
+//	                         0 for none
 //	PHONE_SIP_TRACE          "1" (the default) logs every SIP message's first line, "full" whole
 //	                         messages with the Authorization headers taken out, "0" nothing
 //	LOG_LEVEL                debug for the SIP stack's own log as well
@@ -133,6 +137,11 @@ func lineConfigFromEnv() (lineConfig, error) {
 		return conf, fmt.Errorf("PHONE_SIP_EXPIRY: %w", err)
 	}
 	conf.Expiry = time.Duration(expiry) * time.Second
+	keepalive, err := strconv.Atoi(envOr("PHONE_SIP_KEEPALIVE_SECONDS", "15"))
+	if err != nil || keepalive < 0 {
+		return conf, fmt.Errorf("PHONE_SIP_KEEPALIVE_SECONDS must be a whole number of seconds, 0 for none: %q", os.Getenv("PHONE_SIP_KEEPALIVE_SECONDS"))
+	}
+	conf.Keepalive = time.Duration(keepalive) * time.Second
 	if conf.BindIP == "" {
 		if conf.BindIP, err = localAddressTowards(conf.Domain); err != nil {
 			return conf, err

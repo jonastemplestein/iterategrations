@@ -98,6 +98,12 @@ type lineConfig struct {
 	// SilentLine is how long the line may go quiet mid-call (no packets at all) before the call is
 	// taken for dead: the line sends packets even when nobody speaks.
 	SilentLine time.Duration
+	// Keepalive is how often, once registered, a CRLF CRLF keepalive (RFC 5626) leaves the SIP
+	// socket for each of the registrar's servers: a home router forgets a quiet UDP mapping long
+	// before the next REGISTER, and calls stop arriving. 0: none.
+	Keepalive time.Duration
+	// KeepaliveUnregistered: tests only, keepalives with Register false.
+	KeepaliveUnregistered bool
 }
 
 // liveCall is one call this process knows of: placed, or announced and perhaps answered.
@@ -136,6 +142,7 @@ type server struct {
 	ctx  context.Context
 	log  *zerolog.Logger
 	conf lineConfig
+	ua   *sipgo.UserAgent
 	dg   *diago.Diago
 
 	out  sync.Mutex
@@ -198,6 +205,7 @@ func newServer(ctx context.Context, conf lineConfig, emit func(map[string]any)) 
 	if err != nil {
 		return nil, err
 	}
+	s.ua = ua
 	s.dg = diago.NewDiago(ua,
 		diago.WithLogger(diagoLogger()),
 		diago.WithTransport(diago.Transport{
@@ -218,6 +226,9 @@ func newServer(ctx context.Context, conf lineConfig, emit func(map[string]any)) 
 	} else {
 		close(s.registered)
 		s.emit(map[string]any{"event": "ready", "self": conf.Number})
+		if conf.KeepaliveUnregistered {
+			go s.keepaliveLoop()
+		}
 	}
 	return s, nil
 }
@@ -248,7 +259,10 @@ func (s *server) registerLoop() {
 		if err == nil {
 			pause = 5 * time.Second
 			s.log.Info().Str("registrar", s.conf.Domain).Str("at", registrar).Str("contact", t.Origin.Contact().Address.String()).Msg("registered (200 OK to REGISTER)")
-			s.ready.Do(func() { s.emit(map[string]any{"event": "ready", "self": s.conf.Number}) })
+			s.ready.Do(func() {
+				s.emit(map[string]any{"event": "ready", "self": s.conf.Number})
+				go s.keepaliveLoop()
+			})
 			err = s.keepRegistered(t)
 			if s.ctx.Err() != nil {
 				s.unregister(t)
@@ -284,6 +298,93 @@ func (s *server) keepRegistered(t *diago.RegisterTransaction) error {
 		}
 		s.log.Debug().Msg("registered again")
 	}
+}
+
+// keepaliveLoop sends a keepalive from the SIP socket every conf.Keepalive until ctx ends, so the
+// NAT's mapping of the SIP port stays open between REGISTERs and a call can reach the line. A
+// keepalive that cannot go out is logged once per streak of failures, and the loop goes on.
+func (s *server) keepaliveLoop() {
+	if s.conf.Keepalive <= 0 {
+		return
+	}
+	tick := time.NewTicker(s.conf.Keepalive)
+	defer tick.Stop()
+	var peers []*net.UDPAddr
+	failing := false
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-tick.C:
+		}
+		if resolved, err := s.keepalivePeers(); err == nil {
+			peers = resolved
+		} else if len(peers) == 0 {
+			failing = s.keepaliveFailed(failing, err)
+			continue
+		}
+		if err := s.sendKeepalive(peers); err != nil {
+			failing = s.keepaliveFailed(failing, err)
+			continue
+		}
+		if failing {
+			s.log.Debug().Msg("keepalives go out again")
+			failing = false
+		}
+	}
+}
+
+// keepaliveFailed logs err when a streak of failures begins; it answers that one is under way.
+func (s *server) keepaliveFailed(failing bool, err error) bool {
+	if !failing && s.ctx.Err() == nil {
+		s.log.Debug().Err(err).Msg("a keepalive could not be sent")
+	}
+	return true
+}
+
+// keepalivePeers answers where keepalives go: the test's Proxy, else every IPv4 address of the
+// registrar's name at port 5060 (either server may deliver a call).
+func (s *server) keepalivePeers() ([]*net.UDPAddr, error) {
+	if s.conf.Proxy != "" {
+		peer, err := net.ResolveUDPAddr("udp4", s.conf.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		return []*net.UDPAddr{peer}, nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(s.ctx, "ip4", s.conf.Domain)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("resolve the registrar %s: %w", s.conf.Domain, err)
+	}
+	peers := make([]*net.UDPAddr, 0, len(ips))
+	for _, ip := range ips {
+		peers = append(peers, &net.UDPAddr{IP: ip, Port: 5060})
+	}
+	return peers, nil
+}
+
+// keepalive is RFC 5626's ping over a datagram transport; a registrar that knows it answers CRLF.
+var keepalive = []byte("\r\n\r\n")
+
+// sendKeepalive writes one keepalive to each peer on the SIP listener's own socket: the address
+// and port REGISTER leaves from and the Contact names, which is the mapping that must stay open.
+func (s *server) sendKeepalive(peers []*net.UDPAddr) error {
+	local := net.JoinHostPort(s.conf.BindIP, fmt.Sprint(s.conf.Port))
+	conn, err := s.ua.TransportLayer().GetConnection("udp", local)
+	if err != nil {
+		return fmt.Errorf("the SIP socket %s: %w", local, err)
+	}
+	socket, ok := conn.(*sip.UDPConnection)
+	if !ok {
+		return fmt.Errorf("the SIP socket %s is not UDP", local)
+	}
+	var failed error
+	for _, peer := range peers {
+		if _, err := socket.WriteTo(keepalive, peer); err != nil {
+			failed = errors.Join(failed, err)
+		}
+	}
+	return failed
 }
 
 // unregister removes this process's contact from the number: calls stop coming here at once.
