@@ -160,12 +160,12 @@ const cardOf = (receiver: Receiver, signing: boolean) => ({
   title: receiver.title,
   description: receiver.description,
   icon: "https://www.google.com/s2/favicons?domain=repebble.com&sz=64",
-  status: signing
-    ? { kind: "ok" }
-    : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
+  // set up: "OK"; not yet: no status, and the recipe first, the one thing to do
+  ...(signing && { status: { kind: "ok" } }),
   actions: [
+    ...(signing ? [] : [{ label: "Set up", url: RECIPE }]),
     { label: "Open", routingSlug: receiver.slug, path: "/" },
-    { label: "Recipe", url: RECIPE },
+    ...(signing ? [{ label: "Recipe", url: RECIPE }] : []),
   ],
 });
 
@@ -307,7 +307,12 @@ export function pebble(options: PebbleOptions = {}): Integration {
       });
     },
     async processEvent({ event, itx }) {
-      if (event.type !== WORKER_UPDATED) return;
+      // the publish, or its secret set or deleted: the fact lands on the secret's own context
+      const fact =
+        (event.type === "events.iterate.com/secret/set" ||
+          event.type === "events.iterate.com/secret/deleted") &&
+        event.path === receiver.signingSecret;
+      if (event.type !== WORKER_UPDATED && !fact) return;
       const signing = await hasSigningSecret(itx, receiver);
       // The platform retries an event, so this card may have landed already, perhaps with what was
       // true then (IDEMPOTENCY_CONFLICT): not an error, and the next publish registers it again.

@@ -215,16 +215,22 @@ test("the app's test event is verified and answered, and stores nothing", async 
 
 // --------------------------------------------- the Dash's Integrations page
 
-const card = (status: object) => ({
+/** The card: set up (`status`), or not yet: no status, and the setup step first. */
+const card = (status?: object) => ({
   title: "Pebble Index 01",
   description:
     "Every recording made with the ring: the transcript as a pebble/recording-created event on /pebble, the audio as a mind file.",
   icon: "https://www.google.com/s2/favicons?domain=repebble.com&sz=64",
-  status,
-  actions: [
-    { label: "Open", routingSlug: "pebble", path: "/" },
-    { label: "Recipe", url: RECIPE },
-  ],
+  ...(status && { status }),
+  actions: status
+    ? [
+        { label: "Open", routingSlug: "pebble", path: "/" },
+        { label: "Recipe", url: RECIPE },
+      ]
+    : [
+        { label: "Set up", url: RECIPE },
+        { label: "Open", routingSlug: "pebble", path: "/" },
+      ],
 });
 
 test("the install hook registers the card, keyed by the event's path and offset: attention until the signing secret exists, ok after", async () => {
@@ -236,7 +242,7 @@ test("the install hook registers the card, keyed by the event's path and offset:
       idempotencyKey: "pebble:registry:/@5",
       payload: {
         integration: "pebble",
-        card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+        card: card(),
       },
     },
   ]);
@@ -622,8 +628,8 @@ test("one publish lands every receiver's card, each under its own key, with its 
       event.idempotencyKey,
       event.payload.integration,
       event.payload.card.title,
-      event.payload.card.status.kind,
-      event.payload.card.actions[0].routingSlug,
+      event.payload.card.status?.kind ?? "none",
+      event.payload.card.actions.find((button: any) => "routingSlug" in button).routingSlug,
       /event on (\S+),/.exec(event.payload.card.description)![1],
     ]),
     [
@@ -639,11 +645,11 @@ test("one publish lands every receiver's card, each under its own key, with its 
         "pebble-sam:registry:/@7",
         "pebble-sam",
         "Pebble Index 01 (pebble-sam)",
-        "attention",
+        "none",
         "pebble-sam",
         "/pebble-sam",
       ],
-      ["pebble:registry:/@7", "pebble", "Pebble Index 01", "attention", "pebble", "/pebble"],
+      ["pebble:registry:/@7", "pebble", "Pebble Index 01", "none", "pebble", "/pebble"],
     ],
   );
   cards.forEach(assertFits);

@@ -61,12 +61,12 @@ const cardOf = (account: boolean) => ({
   title: TITLE,
   description: DESCRIPTION,
   icon: "https://www.google.com/s2/favicons?domain=waitrose.com&sz=64",
-  status: account
-    ? { kind: "ok" }
-    : { kind: "attention", text: "Set up by your coding agent: see the recipe" },
+  // set up: "OK"; not yet: no status, and the recipe first, the one thing to do
+  ...(account && { status: { kind: "ok" } }),
   actions: [
+    ...(account ? [] : [{ label: "Set up", url: RECIPE }]),
     { label: "Open", routingSlug: SLUG, path: "/" },
-    { label: "Recipe", url: RECIPE },
+    ...(account ? [{ label: "Recipe", url: RECIPE }] : []),
   ],
 });
 
@@ -99,7 +99,12 @@ export function waitrose(): Integration {
       });
     },
     async processEvent({ event, itx }) {
-      if (event.type !== WORKER_UPDATED) return;
+      // the publish, or its secret set or deleted: the fact lands on the secret's own context
+      const fact =
+        (event.type === "events.iterate.com/secret/set" ||
+          event.type === "events.iterate.com/secret/deleted") &&
+        event.path === ACCOUNT;
+      if (event.type !== WORKER_UPDATED && !fact) return;
       const account = await hasAccount(itx);
       // The platform retries an event, so this card may have landed already, perhaps with what was
       // true then (IDEMPOTENCY_CONFLICT): not an error, and the next publish registers it again.

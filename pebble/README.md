@@ -7,8 +7,9 @@ Every recording you make with the ring lands in an iterate mind: the transcript 
 The receiver is the package `iterate-pebble`: one element, `pebble()`, in the `integrations` array
 of the mind's config worker. It has a page of its own, for the mind's members: the status and
 the webhook URL to paste in the Pebble app. The mind's Integrations page in the Dash shows a
-Pebble card ("Set up by your coding agent" until the signing secret exists), with an **Open** button
-to the page and a **Recipe** button to this recipe.
+Pebble card under "This mind's own": no status and a **Set up** button to this recipe until the
+signing secret exists, then "OK" with an **Open** button to the page and a **Recipe** button. It
+changes when the secret is set or deleted.
 
 A mind with more than one ring hosts one receiver per ring, each with its own names: see
 [Several rings](#several-rings-a-receiver-each). The steps below set up the default receiver,
@@ -34,8 +35,7 @@ It sends every recording of that gesture to a URL of the person's choice, so not
 needs a Pebble account, key or approval. Nothing is configured there until step 4.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 1. The signing secret (the person makes it up)
 
@@ -139,6 +139,18 @@ async (itx) => {
 };
 ```
 
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("pebble/"));
+  return { card: integrations.pebble, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Pebble Index 01** card says "OK"; it has no rows (a receiver with options has its card under its own `integration`). No status: the signing secret is missing, so do step 1 again.
+
 ## Several rings: a receiver each
 
 Each ring (or each person) gets a receiver of its own: another element of the `integrations` array,
@@ -210,4 +222,4 @@ of `worker.ts`, and delete `/secrets/pebble-webhook` (a receiver with options: i
 `signingSecret`, and its card by its `integration`). The Dash takes nothing away itself, so once
 that commit is live, take the card off with its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "pebble", card: null } })`. The recordings stay on `/pebble`
-and in the mind's files.
+and in the mind's files. Check that `(await itx.integrations.list()).integrations.pebble` is gone.

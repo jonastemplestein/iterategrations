@@ -38,8 +38,8 @@ they do not register an integration card or worker route.
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
 mind's root). How an integration reaches a mind depends on what it is:
 
-- **A package** (`iterate-…` in the table: Pebble, iPhone voice notes, Waitrose, Monzo, JMAP, Telegram, ChatGPT, GitHub)
-  runs in the mind's own config worker, as one element of its `integrations` array:
+- **A package** (`iterate-…` in the table: Pebble, iPhone voice notes, Waitrose, Arbor, Monzo, JMAP,
+  Telegram, ChatGPT, GitHub, Google, X, Cloudflare) runs in the mind's own config worker, as one element of its `integrations` array:
   `const integrations: Integration[] = [telegram(), github()];`. The worker hands each package the
   requests on its routing slug (its page, its webhook) and every event. A package's install hook
   registers its card, and a row for each connection (a bot, an installation, an account), on the
@@ -49,13 +49,23 @@ mind's root). How an integration reaches a mind depends on what it is:
   waits for the platform to publish. Each recipe gives the values to put in its first block, then what
   to do next (a secret, a webhook, a page). Writing and publishing a package of your own:
   [`adding-an-integration.md`](adding-an-integration.md).
-- **Lent from your own computer** (WhatsApp, WhatsApp calls, Herdr, ChatGPT desktop: "run with `iterate provide`"): one
-  command lends it to the mind as `itx.<name>`. Each recipe says what to run and has a sample call.
+- **Lent from your own computer** (WhatsApp, WhatsApp calls, phone calls, Amazon, Herdr, ChatGPT
+  desktop: "run with `iterate provide`"): one command lends it to the mind as `itx.<name>`. Each
+  recipe says what to run and has a sample call. A lend registers no card: the mind lists it while
+  the bridge is connected, by the description the bridge gives it.
 - **A sign-in and a file** (Yoto; Monzo's API beside its package): the mind signs in to the service
   itself with `itx.secrets.beginOAuth`, and one file of plain `fetch` calls gives its agents the API
   by tool name.
 
 Never take a secret in chat: a recipe that needs one makes a form with `itx.secrets.collectFromUser`.
+
+## The Integrations page
+
+A mind's Dash has an Integrations page. Every package here keeps it true: its card says what is set
+up, a row stands for each connection that works, and a row goes when its connection goes. Every
+recipe ends with a check of the page (`await itx.integrations.list()`), and a coding agent does that
+check before it tells the person it is done. The rules for a package author are in
+[adding-an-integration.md](adding-an-integration.md#keep-the-integrations-page-true).
 
 [`zero-trust-mcp.md`](zero-trust-mcp.md) connects a
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) server, which keeps no credentials of its

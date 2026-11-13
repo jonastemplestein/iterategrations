@@ -13,13 +13,13 @@ It is the package `iterate-waitrose`. `waitroseFetch` and `graphql` add what eve
 spends nothing, and `placeOrder` is the one call that spends money, with its guards. The login is
 the secret's refresh. `waitrose()` is one element in the
 `integrations` array of the mind's config worker, with a page of its own for the mind's
-members: the status. The mind's Integrations page in the Dash shows a Waitrose card ("Set up by
-your coding agent" until the account's secret exists), with an **Open** button to the page and a
-**Recipe** button to this recipe.
+members: the status. The mind's Integrations page in the Dash shows a Waitrose card under
+"This mind's own": no status and a **Set up** button to this recipe until the account's secret
+exists, then "OK" with an **Open** button to the page and a **Recipe** button. It changes when the
+secret is set or deleted.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 1. The account, as a secret
 
@@ -136,6 +136,18 @@ takes a moment.
 Then write into the mind's `AGENTS.md` that agents call Waitrose with `fetch` and the token's
 placeholder, with a link to this README's
 [Calling Waitrose](https://github.com/jonastemplestein/iterategrations/tree/main/waitrose#calling-waitrose).
+
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("waitrose/"));
+  return { card: integrations.waitrose, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Waitrose** card says "OK"; it has no rows. No status: `/secrets/waitrose` is missing, so do step 1 again.
 
 ## Calling Waitrose
 
@@ -596,3 +608,4 @@ async (itx) =>
 - To remove it: take the element and its import out of `worker.ts`, and delete `/secrets/waitrose`.
   The Dash takes nothing away itself, so once that commit is live, take the card off with its null:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "waitrose", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.waitrose` is gone.

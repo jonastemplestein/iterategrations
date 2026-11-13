@@ -2,8 +2,7 @@
 
 No recipe here needs this: the [Monzo](monzo/README.md) and [Yoto](yoto/README.md) recipes connect
 the mind to the service directly. It is for a person who runs such a server and wants the mind to
-use it. You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the mind's root; read
-<https://os.iterate.com/connect-a-service.md> first if that is new to you, and never take a secret
+use it. You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the mind's root; never take a secret
 in chat).
 
 [zero-trust-mcp](https://github.com/iterate/zero-trust-mcp) is a small Cloudflare Worker that puts

@@ -83,6 +83,23 @@ at "183 Session progress" and never arrive. So while it is registered, `serve` s
 between the REGISTERs. `PHONE_SIP_KEEPALIVE_SECONDS` sets the interval; `0` turns the keepalives
 off.
 
+### On the Integrations page
+
+A bridge registers no card on the Integrations page: when it stops, nothing would take the card
+away. While it is connected, the mind lists the lend itself under the heading "Lent by a
+computer": the card's title is `itx.phoneCalls`, and its description is the lend's own, cut to its first
+sentence and to 200 characters. The rule leaves the list when the program stops. The description
+begins "Phone calls both ways on the agents' own number, lent from a computer."
+
+Last, before you tell the person it is done, check that it is lent:
+
+```js
+async (itx) => (await itx.rewriteRules.list()).find((rule) => rule.match === "itx.phoneCalls");
+```
+
+A rule whose target is `itx.builtins.rpcStubs.get('phoneCalls')` is the live lend, with its
+`description`. No rule: the bridge is not connected, so read its output.
+
 ## What the mind gets
 
 ```js

@@ -17,23 +17,22 @@ worker, which hands it the requests on the mind's `cloudflare` routing slug, and
   to iterate's own callback, which stores the tokens in the browser that opened the Connect link
   and then sends them here; the page reads what Cloudflare granted (`itx.secrets.oauthResult`) and
   lists the connection.
-- **The Dash:** the mind's Integrations page shows a Cloudflare card ("Create an OAuth client
-  and paste its secret" until the client is saved, then "Connect an account") and a row per
-  connection: the person's address, the account their token reaches, the scopes, and buttons to the
-  page and to their profile at Cloudflare. The card changes when the client is saved or deleted: the
-  package registers it again on that secret's `events.iterate.com/secret/set` and `secret/deleted`
-  facts.
+- **The Integrations page** (the Dash): a Cloudflare card under "This mind's own". Before anything
+  is connected it has no status, and its one button is the next step: **Set up** until the client
+  is saved, then **Connect an account**. Once a person is connected it says "Connected" (or how
+  many), its button is **Add account**, and each connection has a row: the person's address, a
+  green dot, the Cloudflare account their token reaches (by name), **Manage** (the page) and
+  **Open** (their profile at Cloudflare). A row goes when its secret goes: Disconnect, or the
+  secret deleted on the Dash, and at the latest at the next publish.
 
-The deployment's own Cloudflare client (iterate's, on the Dash's Connect sheet, and the one people
-sign in with) is another thing: it is shared by every mind, and the platform keeps it. This
+The deployment's own Cloudflare client (iterate's, and the one people sign in with) is another thing: it is shared by every mind, and the platform keeps it. This
 package is for a client the mind owns, with its own scopes: a deploy of iterate's platform into
 the person's account, for one.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one element of
+mind's root; never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
@@ -81,6 +80,21 @@ page gives the request, for an API token with **OAuth Clients Write**; the answe
 client's id and its secret once), save both on the Dash's form, and press Connect. Cloudflare asks
 which account the person grants access to, and sends them back.
 
+### 3. Check the Integrations page
+
+Before you tell the person it is done, read what the page shows:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("cloudflare/"));
+  return { card: integrations.cloudflare, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Cloudflare** card says "Connected" (or how many are connected), with a row per connection (the person's address, a green dot, the account's name, **Manage**, **Open**). Before the client is saved it has no status and one button, **Set up**; then **Connect an account**. A row
+that the page does not list: publish the config repo again, and the install hook takes it away.
+
 ## Use it
 
 A connection is a secret, `/secrets/own-cloudflare-<connection>`, whose placeholder a request to
@@ -114,3 +128,9 @@ client, which owns `/secrets/cloudflare-<connection>`:
   for an hour), and `own-cloudflare/removed/<connection>` (a removal whose row has yet to leave the
   Dash). A client registered with an older version of this package's own `/oauth2/callback` needs
   iterate's callback added.
+
+To remove it: Disconnect each person on the page (each row goes; check it as in step 3), take
+`cloudflare()` and its import out of `worker.ts`, and delete `/secrets/own-cloudflare-app`. Once
+that commit is live, take the card off with its null, which takes any row left with it:
+`itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "cloudflare", card: null } })`.
+Check that `(await itx.integrations.list()).integrations.cloudflare` is gone.

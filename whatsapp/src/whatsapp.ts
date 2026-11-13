@@ -86,7 +86,8 @@ export function describeLend(
   const lent = lend
     ? `it lends ${lend.length} named function${lend.length === 1 ? "" : "s"} of it and no other; call __describe() first for their names`
     : "every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first";
-  const rest = `, as Baileys' socket (https://baileys.wiki): ${lent}. Every event of the socket lands on the account's stream (${logPath}).`;
+  // the first sentence says what it is: the Dash's Integrations page lists a live lend by it
+  const rest = `: WhatsApp messages, lent from a computer. It is Baileys' socket (https://baileys.wiki): ${lent}. Every event of the socket lands on the account's stream (${logPath}).`;
   const who = account.replace(/\s+/g, " ").trim();
   const room = Math.max(1, DESCRIPTION_LIMIT - rest.length);
   return `${who.length > room ? `${who.slice(0, room - 1)}…` : who}${rest}`

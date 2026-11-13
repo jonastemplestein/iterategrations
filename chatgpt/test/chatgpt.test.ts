@@ -339,13 +339,15 @@ test("a refused refresh says to connect again, naming OpenAI's code but never a 
 
 // --------------------------------------------- the Dash's Integrations page
 
-const card = (status: object, label: string, routingSlug = "chatgpt") => ({
+/** The card: Connected with no button of its own (the row has Manage), or no status and one
+ *  Connect button, the thing to do. */
+const card = (connected: boolean, routingSlug = "chatgpt") => ({
   title: "ChatGPT",
   description:
     "Bring your own ChatGPT: Responses API requests paid by a ChatGPT Plus or Pro plan, not an API key.",
   icon: "https://www.google.com/s2/favicons?domain=chatgpt.com&sz=64",
-  status,
-  actions: [{ label, routingSlug, path: "/" }],
+  ...(connected && { status: { kind: "ok", text: "Connected" } }),
+  actions: connected ? [] : [{ label: "Connect", routingSlug, path: "/" }],
 });
 const row = (routingSlug = "chatgpt") => ({
   account: "jonas@example.com",
@@ -365,7 +367,7 @@ test("the install hook registers the card and the connection's row, or takes the
       idempotencyKey: "chatgpt:registry:/@5",
       payload: {
         integration: "chatgpt",
-        card: card({ kind: "attention", text: "Connect ChatGPT" }, "Connect"),
+        card: card(false),
       },
     },
     {
@@ -385,7 +387,7 @@ test("the install hook registers the card and the connection's row, or takes the
     {
       type: CONFIGURED,
       idempotencyKey: "chatgpt:registry:/@9",
-      payload: { integration: "chatgpt", card: card({ kind: "ok" }, "Manage") },
+      payload: { integration: "chatgpt", card: card(true) },
     },
     {
       type: CONNECTION_CONFIGURED,
@@ -403,7 +405,7 @@ test("connecting registers the card and the account's row; disconnecting takes t
   assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
-      payload: { integration: "chatgpt", card: card({ kind: "ok" }, "Manage", "openai") },
+      payload: { integration: "chatgpt", card: card(true, "openai") },
     },
     {
       type: CONNECTION_CONFIGURED,
@@ -417,7 +419,7 @@ test("connecting registers the card and the account's row; disconnecting takes t
       type: CONFIGURED,
       payload: {
         integration: "chatgpt",
-        card: card({ kind: "attention", text: "Connect ChatGPT" }, "Connect", "openai"),
+        card: card(false, "openai"),
       },
     },
     {
@@ -427,10 +429,34 @@ test("connecting registers the card and the account's row; disconnecting takes t
   ]);
   const count = mind.registry().length;
   await mind.integration.processEvent!({
-    event: { type: "events.iterate.com/secret/set", path: "/secrets/chatgpt", offset: 3 },
+    // a copy on `/`: the platform appends none there
+    event: {
+      type: "events.iterate.com/secret/set",
+      path: "/",
+      offset: 3,
+      payload: { path: "/secrets/chatgpt" },
+    },
     itx: mind.itx,
   });
   assert.equal(mind.registry().length, count, "the hook ignores every other event");
+
+  // the secret deleted on the Dash: its fact on its own context takes the row away
+  await mind.page("/start", { method: "POST" });
+  await mind.paste(callbackFor(await (await mind.page("/")).text()));
+  await mind.itx.secrets.delete("/secrets/chatgpt");
+  await mind.integration.processEvent!({
+    event: {
+      type: "events.iterate.com/secret/deleted",
+      path: "/secrets/chatgpt",
+      offset: 4,
+    },
+    itx: mind.itx,
+  });
+  assert.deepEqual(mind.registry().at(-1), {
+    type: CONNECTION_CONFIGURED,
+    idempotencyKey: "chatgpt:registry:account:/secrets/chatgpt@4",
+    payload: { integration: "chatgpt", connection: "account", row: null },
+  });
 });
 
 test("a Disconnect whose secret cannot be deleted says so, and ChatGPT stays connected for another try", async () => {

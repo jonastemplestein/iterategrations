@@ -16,13 +16,13 @@ It is the package `iterate-arbor`. `arborFetch` and `arborGet` add what every ca
 `removeMealChoices` change things at the school, and `checkoutBasket` is the one call that can spend
 money, with its guards ([Booking meals](#booking-meals)). The login is the secret's refresh. `arbor()` is one element in the
 `integrations` array of the mind's config worker, with a page of its own for the mind's
-members: the status. The mind's Integrations page in the Dash shows an Arbor card ("Set up by
-your coding agent" until the account's secret exists), with an **Open** button to the page and a
-**Recipe** button to this recipe.
+members: the status. The mind's Integrations page in the Dash shows an Arbor card under
+"This mind's own": no status and a **Set up** button to this recipe until the account's secret
+exists, then the school's site as its status, with an **Open** button to the page and a **Recipe**
+button. It changes when the secret is set or deleted.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 1. The account, as a secret
 
@@ -163,6 +163,18 @@ logs in by the secret's refresh, so it takes a moment.
 Then write into the mind's `AGENTS.md` that agents call Arbor with `fetch` and the token's
 placeholder, with a link to this README's
 [Calling Arbor](https://github.com/jonastemplestein/iterategrations/tree/main/arbor#calling-arbor).
+
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("arbor/"));
+  return { card: integrations.arbor, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Arbor** card's status is the school's site, in green; it has no rows. An amber "no school site": collect the secret again with its `site` (step 1). No card: publish the config repo again.
 
 ## Calling Arbor
 
@@ -832,3 +844,4 @@ token are safe, because the second gets `invalid_grant` and logs in with the pas
 - To remove it: take the element and its import out of `worker.ts`, and delete `/secrets/arbor`.
   The Dash takes nothing away itself, so once that commit is live, take the card off with its null:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "arbor", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.arbor` is gone.

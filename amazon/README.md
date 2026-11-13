@@ -72,6 +72,23 @@ Purchases are disabled unless the owner sets `AMAZON_MAX_ORDER_PENCE` before sta
 For example, `AMAZON_MAX_ORDER_PENCE=2500` permits orders up to £25.00. The exact final total
 must also match the reviewed checkout. This is a per-order limit.
 
+### On the Integrations page
+
+A bridge registers no card on the Integrations page: when it stops, nothing would take the card
+away. While it is connected, the mind lists the lend itself under the heading "Lent by a
+computer": the card's title is `itx.amazon`, and its description is the lend's own, cut to its first
+sentence and to 200 characters. The rule leaves the list when the program stops. The description
+begins "Amazon UK search, basket and checkout, lent from a computer that signed in with Chrome."
+
+Last, before you tell the person it is done, check that it is lent:
+
+```js
+async (itx) => (await itx.rewriteRules.list()).find((rule) => rule.match === "itx.amazon");
+```
+
+A rule whose target is `itx.builtins.rpcStubs.get('amazon')` is the live lend, with its
+`description`. No rule: the bridge is not connected, so read its output.
+
 ## Agent calls
 
 ```js

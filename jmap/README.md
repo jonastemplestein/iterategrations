@@ -20,8 +20,7 @@ token in on the way out. In every worker the platform loads (a run script, the c
 global `fetch` is that egress.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a mailbox and a token
 
@@ -67,9 +66,9 @@ const FILES = {};
 
 `jmap()` answers the mind's `jmap` host. Its page at `/` is for the mind's members: it shows
 the status (whether the token exists). It has no webhook, so there is no URL to paste. Its install
-hook (`mind/worker-updated`) puts a Mailbox card on the Dash's Integrations page: "Set up by your
-coding agent: see the recipe" until the token exists, and "ok" after, with an **Open** button to the
-page and a **Recipe** button to this recipe.
+hook (`mind/worker-updated`) puts a "Mailbox (JMAP)" card on the Dash's Integrations page: no
+status and a **Set up** button to this recipe until the token exists, then "OK" with an **Open**
+button to the page and a **Recipe** button. It changes when the token is set or deleted.
 
 Earlier builds of this package shipped a client (`connectJmap`, `maskedEmails`), and an earlier
 version of this recipe added `mail.ts` and a `mailbox()` member to `worker.ts` that use it. Move any
@@ -87,6 +86,18 @@ the token's placeholder, and a link to this README's
 [Using the mailbox](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#using-the-mailbox).
 The mind's code uses `mailbox()`:
 [In the mind's code](https://github.com/jonastemplestein/iterategrations/tree/main/jmap#in-the-minds-code).
+
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("jmap/"));
+  return { card: integrations.jmap, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Mailbox (JMAP)** card says "OK"; it has no rows. No status: `/secrets/fastmail` is missing, so do step 1 again.
 
 ## In the mind's code
 
@@ -550,3 +561,4 @@ earlier version of this recipe added them), and delete `/secrets/fastmail` (and 
 Fastmail). The Dash takes nothing away itself, so once that commit is live, take the card off with
 its null:
 `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "jmap", card: null } })`.
+Check that `(await itx.integrations.list()).integrations.jmap` is gone.

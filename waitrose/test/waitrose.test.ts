@@ -766,16 +766,22 @@ test("waitrose() answers the waitrose routing slug; its install hook registers t
   assert.equal(typeof integration.fetch, "function");
   const publish = (offset: number, type = "events.iterate.com/mind/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
-  const card = (status: object) => ({
+  /** The card: set up (`status`), or not yet: no status, and the setup step first. */
+  const card = (status?: object) => ({
     title: "Waitrose",
     description:
       "The Waitrose grocery API (search, trolley, orders, delivery slots, checkout), signed in as the person's own account: agents and the mind's code call it with fetch and the token's placeholder.",
     icon: "https://www.google.com/s2/favicons?domain=waitrose.com&sz=64",
-    status,
-    actions: [
-      { label: "Open", routingSlug: "waitrose", path: "/" },
-      { label: "Recipe", url: RECIPE },
-    ],
+    ...(status && { status }),
+    actions: status
+      ? [
+          { label: "Open", routingSlug: "waitrose", path: "/" },
+          { label: "Recipe", url: RECIPE },
+        ]
+      : [
+          { label: "Set up", url: RECIPE },
+          { label: "Open", routingSlug: "waitrose", path: "/" },
+        ],
   });
 
   for (let attempt = 0; attempt < 2; attempt++) await publish(5);
@@ -791,7 +797,7 @@ test("waitrose() answers the waitrose routing slug; its install hook registers t
         idempotencyKey: "waitrose:registry:/@5",
         payload: {
           integration: "waitrose",
-          card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+          card: card(),
         },
       },
     },

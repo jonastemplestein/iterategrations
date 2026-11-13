@@ -17,21 +17,23 @@ which hands it the requests on the mind's `x` routing slug, and every event.
   iterate's own callback, which stores the tokens in the browser that opened the Connect link and
   then sends them here; the page reads what X granted (`itx.secrets.oauthResult`) and lists the
   account.
-- **The Dash:** the mind's Integrations page shows an X card ("Create an OAuth client and paste
-  its secret" until the client is saved, then "Connect an account") and a row per account: its
-  @username, its scopes, and buttons to the page and to the account on X. The card changes when the
-  client is saved or deleted: the package registers it again on that secret's
-  `events.iterate.com/secret/set` and `secret/deleted` facts.
+- **The Integrations page** (the Dash): an X card under "This mind's own", with X's mark. Before
+  anything is connected it has no status, and its one button is the next step: **Set up** until
+  the client is saved, then **Connect an account**. Once an account is connected it says
+  "Connected" (or how many), its button is **Add account**, and each account has a row: its
+  @username, a green dot, **Manage** (the page) and **Open** (the account on X). A row goes when
+  the account's secret goes, however it goes: Disconnect, or the secret deleted on the Dash
+  (`secret/deleted`), and at the latest at the next publish.
 
-The deployment's own X app (iterate's, on the Dash's Connect sheet) is another thing: it is shared
+The deployment's own X app (iterate Cloud's, under the "iterate Cloud" heading of the Integrations
+page) is another thing: it is shared
 by every mind, and the platform keeps it. This package is for an app the mind owns, with its
 own developer account at X and its own scopes.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one element of
+mind's root; never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
@@ -101,6 +103,21 @@ mind's `x` address; the page shows each URL with a Copy button):
    account, then connect again.
 
 Then write the accounts, their secrets and where the page is into the mind's `AGENTS.md`.
+
+### 3. Check the Integrations page
+
+Before you tell the person it is done, read what the page shows:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("x/"));
+  return { card: integrations.x, rows: Object.fromEntries(rows) };
+};
+```
+
+The **X** card says "Connected" (or how many are connected), with a row per account (its @username, a green dot, **Manage**, **Open**). Before the client is saved it has no status and one button, **Set up**; then **Connect an account**. A row
+that the page does not list: publish the config repo again, and the install hook takes it away.
 
 ## What the agent gets
 
@@ -179,13 +196,15 @@ The package exports `placeholder(connection)` (that string) and `secretOf`.
 - **Disconnect** deletes the account's secret, then forgets it here. A secret that cannot be deleted
   is shown as an error, and the account stays listed, so Disconnect again can finish. A row the Dash
   could not be told to take away is taken away by Disconnect again, or at the next publish: until
-  then `own-x/removed/<connection>` in the kv marks it. The app stays authorized at X until the
+  then `own-x/removed/<connection>` in the kv marks it. Check the page after it: the account's row
+  is gone (`itx.integrations.list()`, as in step 3). The app stays authorized at X until the
   account revokes it, in X's settings under **Security and account access**, **Apps and sessions**,
   **Connected apps**.
 - **Removing it.** Disconnect each account on the page, take `x()` and its import out of `worker.ts`,
   and delete `/secrets/own-x-app`. Once that commit is live, take the card off with its null, which
   takes any row left with it:
   `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "x", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.x` is gone.
   Then delete the app at X, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-x`: the secrets
   `/secrets/own-x-app` and `/secrets/own-x-<connection>`, and the kv keys `own-x/…`. iterate's

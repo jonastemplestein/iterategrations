@@ -5,8 +5,7 @@ the service: the package serves its own pages and webhooks on the mind's host, k
 credentials through `itx.secrets`, and tells the Dash about itself. This guide says how to write one,
 how to test it, and how to publish it so a coding agent can add it to any mind from its README.
 Each package here is a folder of its own; [add-to-a-mind.md](add-to-a-mind.md) is the one
-script that adds any of them. To connect a service to one mind without writing a package, a
-coding agent follows `<platform origin>/connect-a-service.md` instead.
+script that adds any of them.
 
 ## The shape
 
@@ -65,51 +64,140 @@ dependencies, so the build compiles that public package in (`deps.onlyBundle`, a
 `deps.onlyImport: []` to fail the build on any import). The rest of a package's code is what the
 service pushes (webhooks), what a person does (the page) and what the platform cannot do.
 
-## Registering on the Dash
+## Keep the Integrations page true
 
-The install hook (the `mind/worker-updated` case) appends the package's card on the mind's
-`/integrations` context, and one row per connection. Both are set semantics: the whole card or row
-again whenever anything changes, `null` to take it away (a card's null takes its rows with it; a row
-needs its card). The Dash shows what stands and changes nothing itself.
+The Dash's Integrations page draws what the mind's packages registered on the `/integrations`
+context. It changes nothing itself and has no expiry. So a package must say what is true, and take
+back what is no longer true. The contract is `core/lib/src/integrations.ts` in
+[iterate/core](https://github.com/iterate/core) (`iterate/integrations` in a mind).
+
+**The contract in brief.**
+
+- A **card** (`integration/configured`) is the integration: `title`, a `description` of one
+  sentence (the page shows it whole, at most 400 characters), an `icon`, a `status`, and at most
+  four `actions`. Its key is the integration's name, a routing slug's shape.
+- A **row** (`integration/connection-configured`) is one connection under its card: an `account`
+  (what the provider calls it), a `status`, at most four `actions`, and `details`. Its key is
+  `<integration>/<connection>`. A row stands only under a card that exists.
+- A card may name another card as its `section`. The named card is then drawn as a heading (its
+  icon, title, description) above the cards that name it. A card with no section stands under
+  "This mind's own".
+- An `icon` is an https URL, or a place in the mind, `{ routingSlug?, path }`: a file that the
+  package serves on its own routing slug. Do not point at another app's files (the template
+  Dash's `/brands/` marks exist only on a mind whose Dash is the template's).
+- A `status` is `{ kind: "ok" | "attention" | "error", text? }`, drawn as a coloured dot and plain
+  words. `{ kind: "ok" }` with no text is only a dot on a row, and "OK" on a card. The card's header
+  shows the worst status of the card and its rows.
+- An action is a link: `{ label, url }`, or `{ label, routingSlug, path }`, a place in the mind
+  whose URL the Dash makes. Only buttons look pressable. A card with no status and no row draws
+  its first button dark: the one thing to do.
+- Both are set semantics: append the whole card or row again when anything changes. A `null` card
+  takes the card and all its rows away; a `null` row takes one row away. Nothing else does.
+- Card names that start with `iterate-cloud-`, `keys-` or `lent-` are the platform's: a package
+  must not use them.
+- The mind's default config lists every secret that no package row shows under "Keys and
+  accounts". A secret named `<integration>-<connection>`, or ending with
+  `-<integration>-<connection>`, of a registered row is shown by that row alone: name a
+  connection's secret so (`/secrets/own-acme-main` for the row `acme/main`).
+
+**The checklist.** A package author checks each line:
+
+1. Register in the install hook (`mind/worker-updated`): the card, then a row per connection.
+2. Append only what changed, or key each append by the triggering event
+   (`<name>:registry:<path>@<offset>`), so a retry or a publish adds nothing new. Read
+   `await itx.integrations.list()` (`{ integrations, connections }`) to compare.
+3. Before setup, give the card **no status**, and make its first button the setup step ("Set up",
+   "Connect"). Never show a setup instruction as a status.
+4. Once a connection works, the card's status is the connections' ("Connected", "3 accounts"),
+   whatever the setup secret's catalog entry says.
+5. A row that is well is `{ kind: "ok" }` with no text. Words are for what a person must do.
+6. A row's `details` hold at most two or three facts a person wants. No raw scope strings: say
+   "Can: mail, calendar" in plain words. No internal ids, unless the provider's own page shows
+   them to the person.
+7. No two buttons with the same label to the same place on a card and its rows. A row's button
+   manages that connection ("Manage", "Open"); a card's button adds another ("Add account") or
+   opens the package's page.
+8. Give every card a one-sentence description and, where you can, an `icon`.
+9. When a connection goes, append its row as `null`. Listen for every way it can go: your page's
+   Disconnect, its secret deleted elsewhere (`secret/deleted` whose `event.path` is the secret), and
+   the provider's own uninstall or revoke event. Keep a tombstone until the `null` has landed.
+10. In the install hook, reconcile: each connection whose secret the catalog
+    (`itx.secrets.list()`) no longer has goes, and each row in `itx.integrations.list()` that the
+    package no longer keeps gets a `null`.
+11. When a setup secret is set or deleted on the Dash, no request of the package sees it. Its
+    `events.iterate.com/secret/set` and `…/secret/deleted` facts land on the secret's own context
+    only: `event.path` is `/secrets/<name>` (one name, no deeper), and that path is the secret. The
+    root's log holds neither. Register the card again on that fact.
+12. A process that is not the mind's worker (a bridge) registers no card: when it dies, nothing
+    appends the `null`. The mind lists a live lend itself, by its description (below).
+
+**A card and a row.**
 
 ```ts
-await itx.cd("/integrations").append(
-  {
-    type: "events.iterate.com/integration/configured",
-    idempotencyKey: `acme:registry:${at}`,
-    payload: {
-      integration: "acme",
-      card: {
-        title: "Acme",
-        description: "What it does, in one sentence.",
-        status: { kind: "attention", text: "Connect an account" },
-        actions: [{ label: "Connect", routingSlug: "acme", path: "/" }],
-      },
+const registry = itx.cd("/integrations");
+await registry.append({
+  type: "events.iterate.com/integration/configured",
+  idempotencyKey: `acme:registry:${at}`, // `at` is the event's `${path}@${offset}`
+  payload: {
+    integration: "acme",
+    card: {
+      title: "Acme",
+      description: "Acme's API as each connected account.",
+      icon: "https://acme.example/mark.svg",
+      // connected: a status; not yet: none, and the first button is the step to take
+      status: { kind: "ok", text: "Connected" },
+      actions: [{ label: "Add account", routingSlug: "acme", path: "/" }],
     },
   },
-  {
-    type: "events.iterate.com/integration/connection-configured",
-    idempotencyKey: `acme/main:registry:${at}`,
-    payload: {
-      integration: "acme",
-      connection: "main",
-      row: { account: "ops@acme.example", status: { kind: "ok" }, actions: [] },
+});
+await registry.append({
+  type: "events.iterate.com/integration/connection-configured",
+  idempotencyKey: `acme:registry:main:${at}`,
+  payload: {
+    integration: "acme",
+    connection: "main",
+    row: {
+      account: "ops@acme.example",
+      status: { kind: "ok" },
+      actions: [{ label: "Manage", routingSlug: "acme", path: "/" }],
     },
   },
-);
+});
 ```
 
-A button's target is `{ routingSlug, path }`, a place in the mind the Dash turns into a URL for the
-deployment's routing, or `{ url }`. The schemas are `iterate/integrations`; every string is capped,
-the state is kept within 1 MiB, and a malformed payload folds nothing. When a connection goes, append
-its row as `null`; keep a tombstone until that append has landed and finish it at the next
-publication, so a failed append cannot leave a stale row.
+**Removing.** A connection that goes: its row as `null`
+(`{ integration: "acme", connection: "main", row: null }`). The package that goes: first take it out
+of `worker.ts`; once that commit is live, append its card as `null`
+(`{ integration: "acme", card: null }`), which takes its rows with it.
 
-A secret a person saves on the Dash (a `collectFromUser` form) changes what the card says, and no
-request of the package's sees it. Its `events.iterate.com/secret/set` and `secret/deleted` facts
-reach the hook twice: first on the secret's own path, then on `/`, where the catalog folds them.
-Register the card again on the copy on `/` whose `payload.path` is the package's secret, keyed by
-that event.
+**Check it.** Every procedure in a README ends with this check, before the agent tells the person
+it is done:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  return {
+    card: integrations.acme,
+    rows: Object.fromEntries(
+      Object.entries(connections).filter(([key]) => key.startsWith("acme/")),
+    ),
+  };
+};
+```
+
+The card and rows must be what the README says they are after that procedure. If not, publish
+the config repo again (the install hook makes them true), or append the `null` the README names.
+Every string is capped, the state is kept within 1 MiB, and a malformed payload folds nothing:
+parse each payload with the schemas from `iterate/integrations` in the package's tests.
+
+**Bridges.** A file lent with `iterate provide` is listed by the mind while it is connected: its
+rewrite rule in `itx.rewriteRules.list()` (`match: "itx.<name>"`) carries the `description` the
+file exports, and the rule leaves the list when the program stops. The mind's default config lists
+every live lend by itself under a heading "Lent by a computer": the card's title is `itx.<name>`,
+and its description is the lend's own description cut to its first sentence and to 200
+characters. So begin that description with one plain sentence that says what it is ("WhatsApp
+messages, lent from a computer."); the rest is for the model. Check a lend with
+`(await itx.rewriteRules.list()).find((rule) => rule.match === "itx.<name>")`.
 
 ## The archetypes
 
@@ -180,10 +268,11 @@ both pass), prove a new installation through a temporary secret before replacing
 and clear only the pending request the callback's nonce names.
 
 **An API key, and a page that shows its status** (Monzo, Pebble, Waitrose, JMAP). The package's
-README recipe has the agent collect the key into a secret pinned to the service's origin; the install
-hook registers a card that says "Set up by your coding agent: see the recipe" until that secret
-exists, and the page at `/` shows whether it does, with the URLs a person pastes at the service. Where there are
-accounts to name, the recipe's own script appends a row for each (Monzo's does). Outbound calls
+README recipe has the agent collect the key into a secret pinned to the service's origin. Until that
+secret exists, the install hook registers a card with no status and a first button, "Set up", to the
+recipe; once it exists, the card is "OK". The page at `/` shows whether it does, with the URLs a
+person pastes at the service. Where there are accounts to name, the hook registers a row for each
+from the secrets that exist (Monzo's does), so a row goes when its secret goes. Outbound calls
 spend the key as a placeholder, in plain `fetch`, by the README's examples.
 
 **An event producer or consumer with no service** (a schedule, a mind-internal workflow). Only
@@ -200,8 +289,9 @@ follows `[a-zA-Z0-9._-]{1,64}`.
 The package's own tests run in Node with a fake of the service: each page and webhook branch, each
 registry payload (parse them with the schemas from `iterate/integrations`), a replayed webhook, a
 nonce used twice at once, a disconnect whose secret deletion fails. Against a real platform, publish
-the package to a mind and watch the Dash: the card appears after the worker is published, and each
-button leads to the package's page in that deployment's routing.
+the package to a mind and read `itx.integrations.list()`: the card appears after the worker is
+published, each row matches a connection, and each button leads to the package's page in that
+deployment's routing.
 
 ## Publishing the integration
 
@@ -218,11 +308,14 @@ add it to a mind.
    `integrations` array, such as `acme()`), `MEMBER` (a method to add to the worker's class, or empty)
    and `FILES` (new files, or none). Then the steps after the commit: a secret to collect, a webhook
    URL to paste at the service, a page to open. Then the events the package appends and their shapes,
-   and how to remove it (its secrets, its kv keys, its rows).
+   and how to remove it (its secrets, its kv keys, its rows). Each of these procedures ends with
+   the check of the Integrations page above: the card and rows it must show, and what to run when
+   they are wrong.
 3. **Tell the agent where it is.** A person pastes the README's address into their coding agent, or
    the mind's `AGENTS.md` links it. The agent reads the recipe, runs the script with the recipe's
    values against the mind through iterate's MCP server, and the platform publishes the worker;
-   the package's install hook registers it on the Dash.
+   the package's install hook registers it on the Integrations page, and the agent checks it there
+   before it tells the person it is done.
 
 The script pins the package at a full commit, adds the dependency to `package.json`, puts the import
 and the element into `worker.ts`, probes the patched repo as a worker before committing, commits once

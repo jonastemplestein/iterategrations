@@ -59,8 +59,7 @@ order can fail until the provider and account holder resolve access.
 
 ## 2. Collect the Zinc API key as an iterate secret
 
-Use iterate's MCP `run({ script })` in the target mind. Read
-<https://os.iterate.com/connect-a-service.md> if this is new to you.
+Use iterate's MCP `run({ script })` in the target mind.
 
 ```js
 async (itx) =>

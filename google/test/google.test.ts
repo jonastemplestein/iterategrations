@@ -365,10 +365,13 @@ function assertFits(event: any) {
     if (!payload.card) return;
     const { card } = payload;
     for (const key of Object.keys(card))
-      assert.ok(["title", "description", "status", "actions"].includes(key), key);
+      assert.ok(
+        ["title", "description", "icon", "section", "status", "actions"].includes(key),
+        key,
+      );
     assert.ok(card.title.length >= 1 && card.title.length <= 80);
     assert.ok((card.description ?? "").length <= 400);
-    status(card.status);
+    if (card.status) status(card.status);
     assert.ok(card.actions.length <= 4);
     card.actions.forEach(action);
   } else {
@@ -379,7 +382,7 @@ function assertFits(event: any) {
     for (const key of Object.keys(row))
       assert.ok(["account", "status", "actions", "details"].includes(key), key);
     assert.ok(row.account.length >= 1 && row.account.length <= 200, row.account);
-    status(row.status);
+    if (row.status) status(row.status);
     assert.ok(row.actions.length <= 4);
     row.actions.forEach(action);
     const details = Object.entries(row.details ?? {});
@@ -392,11 +395,12 @@ function assertFits(event: any) {
 }
 
 const location = (res: Response) => decodeURIComponent(res.headers.get("location") ?? "");
-const card = (status: object, label: string, routingSlug = "google") => ({
+const card = (status: object | undefined, label: string, routingSlug = "google") => ({
   title: "Google",
   description:
     "The mind's own Google OAuth client: Google's APIs (Gmail, Calendar, Drive and the rest) as each connected account, with tokens the platform refreshes.",
-  status,
+  icon: "https://www.google.com/s2/favicons?domain=google.com&sz=64",
+  ...(status && { status }),
   actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (account = "ada@example.com", routingSlug = "google") => ({
@@ -406,14 +410,11 @@ const row = (account = "ada@example.com", routingSlug = "google") => ({
     { label: "Manage", routingSlug, path: "/" },
     { label: "Open", url: "https://myaccount.google.com/permissions" },
   ],
-  details: { Scopes: "openid userinfo.email userinfo.profile" },
 });
-const READY = card({ kind: "ok" }, "Manage");
-const NO_CLIENT = card(
-  { kind: "attention", text: "Create an OAuth client and paste its secret" },
-  "Connect",
-);
-const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
+const READY = card({ kind: "ok", text: "Connected" }, "Add account");
+/** Nothing set up: no status, and the one button is the next step. */
+const NO_CLIENT = card(undefined, "Set up");
+const NO_ACCOUNT = card(undefined, "Connect an account");
 
 /** A mind with Ada connected through the page, and her connection. */
 async function connected() {
@@ -822,7 +823,13 @@ test("the same account connected twice keeps one row: the older connection's sec
       type: CONNECTION_CONFIGURED,
       payload: { integration: "google", connection: older, row: null },
     },
-    { type: CONFIGURED, payload: { integration: "google", card: READY } },
+    {
+      type: CONFIGURED,
+      payload: {
+        integration: "google",
+        card: card({ kind: "ok", text: "2 accounts" }, "Add account"),
+      },
+    },
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "google", connection: newer, row: row() },
@@ -1067,14 +1074,7 @@ test("the card asks for the client, then for an account, then is ok", async () =
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const mind = fakeMind({ slug: "gmail" });
   await mind.publish(1);
-  assert.deepEqual(
-    mind.registry()[0]!.payload.card,
-    card(
-      { kind: "attention", text: "Create an OAuth client and paste its secret" },
-      "Connect",
-      "gmail",
-    ),
-  );
+  assert.deepEqual(mind.registry()[0]!.payload.card, card(undefined, "Set up", "gmail"));
   await mind.setUp();
   await mind.start();
   assert.deepEqual(mind.begun[0]!.options.next, {
@@ -1083,25 +1083,27 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
   });
   const count = mind.appended.length;
   for (const event of [
-    // another secret's fact, the client's own on its secret's path, and a fact with no payload
-    { type: "events.iterate.com/secret/set", path: "/", payload: { path: "/secrets/other" } },
+    // another secret's fact, a root-path copy of the client's (the platform appends none), and a
+    // secret's fact deeper than one name
+    { type: "events.iterate.com/secret/set", path: "/secrets/other" },
     {
       type: "events.iterate.com/secret/set",
-      path: "/secrets/own-google-app",
+      path: "/",
       payload: { path: "/secrets/own-google-app" },
     },
-    { type: "events.iterate.com/secret/deleted", path: "/" },
+    { type: "events.iterate.com/secret/deleted", path: "/secrets/own-google-app/deeper" },
     { type: "events.iterate.com/integration/configured", path: "/integrations" },
   ])
     await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
   assert.equal(mind.appended.length, count);
 });
 
-test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
+test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on its own context: a retry appends nothing new", async () => {
   const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
     mind.integration.processEvent!({
-      event: { type, path: "/", offset, payload },
+      // the fact lands on the secret's own context
+      event: { type, path: (payload as { path: string }).path, offset, payload },
       itx: mind.itx,
     });
   await mind.setUp();
@@ -1116,12 +1118,12 @@ test("the client saved or deleted on the Dash registers the card again, keyed by
   assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
-      idempotencyKey: "google:registry:/@7",
+      idempotencyKey: "google:registry:/secrets/own-google-app@7",
       payload: { integration: "google", card: NO_ACCOUNT },
     },
     {
       type: CONFIGURED,
-      idempotencyKey: "google:registry:/@8",
+      idempotencyKey: "google:registry:/secrets/own-google-app@8",
       payload: { integration: "google", card: NO_CLIENT },
     },
   ]);
@@ -1140,8 +1142,51 @@ test("a long address and many scopes are cut to the registry's limits", async ()
   const { row: registered } = mind.registry().at(-1)!.payload;
   assert.equal(registered.account.length, 200);
   assert.ok(registered.account.endsWith("…"));
-  assert.equal(registered.details.Scopes.length, 200);
-  assert.ok(
-    registered.details.Scopes.startsWith("openid userinfo.email userinfo.profile scope-0.readonly"),
+  assert.equal(registered.details, undefined, "no scope the row has a word for");
+});
+
+test("a row says in plain words what the account's scopes let the mind do, never the scopes", async () => {
+  const mind = fakeMind({
+    scopes: [
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/gmail.send",
+    ],
+  });
+  await mind.setUp();
+  await mind.connect();
+  assert.deepEqual(mind.registry().at(-1)!.payload.row.details, { Can: "mail, calendar, drive" });
+});
+
+test("an account's secret deleted outside the page takes its row away, and the card never asks for setup above a working row", async () => {
+  const { mind, connection } = await connected();
+  mind.secrets["/secrets/own-google-app"] = structuredClone(SECRET_ALONE);
+  await mind.publish(4);
+  assert.deepEqual(
+    mind.registry().find((event) => event.idempotencyKey === "google:registry:/@4")!.payload.card,
+    READY,
   );
+  delete mind.secrets[`/secrets/own-google-${connection}`];
+  await mind.integration.processEvent!({
+    event: {
+      type: "events.iterate.com/secret/deleted",
+      path: `/secrets/own-google-${connection}`,
+      offset: 6,
+    },
+    itx: mind.itx,
+  });
+  assert.equal(mind.kv[`own-google/accounts/${connection}`], undefined);
+  assert.deepEqual(mind.registry().slice(-2), [
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: `google:registry:gone:${connection}:/secrets/own-google-${connection}@6`,
+      payload: { integration: "google", connection, row: null },
+    },
+    {
+      type: CONFIGURED,
+      idempotencyKey: `google:registry:/secrets/own-google-${connection}@6`,
+      payload: { integration: "google", card: card(undefined, "Set up") },
+    },
+  ]);
 });

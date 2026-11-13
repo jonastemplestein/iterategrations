@@ -10,7 +10,7 @@ their Sonos account. It is Early Access, English only, and needs an S2 system on
 If an action fails, try it on <https://play.sonos.com>; the server can do only what that can.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you).
+mind's root).
 
 ## 1. Connect
 
@@ -42,3 +42,7 @@ async (itx) => {
 
 Sonos's terms say the tools change: list them each time and never hard-code their names. Then
 write the connection down for the mind's agents (`AGENTS.md` in `/repos/config`).
+
+This recipe has no package, so it registers no card on the Integrations page: the connection is
+the mind's MCP connection to Sonos, and `(await itx.integrations.list()).integrations` has no Sonos
+card.

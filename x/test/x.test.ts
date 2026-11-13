@@ -360,10 +360,13 @@ function assertFits(event: any) {
     if (!payload.card) return;
     const { card } = payload;
     for (const key of Object.keys(card))
-      assert.ok(["title", "description", "status", "actions"].includes(key), key);
+      assert.ok(
+        ["title", "description", "icon", "section", "status", "actions"].includes(key),
+        key,
+      );
     assert.ok(card.title.length >= 1 && card.title.length <= 80);
     assert.ok((card.description ?? "").length <= 400);
-    status(card.status);
+    if (card.status) status(card.status);
     assert.ok(card.actions.length <= 4);
     card.actions.forEach(action);
   } else {
@@ -374,7 +377,7 @@ function assertFits(event: any) {
     for (const key of Object.keys(row))
       assert.ok(["account", "status", "actions", "details"].includes(key), key);
     assert.ok(row.account.length >= 1 && row.account.length <= 200, row.account);
-    status(row.status);
+    if (row.status) status(row.status);
     assert.ok(row.actions.length <= 4);
     row.actions.forEach(action);
     const details = Object.entries(row.details ?? {});
@@ -387,11 +390,12 @@ function assertFits(event: any) {
 }
 
 const location = (res: Response) => decodeURIComponent(res.headers.get("location") ?? "");
-const card = (status: object, label: string, routingSlug = "x") => ({
+const card = (status: object | undefined, label: string, routingSlug = "x") => ({
   title: "X",
   description:
     "The mind's own X app: X's API as each connected account, with tokens the platform refreshes.",
-  status,
+  icon: "https://www.google.com/s2/favicons?domain=x.com&sz=64",
+  ...(status && { status }),
   actions: [{ label, routingSlug, path: "/" }],
 });
 const row = (username = "fake_ada", routingSlug = "x") => ({
@@ -401,14 +405,11 @@ const row = (username = "fake_ada", routingSlug = "x") => ({
     { label: "Manage", routingSlug, path: "/" },
     { label: "Open", url: `https://x.com/${username}` },
   ],
-  details: { Scopes: "tweet.read users.read offline.access" },
 });
-const READY = card({ kind: "ok" }, "Manage");
-const NO_CLIENT = card(
-  { kind: "attention", text: "Create an OAuth client and paste its secret" },
-  "Connect",
-);
-const NO_ACCOUNT = card({ kind: "attention", text: "Connect an account" }, "Connect");
+const READY = card({ kind: "ok", text: "Connected" }, "Add account");
+/** Nothing set up: no status, and the one button is the next step. */
+const NO_CLIENT = card(undefined, "Set up");
+const NO_ACCOUNT = card(undefined, "Connect an account");
 
 /** A mind with Ada connected through the page, and her connection. */
 async function connected() {
@@ -788,7 +789,10 @@ test("the same account connected twice keeps one row: the older connection's sec
       type: CONNECTION_CONFIGURED,
       payload: { integration: "x", connection: older, row: null },
     },
-    { type: CONFIGURED, payload: { integration: "x", card: READY } },
+    {
+      type: CONFIGURED,
+      payload: { integration: "x", card: card({ kind: "ok", text: "2 accounts" }, "Add account") },
+    },
     {
       type: CONNECTION_CONFIGURED,
       payload: { integration: "x", connection: newer, row: row() },
@@ -1027,14 +1031,7 @@ test("the card asks for the client, then for an account, then is ok", async () =
 test("the Dash's buttons lead to the slug it answers on; the hook ignores every other event", async () => {
   const mind = fakeMind({ slug: "twitter" });
   await mind.publish(1);
-  assert.deepEqual(
-    mind.registry()[0]!.payload.card,
-    card(
-      { kind: "attention", text: "Create an OAuth client and paste its secret" },
-      "Connect",
-      "twitter",
-    ),
-  );
+  assert.deepEqual(mind.registry()[0]!.payload.card, card(undefined, "Set up", "twitter"));
   await mind.setUp();
   await mind.start();
   assert.deepEqual(mind.begun[0]!.options.next, {
@@ -1043,25 +1040,27 @@ test("the Dash's buttons lead to the slug it answers on; the hook ignores every 
   });
   const count = mind.appended.length;
   for (const event of [
-    // another secret's fact, the client's own on its secret's path, and a fact with no payload
-    { type: "events.iterate.com/secret/set", path: "/", payload: { path: "/secrets/other" } },
+    // another secret's fact, a root-path copy of the client's (the platform appends none), and a
+    // secret's fact deeper than one name
+    { type: "events.iterate.com/secret/set", path: "/secrets/other" },
     {
       type: "events.iterate.com/secret/set",
-      path: "/secrets/own-x-app",
+      path: "/",
       payload: { path: "/secrets/own-x-app" },
     },
-    { type: "events.iterate.com/secret/deleted", path: "/" },
+    { type: "events.iterate.com/secret/deleted", path: "/secrets/own-x-app/deeper" },
     { type: "events.iterate.com/integration/configured", path: "/integrations" },
   ])
     await mind.integration.processEvent!({ event: { ...event, offset: 2 }, itx: mind.itx });
   assert.equal(mind.appended.length, count);
 });
 
-test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on /: a retry appends nothing new", async () => {
+test("the client saved or deleted on the Dash registers the card again, keyed by its secret's fact on its own context: a retry appends nothing new", async () => {
   const mind = fakeMind();
   const fact = (type: string, offset: number, payload: object) =>
     mind.integration.processEvent!({
-      event: { type, path: "/", offset, payload },
+      // the fact lands on the secret's own context
+      event: { type, path: (payload as { path: string }).path, offset, payload },
       itx: mind.itx,
     });
   await mind.setUp();
@@ -1076,12 +1075,12 @@ test("the client saved or deleted on the Dash registers the card again, keyed by
   assert.deepEqual(mind.registry(), [
     {
       type: CONFIGURED,
-      idempotencyKey: "x:registry:/@7",
+      idempotencyKey: "x:registry:/secrets/own-x-app@7",
       payload: { integration: "x", card: NO_ACCOUNT },
     },
     {
       type: CONFIGURED,
-      idempotencyKey: "x:registry:/@8",
+      idempotencyKey: "x:registry:/secrets/own-x-app@8",
       payload: { integration: "x", card: NO_CLIENT },
     },
   ]);
@@ -1098,6 +1097,97 @@ test("a long username and many scopes are cut to the registry's limits; a userna
   assert.equal(registered.account.length, 200);
   assert.ok(registered.account.endsWith("…"));
   assert.deepEqual(registered.actions, [{ label: "Manage", routingSlug: "x", path: "/" }]);
-  assert.equal(registered.details.Scopes.length, 200);
-  assert.ok(registered.details.Scopes.startsWith("tweet.read users.read offline.access made.up"));
+  assert.equal(registered.details, undefined, "no scope list on the Dash");
+});
+
+test("an account connected under a client the catalog names no ID for is still connected: the card never asks for setup above a working row", async () => {
+  const { mind, connection } = await connected();
+  // the client's secret as an older form saved it: no public ID
+  mind.secrets["/secrets/own-x-app"] = structuredClone(SECRET_ALONE);
+  await mind.publish(4);
+  assert.deepEqual(
+    mind.registry().find((event) => event.idempotencyKey === "x:registry:/@4")!.payload.card,
+    READY,
+  );
+  assert.deepEqual(
+    mind.registry().find((event) => event.idempotencyKey === `x:registry:${connection}:/@4`)!
+      .payload.row,
+    row(),
+  );
+});
+
+test("an account's secret deleted outside the page takes its row away: at once on its fact, else at the next publish", async () => {
+  const { mind, connection } = await connected();
+  delete mind.secrets[`/secrets/own-x-${connection}`];
+  // the fact lands on the secret's own context
+  const gone = {
+    type: "events.iterate.com/secret/deleted",
+    path: `/secrets/own-x-${connection}`,
+    offset: 6,
+  };
+  for (let attempt = 0; attempt < 2; attempt++)
+    await mind.integration.processEvent!({ event: gone, itx: mind.itx });
+  assert.equal(mind.kv[`own-x/accounts/${connection}`], undefined);
+  assert.equal(mind.kv[`own-x/removed/${connection}`], undefined, "its null row landed");
+  assert.deepEqual(mind.registry().slice(-2), [
+    {
+      type: CONNECTION_CONFIGURED,
+      idempotencyKey: `x:registry:gone:${connection}:/secrets/own-x-${connection}@6`,
+      payload: { integration: "x", connection, row: null },
+    },
+    {
+      type: CONFIGURED,
+      idempotencyKey: `x:registry:/secrets/own-x-${connection}@6`,
+      payload: { integration: "x", card: NO_ACCOUNT },
+    },
+  ]);
+
+  // the fact missed: the publish finds the account with no secret
+  const later = fakeMind();
+  await later.setUp();
+  await later.connect(ADA);
+  const other = later.lastConnection();
+  delete later.secrets[`/secrets/own-x-${other}`];
+  await later.publish(9);
+  assert.equal(later.kv[`own-x/accounts/${other}`], undefined);
+  assert.deepEqual(
+    later.registry().filter((event) => event.idempotencyKey?.endsWith("/@9")),
+    [
+      {
+        type: CONNECTION_CONFIGURED,
+        idempotencyKey: `x:registry:removed:${other}:/@9`,
+        payload: { integration: "x", connection: other, row: null },
+      },
+      {
+        type: CONFIGURED,
+        idempotencyKey: "x:registry:/@9",
+        payload: { integration: "x", card: NO_ACCOUNT },
+      },
+    ],
+  );
+});
+
+test("a row the registry holds for an account the kv does not keep goes at the next publish", async () => {
+  const { mind, connection } = await connected();
+  // the registry, as the Dash reads it: this account's row and one the kv lost
+  mind.itx.integrations = {
+    list: async () => ({
+      connections: {
+        [`x/${connection}`]: row(),
+        "x/0a0b0c0d": row("fake_lost"),
+        "telegram/bot": {},
+      },
+    }),
+  };
+  await mind.publish(9);
+  assert.deepEqual(mind.registry().at(-1), {
+    type: CONNECTION_CONFIGURED,
+    idempotencyKey: "x:registry:0a0b0c0d:/@9",
+    payload: { integration: "x", connection: "0a0b0c0d", row: null },
+  });
+  assert.equal(
+    mind.registry().filter((event) => event.payload.row === null).length,
+    1,
+    "only the lost row",
+  );
 });

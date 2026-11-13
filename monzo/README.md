@@ -15,13 +15,13 @@ The receiver is the package `iterate-monzo`: one element, `monzo()`, in the `int
 the mind's config worker. The package also exports `monzoApi`, Monzo's API by tool name for the
 mind's agents. It has a page of its own, for the mind's members: the status, the
 accounts, and the shape of an account's webhook URL. The mind's Integrations page in the Dash
-shows a Monzo card ("Set up by your coding agent" until the sign-in exists), with an **Open** button
-to the page and a **Recipe** button to this recipe, and a row per account whose webhook step 4
-registered.
+shows a Monzo card under "This mind's own": no status and a **Set up** button to this recipe until
+the sign-in exists, then "OK" with an **Open** button to the page and a **Recipe** button. Under it
+is a row per account whose webhook secret exists (step 4), by its name, with a green dot. The
+package keeps the rows itself: a row comes when the secret is set, and goes when it is deleted.
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). Follow the steps in order.
+mind's root; never take a secret in chat). Follow the steps in order.
 
 ## 0. Before you start: a Monzo developer client
 
@@ -207,15 +207,7 @@ async (itx) => {
   }
   for (const old of earlier.filter((hook) => hook.url.startsWith(mine)))
     await itx.config.monzoApi("delete_webhook", { webhook_id: old.id });
-  // the account's row under the Monzo card on the Dash (set semantics: the whole row again)
-  await itx.cd("/integrations").append({
-    type: "events.iterate.com/integration/connection-configured",
-    payload: {
-      integration: "monzo",
-      connection: name,
-      row: { account: name, status: { kind: "ok" }, details: { Account: accountId } },
-    },
-  });
+  // the account's row on the Integrations page comes from the package: the secret's set lists it
   return { name, webhook: JSON.parse(JSON.stringify(registered).replaceAll(secret, "<secret>")) };
 };
 ```
@@ -256,6 +248,18 @@ async (itx) => {
 If it gives up, end your turn and wait for the person to say they've paid. Monzo shows the
 transaction in the app a moment before the webhook fires. Then write the accounts, their names and
 how to reach the API (`itx.config.monzoApi`) into the mind's `AGENTS.md`.
+
+Last, before you tell the person it is done, check the Integrations page:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("monzo/"));
+  return { card: integrations.monzo, rows: Object.fromEntries(rows) };
+};
+```
+
+The **Monzo** card says "OK", with a row per account by its name (a green dot). A row is missing: its webhook secret is not set, so run step 4 for that account. A row for an account you stopped: publish the config repo again, and the hook takes it away.
 
 ## What the tools do
 
@@ -318,11 +322,11 @@ On the stream `/monzo/<account name>`:
   each account's webhook again with step 4; the old client's webhooks can only be deleted with the
   old client's sign-in, or by deleting that client at <https://developers.monzo.com/>.
 - To stop an account: call `delete_webhook` (`itx.config.monzoApi`), then
-  `itx.secrets.delete("/secrets/monzo-webhook-<name>")`, and take its row off the Dash (which takes
-  nothing away itself):
-  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/connection-configured", payload: { integration: "monzo", connection: "<name>", row: null } })`.
+  `itx.secrets.delete("/secrets/monzo-webhook-<name>")`. The secret's deletion takes its row off the
+  Integrations page; check that `monzo/<name>` is gone from `(await itx.integrations.list()).connections`.
 - To remove the package: stop each account, take `monzo()` and its import out of `worker.ts`, and
   once that commit is live take the card off with its null, which takes any row left with it:
-  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "monzo", card: null } })`. Delete the sign-in,
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "monzo", card: null } })`
+  (check that `(await itx.integrations.list()).integrations.monzo` is gone). Delete the sign-in,
   `/secrets/monzo`, and the client, `/secrets/monzo-app`, with `itx.secrets.delete(…)`, and take the
   `monzoApi` member out of `worker.ts`, unless the mind's agents still use the API tools.

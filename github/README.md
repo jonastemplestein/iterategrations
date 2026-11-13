@@ -15,19 +15,23 @@ worker, which hands it the requests on the mind's `github` routing slug, and eve
 - **The setup URL** (the same address, `/oauth2/callback`, members only): GitHub sends the person back here
   after an install, and the page connects the installation.
 - **The webhook** (the same address, `/webhook`): GitHub's, checked with the App's webhook secret.
-- **The Dash:** the mind's Integrations page shows a GitHub card ("Create a GitHub App and paste
-  its secrets" until the App is saved) and a row per installation: its account, and buttons to the
-  page and to the account on GitHub. The card changes when the App is saved or deleted: the package
-  registers it again on that secret's `events.iterate.com/secret/set` and `secret/deleted` facts.
+- **The Integrations page** (the Dash): a GitHub card under "This mind's own", with GitHub's mark.
+  Before anything is installed it has no status, and its one button is the next step: **Set up**
+  until the App is saved, then **Install**. Once an installation is connected it says "Connected"
+  (or how many), its button is **Install on another account**, and each installation has a row: its
+  account, a green dot, **Manage** (the page) and **Open** (the account on GitHub). A request that
+  waits for an owner's approval is an amber row. A row goes when the installation goes: Disconnect
+  on the page, the App uninstalled at GitHub (its `installation` delivery with action `deleted`), or
+  its secret deleted on the Dash, and at the latest at the next publish.
 
-The deployment's own GitHub App (iterate's, on the Dash's Connect sheet) is another thing: it is
+The deployment's own GitHub App (iterate Cloud's, under the "iterate Cloud" heading of the
+Integrations page) is another thing: it is
 shared by every mind, and the platform keeps it. This package is for an App the mind owns.
 
 ## Set it up
 
 You are a coding agent with iterate's MCP server (`run({ script })`, `async (itx) => …` at the
-mind's root; read <https://os.iterate.com/connect-a-service.md> first if that is new to you, and
-never take a secret in chat). The only code to commit is one dependency and one element of
+mind's root; never take a secret in chat). The only code to commit is one dependency and one element of
 `worker.ts`'s `integrations` array.
 
 ### 1. The package, in the config repo
@@ -95,6 +99,21 @@ Say: "Open this, sign in, and follow the steps." The page walks them through it:
    `https://github.com/organizations/<org>/settings/installations/<id>`.
 
 Then write the App's name, its installations and where its page is into the mind's `AGENTS.md`.
+
+### 3. Check the Integrations page
+
+Before you tell the person it is done, read what the page shows:
+
+```js
+async (itx) => {
+  const { integrations, connections } = await itx.integrations.list();
+  const rows = Object.entries(connections).filter(([key]) => key.startsWith("github/"));
+  return { card: integrations.github, rows: Object.fromEntries(rows) };
+};
+```
+
+The **GitHub** card says "Connected" (or how many are connected), with a row per installation (its account, a green dot, **Manage**, **Open**; a request still waiting is amber). Before the App is saved it has no status and one button, **Set up**; then **Install**. A row
+that the page does not list: publish the config repo again, and the install hook takes it away.
 
 ## What the agent gets
 
@@ -193,11 +212,14 @@ The package exports `placeholder(installationId)` (that string), `secretOf` and 
   The Dash only shows what the package registered and takes nothing away itself, so a row goes only
   when the package appends its null. A row the Dash could not be told to take away is taken away by
   Disconnect again, or at the next publish: until then `own-github/removed/<connection>` in the kv
-  marks it. The App stays installed at GitHub: only its account can uninstall it.
-- **Removing it.** Disconnect each installation and Forget each request on the page, take
+  marks it. The App stays installed at GitHub: only its account can uninstall it. When it does,
+  GitHub's `installation` delivery (action `deleted`) takes the installation and its row away.
+- **Removing it.** Disconnect each installation and Forget each request on the page (each row goes;
+  check it as in step 3), take
   `github()` and its import out of `worker.ts`, and delete `/secrets/own-github-app`. Once that
   commit is live, take the card off with its null, which takes any row left with it:
-  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "github", card: null } })`. Then delete the App
+  `itx.cd("/integrations").append({ type: "events.iterate.com/integration/configured", payload: { integration: "github", card: null } })`.
+  Check that `(await itx.integrations.list()).integrations.github` is gone. Then delete the App
   at GitHub, or keep it for another mind.
 - **Its own names.** Everything the package keeps starts with `own-github`: the secrets
   `/secrets/own-github-app` and `/secrets/own-github-<installation id>`, the streams

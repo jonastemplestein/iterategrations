@@ -26,16 +26,22 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
   assert.equal(typeof integration.fetch, "function");
   const publish = (offset: number, type = "events.iterate.com/mind/worker-updated") =>
     integration.processEvent!({ event: { type, path: "/", offset }, itx });
-  const card = (status: object) => ({
+  /** The card: set up (`status`), or not yet: no status, and the setup step first. */
+  const card = (status?: object) => ({
     title: "Mailbox (JMAP)",
     description:
       "The mind's own Fastmail mailbox, over JMAP: agents send from it, search it, read whole threads and make Masked Email addresses, calling Fastmail's API with fetch and the token's placeholder.",
     icon: "https://www.google.com/s2/favicons?domain=fastmail.com&sz=64",
-    status,
-    actions: [
-      { label: "Open", routingSlug: "jmap", path: "/" },
-      { label: "Recipe", url: RECIPE },
-    ],
+    ...(status && { status }),
+    actions: status
+      ? [
+          { label: "Open", routingSlug: "jmap", path: "/" },
+          { label: "Recipe", url: RECIPE },
+        ]
+      : [
+          { label: "Set up", url: RECIPE },
+          { label: "Open", routingSlug: "jmap", path: "/" },
+        ],
   });
 
   for (let attempt = 0; attempt < 2; attempt++) await publish(5);
@@ -51,7 +57,7 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
         idempotencyKey: "jmap:registry:/@5",
         payload: {
           integration: "jmap",
-          card: card({ kind: "attention", text: "Set up by your coding agent: see the recipe" }),
+          card: card(),
         },
       },
     },
@@ -64,6 +70,22 @@ test("jmap() answers the jmap routing slug; its install hook registers the card,
       },
     },
   ]);
+
+  // the token deleted on the Dash: its fact on its own context registers the card again, at once
+  secrets.length = 0;
+  await integration.processEvent!({
+    event: {
+      type: "events.iterate.com/secret/deleted",
+      path: "/secrets/fastmail",
+      offset: 8,
+    },
+    itx,
+  });
+  assert.deepEqual(appended.at(-1)!.event, {
+    type: "events.iterate.com/integration/configured",
+    idempotencyKey: "jmap:registry:/secrets/fastmail@8",
+    payload: { integration: "jmap", card: card() },
+  });
 });
 
 // ------------------------------------------------------------------- the page

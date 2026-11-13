@@ -29,3 +29,10 @@ an environment variable.
 Before each commit and each pull request, read the diff for real numbers, addresses, names and
 identifiers. If personal information reaches GitHub, stop and tell the repository owner: removing it
 from history needs a force push and a request to GitHub Support.
+
+## The Integrations page
+
+- A change that adds, renames or removes a connection or a setup step updates the package's card
+  and its rows in the same change, and its README. The rules:
+  [adding-an-integration.md](adding-an-integration.md#keep-the-integrations-page-true).
+- A procedure in a README is complete only when its last step checks the Integrations page.
