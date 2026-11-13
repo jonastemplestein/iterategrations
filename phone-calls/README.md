@@ -45,6 +45,18 @@ export PHONE_CALLS_ANSWER_WITH='{"447700900001":"At your service, sir.","default
 iterate provide phone-calls/calls.ts --name phoneCalls --mind <your mind>
 ```
 
+**Several numbers.** One lend can serve several numbers, each its own `jeeves-phone serve` on a
+SIP port of its own (`PHONE_SIP_PORT`, 5062, plus the number's place in the list):
+
+```sh
+export PHONE_SIP_NUMBERS=+447700900000,+447700900001   # the first is the default line
+export PHONE_SIP_PASSWORD_DIR=~/.config/aa-sip-passwords  # one 0600 file per number: 447700900000, …
+```
+
+A number with no password file is not started (the log says so once), and the others are. One
+line failing (a wrong password, a port in use) never stops another. Still one call at a time,
+across all the lines. Unset, `PHONE_SIP_NUMBER` and `PHONE_SIP_PASSWORD_FILE` are the one line.
+
 **A call ends by itself** when nobody has spoken for `PHONE_CALLS_SILENCE_SECONDS` (45), after
 `PHONE_CALLS_MAX_SECONDS` (1800) in any case, and a few seconds after the voice's goodbye when the
 person says nothing more: a live model is paid by the minute, and two voices once said goodbye in
@@ -75,15 +87,21 @@ const { callId, streamPath } = await itx.phoneCalls.call({
     "Why you are calling and the facts the call's agent needs: it cannot see your conversation.",
   reportTo: "/agents/chief-of-staff", // messaged what was said once the call ends
 }); // answers once the phone rings; the ring gives up after 45 s
-await itx.phoneCalls.status(); // { direction, with, answered, streamPath } or null
+await itx.phoneCalls.status(); // { line, direction, with, answered, streamPath } or null
 await itx.phoneCalls.hangup();
+await itx.phoneCalls.lines(); // [{ number: "+447700900000", ready: true }, …], the default first
 ```
+
+With several numbers, `call({ from: "07700 900001", … })` rings from that one (any usual spelling;
+the default line without it). A `from` that is not one of the lend's numbers, or a line that is not
+registered, is an error. A call to any of the numbers is picked up the same way, and its agent's
+brief says which number it is on.
 
 A note for a caller's next call is kv `phone-calls/answer/<digits>` (else WhatsApp's
 `whatsapp-calls/answer/<digits>`), `{ opening, brief, until }`. Every call leaves its facts on
 `/integrations/phone-calls`: `phone-calls/call-placed`, `call-received` (with `untrusted` and
 `reason` when the call was turned away), `call-answered` and `call-ended`, the WhatsApp lend's
-payloads (`metrics.bridge` counts 20 ms frames).
+payloads (`metrics.bridge` counts 20 ms frames), each with `line`: the lend's number the call is on.
 
 One call at a time, WhatsApp's included: a call is not placed or picked up while
 `itx.whatsappCalls.status()` has one, and this lend keeps its own in kv `calls/busy`.

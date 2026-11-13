@@ -16,7 +16,10 @@
 //
 // The line is `jeeves-phone serve` (serve.go: the number registered as a SIP phone with Andrews &
 // Arnold), one process kept running, with the calls' audio on its stdin and stdout: the WhatsApp
-// bridge's protocol, 16 kHz mono PCM16 both ways.
+// bridge's protocol, 16 kHz mono PCM16 both ways. SEVERAL NUMBERS (PHONE_SIP_NUMBERS) are several
+// lines, one `jeeves-phone serve` each, on SIP ports of their own: a call is placed from the default
+// line (the first) unless `call({ from })` names another, and is picked up on whichever line it
+// rings. Still one call at a time, across all of them.
 //
 // A CALLER ID IS A CLAIM. Over the phone network a caller's number can be faked, so a call "from
 // Jonas" may not be Jonas: the call's agent is told so, and a phone yes never approves money,
@@ -38,12 +41,13 @@
 // `call-received`, `call-answered` (with the caller's agent path) and `call-ended` (with what was
 // said), the WhatsApp lend's payloads.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { connectVoiceDevice, type VoiceCall, type VoiceDevice } from "@iterate-com/voice/call";
 
 export const description =
-  "Phone calls on the agents' own number: call({ to, opening, brief, reportTo }) rings the person's phone and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(). Call __describe() first.";
+  "Phone calls on the agents' own number: call({ to, opening, brief, reportTo }) rings the person's phone and connects them to a voice agent that says `opening` and knows `brief`; a call from a known number to the agents' number is answered the same way; hangup(), status(), lines(). Call __describe() first.";
 
 const LOG_PATH = "/integrations/phone-calls";
 const BRIDGE = process.env.PHONE_CALLS_BIN || join(import.meta.dirname, "jeeves-phone");
@@ -103,6 +107,9 @@ type Mind = Parameters<typeof connectVoiceDevice>[0] & {
 type CallInput = {
   /** The person's number, with country code: "+44 7700 900123". */
   to: string;
+  /** Which of the lend's numbers to call from ("+44 7700 900001", "07700 900001"); the default line
+   *  unless given. */
+  from?: string;
   /** The first thing the voice says when they answer. */
   opening?: string;
   /** What the call is for and what the voice agent should know: it cannot see your conversation. */
@@ -141,6 +148,8 @@ type Placed = { callId: string; ringing: true; streamPath: string };
 type ActiveCall = {
   /** "out": the mind rang the person. "in": the person rang the number. */
   direction: "out" | "in";
+  /** The mind's line the call is on: its audio and control go to that line's bridge only. */
+  line: Line;
   callId: string;
   /** The other person's number, digits with country code ("" for a test caller). */
   number: string;
@@ -236,13 +245,84 @@ const NO_AUDIO = "answered, but no audio flowed";
 /** How long a call waits for the line to be registered before it is given up. */
 const BRIDGE_READY_TIMEOUT_MS = 20_000;
 
-let bridge: ChildProcessWithoutNullStreams | null = null;
-let bridgeStarted = false;
-/** The number is registered: calls can be placed and come in. */
-let bridgeReady = false;
-/** The line's own number, as the bridge said once registered. */
-let ownNumber: string | undefined;
-let bridgeWaiters: (() => void)[] = [];
+/** One of the mind's numbers, served by a `jeeves-phone serve` of its own. */
+type Line = {
+  /** "+44…"; "" until a single line's bridge says it, when PHONE_SIP_NUMBER is unset. */
+  number: string;
+  /** The number's digits with country code: the key in `lines`. */
+  digits: string;
+  /** Its bridge's own settings, over the rest of the environment: none for a single line set up
+   *  the old way (PHONE_SIP_NUMBER), which runs on the environment as it is. */
+  env: Record<string, string>;
+  /** Why the line is not started (no password file), or null. */
+  missing: string | null;
+  child: ChildProcessWithoutNullStreams | null;
+  /** The number is registered: calls can be placed and come in. */
+  ready: boolean;
+  waiters: (() => void)[];
+};
+
+/** The lend's lines by digits, the default (the first number) first. PHONE_SIP_NUMBERS: several,
+ *  comma-separated, each with its password in PHONE_SIP_PASSWORD_DIR/<digits> and on SIP port
+ *  PHONE_SIP_PORT (5062) plus its place in the list. Unset: the one line of PHONE_SIP_NUMBER. */
+const lines = new Map<string, Line>();
+{
+  const several = (process.env.PHONE_SIP_NUMBERS || "")
+    .split(",")
+    .map((number) => number.replace(/\D/g, ""))
+    .filter(Boolean);
+  const dir = process.env.PHONE_SIP_PASSWORD_DIR;
+  const basePort = Number(process.env.PHONE_SIP_PORT || 5062);
+  if (several.length === 0) {
+    const digits = (process.env.PHONE_SIP_NUMBER || "").replace(/\D/g, "");
+    lines.set(digits, {
+      number: digits ? `+${digits}` : "",
+      digits,
+      env: {},
+      missing: null,
+      child: null,
+      ready: false,
+      waiters: [],
+    });
+  }
+  for (const [index, digits] of [...new Set(several)].entries()) {
+    const file = dir
+      ? join(dir, digits)
+      : several.length === 1
+        ? process.env.PHONE_SIP_PASSWORD_FILE
+        : undefined;
+    lines.set(digits, {
+      number: `+${digits}`,
+      digits,
+      env: {
+        PHONE_SIP_NUMBER: `+${digits}`,
+        ...(file && { PHONE_SIP_PASSWORD_FILE: file }),
+        PHONE_SIP_PORT: String(basePort + index),
+      },
+      missing: !file
+        ? "it has no password file (PHONE_SIP_PASSWORD_DIR is not set)"
+        : existsSync(file)
+          ? null
+          : `it has no password file (${file})`,
+      child: null,
+      ready: false,
+      waiters: [],
+    });
+  }
+}
+const defaultLine = (): Line => lines.values().next().value!;
+/** The line's number in what the lend logs and says: only when it has more than one. */
+const named = (line: Line) => (lines.size > 1 ? ` ${line.number}` : "");
+let bridgesStarted = false;
+
+/** The lend's line for a number in any usual spelling ("+44 7700 900001", "07700 900001",
+ *  "0044…"), or undefined. A national number is taken as a UK one. */
+function lineFor(spelled: string): Line | undefined {
+  let digits = spelled.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  else if (digits.startsWith("0")) digits = `44${digits.slice(1)}`;
+  return [...lines.values()].find((line) => line.digits === digits);
+}
 
 /** The voice ended the call itself (its agent hung up, or nobody spoke for a minute): the phone
  *  call ends too. Any other end is the voice's connection failing, and the call gets a new one. */
@@ -264,22 +344,23 @@ const record = (type: string, payload: Record<string, unknown>) =>
       console.error(`phone-calls: could not record ${type}: ${String(error)}`),
     );
 
-const tell = (line: Record<string, unknown>) => {
-  if (bridge?.stdin.writable) bridge.stdin.write(`${JSON.stringify(line)}\n`);
+/** Say a line of serve.go's stdin to the bridge of `line`. */
+const tell = (line: Line, said: Record<string, unknown>) => {
+  if (line.child?.stdin.writable) line.child.stdin.write(`${JSON.stringify(said)}\n`);
 };
 
-function bridgeConnected(): Promise<void> {
-  if (bridgeReady) return Promise.resolve();
+function bridgeConnected(line: Line): Promise<void> {
+  if (line.ready) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const connected = () => {
       clearTimeout(timer);
       resolve();
     };
     const timer = setTimeout(() => {
-      bridgeWaiters = bridgeWaiters.filter((waiter) => waiter !== connected);
-      reject(new Error("The phone line is not registered: try again in a minute."));
+      line.waiters = line.waiters.filter((waiter) => waiter !== connected);
+      reject(new Error(`The phone line${named(line)} is not registered: try again in a minute.`));
     }, BRIDGE_READY_TIMEOUT_MS);
-    bridgeWaiters.push(connected);
+    line.waiters.push(connected);
   });
 }
 
@@ -318,6 +399,7 @@ function markBusy(mind: Mind, current: ActiveCall): void {
       JSON.stringify({
         lend: "phoneCalls",
         with: current.who,
+        line: current.line.number,
         direction: current.direction,
         since: new Date(current.startedAt).toISOString(),
         until: new Date(current.startedAt + 3_600_000).toISOString(),
@@ -338,11 +420,13 @@ function clearBusy(mind: Mind): void {
 
 const newCall = (
   direction: "out" | "in",
+  line: Line,
   number: string,
   who: string,
   test = false,
 ): ActiveCall => ({
   direction,
+  line,
   callId: "",
   number,
   who,
@@ -440,13 +524,13 @@ function watchLimits(current: ActiveCall): void {
         `phone-calls: nobody spoke for ${String(Math.round(quiet / 1000))} s with ${current.who}; hanging up`,
       );
       stop();
-      tell({ hangup: true });
+      tell(current.line, { hangup: true });
     } else if (current.answeredAt !== null && now - current.answeredAt >= limit) {
       console.error(
         `phone-calls: the call with ${current.who} reached ${String(Math.round(limit / 1000))} s; hanging up`,
       );
       stop();
-      tell({ hangup: true });
+      tell(current.line, { hangup: true });
     }
   }, 1000);
 }
@@ -477,7 +561,7 @@ function armGoodbye(current: ActiveCall): void {
     if (Date.now() - current.personHeardAt < grace) return armGoodbye(current);
     console.error(`phone-calls: both sides said goodbye to ${current.who}; hanging up`);
     current.endedAfterGoodbyes = true;
-    tell({ hangup: true });
+    tell(current.line, { hangup: true });
   }, wait);
 }
 
@@ -497,7 +581,7 @@ function carryOver(mind: Mind): void {
   if (current?.voice && !current.over) {
     current.metrics.linkMoves += 1;
     console.error(
-      `phone-calls: the link was lost mid-call with ${current.who}; carrying the call over`,
+      `phone-calls: the link was lost mid-call with ${current.who}${named(current.line)}; carrying the call over`,
     );
   }
   for (const [client, device] of devices) {
@@ -513,7 +597,7 @@ function carryOver(mind: Mind): void {
         console.error(
           `phone-calls: the call could not be carried over (${String(error)}); hanging up`,
         );
-        tell({ hangup: true });
+        tell(active.line, { hangup: true });
       }
     });
   }
@@ -553,16 +637,16 @@ async function connectVoice(mind: Mind, current: ActiveCall, resumed: boolean): 
       // nobody is listening until the call is answered: what the voice says before is dropped
       if (current.answeredAt === null) return;
       if (frame.clearSpeakerBufferBeforeFrame) {
-        tell({ clear: true });
+        tell(current.line, { clear: true });
         current.voicePlaysUntil = Date.now();
       }
       if (frame.pcm) {
-        tell({ pcm: frame.pcm, ...(frame.lastFrameOfAnswer && { last: true }) });
+        tell(current.line, { pcm: frame.pcm, ...(frame.lastFrameOfAnswer && { last: true }) });
         // PCM16 at 16 kHz is 32 bytes a millisecond; base64 carries 3 bytes in every 4 characters
         const ms = (frame.pcm.replace(/=+$/, "").length * 3) / 4 / 32;
         current.voicePlaysUntil = Math.max(Date.now(), current.voicePlaysUntil) + ms;
         if (current.byeTimer) armGoodbye(current);
-      } else if (frame.lastFrameOfAnswer) tell({ last: true });
+      } else if (frame.lastFrameOfAnswer) tell(current.line, { last: true });
     },
     onFact: (fact) => {
       if (fact.type === "events.iterate.com/voice-agent/conversation-accepted") accepted.resolve();
@@ -599,14 +683,14 @@ async function connectVoice(mind: Mind, current: ActiveCall, resumed: boolean): 
         current.answeredAt === null ||
         reconnects >= MAX_VOICE_RECONNECTS
       ) {
-        tell({ hangup: true });
+        tell(current.line, { hangup: true });
         return;
       }
       console.error(`phone-calls: the voice ended (${reason}); reconnecting it`);
       // the newest link: the one this voice started on may have been replaced since
       connectVoice(itx ?? mind, current, true).catch((error: unknown) => {
         console.error(`phone-calls: the voice could not be reconnected: ${String(error)}`);
-        tell({ hangup: true });
+        tell(current.line, { hangup: true });
       });
     },
   });
@@ -657,6 +741,7 @@ function briefFor(current: ActiveCall, resumed: boolean): string {
       : current.direction === "out"
         ? `[call brief, for the call that starts now] You are on a phone call (a real telephone line, not WhatsApp) to +${current.number}, which you placed yourself${current.reportTo ? ` from your conversation at ${current.reportTo}` : ""}: to the person you are the same assistant they know, not someone calling on its behalf.`
         : `[call brief, for the call that starts now] +${current.number} rang your phone number (a real telephone line, not WhatsApp) and you picked up: to the person you are the same assistant they know. You do not know yet why they are calling.`,
+    lines.size > 1 ? `The call is on your number ${current.line.number}.` : "",
     UNVERIFIED,
     current.brief ?? "",
     resumed
@@ -688,6 +773,7 @@ async function finished(current: ActiveCall, reason: string, answered: boolean):
   const transcript = current.said.join("\n");
   await record("call-ended", {
     callId: current.callId,
+    line: current.line.number,
     direction: current.direction,
     ...(current.direction === "out" ? { to: current.who } : { from: current.who }),
     ...(current.test && { test: true }),
@@ -772,6 +858,13 @@ async function call(input: CallInput): Promise<Placed> {
     throw new Error(
       `call({ to }) needs a phone number with its country code, got ${JSON.stringify(input?.to)}`,
     );
+  const line = input.from ? lineFor(String(input.from)) : defaultLine();
+  if (!line)
+    throw new Error(
+      `call({ from }) must be one of this lend's numbers (${[...lines.values()].map((l) => l.number).join(", ")}), got ${JSON.stringify(input.from)}`,
+    );
+  if (line.missing)
+    throw new Error(`The phone line${named(line)} is not registered: ${line.missing}.`);
   // OUT: anyone (Jonas, 2026-10-07: "we should be able to call anyone"). Who is rung, and when, is
   // the agents' rules (calls.md); PHONE_CALLS_ALLOWED says only who is answered.
   if (active)
@@ -783,7 +876,7 @@ async function call(input: CallInput): Promise<Placed> {
   if (meanwhile)
     throw new Error(`A call is already in progress (with ${meanwhile.who}): one call at a time.`);
 
-  const current = newCall("out", digits, `+${digits}`);
+  const current = newCall("out", line, digits, `+${digits}`);
   current.opening = input.opening;
   current.brief = input.brief;
   // the lend says it, so the model cannot forget it
@@ -810,29 +903,30 @@ async function call(input: CallInput): Promise<Placed> {
     throw error;
   }
   try {
-    await bridgeConnected();
+    await bridgeConnected(line);
   } catch (error) {
     await finished(current, "the phone line is not registered", false);
     throw error;
   }
   current.placed = Promise.withResolvers<Placed>();
-  tell({ call: `+${digits}`, ring: RING_SECONDS });
+  tell(line, { call: `+${digits}`, ring: RING_SECONDS });
   return await current.placed.promise;
 }
 
 /** Someone is ringing the number. A caller this lend answers gets a voice call of the mind's
  *  first, and is picked up once the live model is on the line; anyone else is turned away, to the
  *  number's own fallback. */
-async function incoming(event: BridgeEvent): Promise<void> {
+async function incoming(line: Line, event: BridgeEvent): Promise<void> {
   const mind = itx;
   const callId = event.callId ?? "";
   const digits = event.number ?? "";
   const test = Boolean(TEST_FROM) && event.from === TEST_FROM;
   const who = digits ? `+${digits}` : (event.from ?? "unknown");
   const turnAway = (reason: string) => {
-    tell({ reject: callId });
+    tell(line, { reject: callId });
     void record("call-received", {
       callId,
+      line: line.number,
       from: who,
       ...(event.untrusted && { untrusted: true }),
       ...(test && { test: true }),
@@ -840,12 +934,12 @@ async function incoming(event: BridgeEvent): Promise<void> {
       reason,
     });
   };
-  if (!mind) return tell({ reject: callId });
+  if (!mind) return tell(line, { reject: callId });
   if (!test && (event.untrusted || !digits))
     return turnAway("the line does not vouch for the caller's number");
   if (!test && !ALLOWED.has(digits)) return turnAway("not a number this lend answers");
   if (active) return turnAway(`another call is in progress (with ${active.who})`);
-  const current = newCall("in", test ? "" : digits, who, test);
+  const current = newCall("in", line, test ? "" : digits, who, test);
   current.callId = callId;
   current.ringingAt = Date.now();
   active = current; // before any await: a second call is turned away
@@ -858,11 +952,17 @@ async function incoming(event: BridgeEvent): Promise<void> {
   current.opening =
     (test ? ANSWER_WITH.test : ANSWER_WITH[digits]) ?? ANSWER_WITH.default ?? "Hello.";
   current.noted = takeNote(mind, current);
-  void record("call-received", { callId, from: who, ...(test && { test: true }), answering: true });
+  void record("call-received", {
+    callId,
+    line: line.number,
+    from: who,
+    ...(test && { test: true }),
+    answering: true,
+  });
   try {
     await connectVoice(mind, current, false);
   } catch (error) {
-    tell({ reject: callId });
+    tell(line, { reject: callId });
     await finished(
       current,
       `the voice could not be connected: ${error instanceof Error ? error.message : String(error)}`,
@@ -870,16 +970,17 @@ async function incoming(event: BridgeEvent): Promise<void> {
     );
     return;
   }
-  tell({ answer: callId });
+  tell(line, { answer: callId });
   setTimeout(() => {
     if (current.over || current.answeredAt !== null) return;
-    tell({ hangup: true });
+    tell(line, { hangup: true });
     void finished(current, "picked up, but the call never came up", false);
   }, PICK_UP_TIMEOUT_MS);
 }
 
-function onBridgeEvent(event: BridgeEvent): void {
-  const current = active;
+/** A line of `line`'s bridge. Only the bridge of the line that holds the call speaks for it. */
+function onBridgeEvent(line: Line, event: BridgeEvent): void {
+  const current = active?.line === line ? active : null;
   if (event.event === "mic") {
     if (!event.pcm || !current) return;
     current.voice?.sendMicFrame(event.pcm);
@@ -888,14 +989,18 @@ function onBridgeEvent(event: BridgeEvent): void {
     return;
   }
   if (event.event === "ready") {
-    bridgeReady = true;
-    ownNumber = event.self ?? ownNumber;
-    console.error("phone-calls: the number is registered");
-    for (const connected of bridgeWaiters.splice(0)) connected();
+    line.ready = true;
+    // a single line set up without PHONE_SIP_NUMBER learns its number here
+    if (event.self && !line.number) {
+      line.number = event.self;
+      line.digits = event.self.replace(/\D/g, "");
+    }
+    console.error(`phone-calls: the number${named(line)} is registered`);
+    for (const connected of line.waiters.splice(0)) connected();
     return;
   }
   if (event.event === "incoming") {
-    void incoming(event);
+    void incoming(line, event);
     return;
   }
   if (!current) return;
@@ -905,6 +1010,7 @@ function onBridgeEvent(event: BridgeEvent): void {
     const streamPath = current.agentPath!;
     void record("call-placed", {
       callId: current.callId,
+      line: line.number,
       to: current.who,
       reportTo: current.reportTo ?? null,
       streamPath,
@@ -926,6 +1032,7 @@ function onBridgeEvent(event: BridgeEvent): void {
     current.metrics.ringMs = current.ringingAt ? current.answeredAt - current.ringingAt : null;
     void record("call-answered", {
       callId: current.callId,
+      line: line.number,
       direction: current.direction,
       ...(current.direction === "out" ? { to: current.who } : { from: current.who }),
       ...(current.test && { test: true }),
@@ -950,27 +1057,33 @@ function onBridgeEvent(event: BridgeEvent): void {
   }
 }
 
-/** `jeeves-phone serve`, kept running: started again a few seconds after it exits. */
-function startBridge(): void {
-  const child = spawn(BRIDGE, ["serve"], { stdio: ["pipe", "pipe", "pipe"] });
-  bridge = child;
+/** The line's `jeeves-phone serve`, kept running: started again a few seconds after it exits. A
+ *  line's bridge exiting touches no other line. */
+function startBridge(line: Line): void {
+  const child = spawn(BRIDGE, ["serve"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, ...line.env },
+  });
+  line.child = child;
   child.stderr.on("data", (chunk: Buffer) => process.stderr.write(chunk));
-  createInterface({ input: child.stdout }).on("line", (line) => {
+  createInterface({ input: child.stdout }).on("line", (said) => {
     let event: BridgeEvent;
     try {
-      event = JSON.parse(line) as BridgeEvent;
+      event = JSON.parse(said) as BridgeEvent;
     } catch {
       return;
     }
-    onBridgeEvent(event);
+    onBridgeEvent(line, event);
   });
   child.on("exit", (code) => {
-    if (bridge === child) bridge = null;
-    bridgeReady = false;
-    console.error(`phone-calls: jeeves-phone exited (${String(code)}); starting it again in 5 s`);
-    if (active)
+    if (line.child === child) line.child = null;
+    line.ready = false;
+    console.error(
+      `phone-calls: jeeves-phone${named(line)} exited (${String(code)}); starting it again in 5 s`,
+    );
+    if (active?.line === line)
       void finished(active, `the call process ended (${String(code)})`, active.answeredAt !== null);
-    setTimeout(startBridge, 5000);
+    setTimeout(() => startBridge(line), 5000);
   });
 }
 
@@ -979,16 +1092,22 @@ export default async function provide(connection: { itx: Mind }) {
   itx = connection.itx;
   if (reconnected) carryOver(connection.itx);
   provisionAnswered(connection.itx);
-  // `iterate provide` calls this again on each reconnection: the line stays as it is
-  if (!bridgeStarted) startBridge();
-  bridgeStarted = true;
+  // `iterate provide` calls this again on each reconnection: the lines stay as they are
+  if (!bridgesStarted)
+    for (const line of lines.values()) {
+      if (line.missing)
+        console.error(`phone-calls: the line ${line.number} is not started: ${line.missing}`);
+      else startBridge(line);
+    }
+  bridgesStarted = true;
+  const all = [...lines.values()];
   const numbers = [...ALLOWED].map((n) => `+${n}`).join(", ") || "nobody";
   return {
     call,
     /** End the call in progress, if any. */
     hangup() {
       if (!active) return { hungUp: false };
-      tell({ hangup: true });
+      tell(active.line, { hangup: true });
       return { hungUp: true, callId: active.callId };
     },
     /** The call in progress, or null. */
@@ -996,6 +1115,7 @@ export default async function provide(connection: { itx: Mind }) {
       return active
         ? {
             callId: active.callId,
+            line: active.line.number,
             direction: active.direction,
             with: active.who,
             answered: active.answeredAt !== null,
@@ -1003,9 +1123,13 @@ export default async function provide(connection: { itx: Mind }) {
           }
         : null;
     },
+    /** The lend's numbers, the default first, each `ready` while it is registered. */
+    lines() {
+      return all.map((line) => ({ number: line.number, ready: line.ready }));
+    },
     __describe: () => ({
-      instructions: `Phone calls on the agents' own number${ownNumber ? ` (${ownNumber})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone: the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this mind: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
-      functions: ["call", "hangup", "status"],
+      instructions: `${all.length > 1 ? `Phone calls on the agents' own numbers (${all.map((line, index) => `${line.number}${index ? "" : ", the default"}`).join("; ")}), over the real phone network. call({ to, from, opening, brief, reportTo }) rings a person's phone from \`from\`, one of those numbers in any spelling (the default ${defaultLine().number} unless given; lines() says which are registered):` : `Phone calls on the agents' own number${defaultLine().number ? ` (${defaultLine().number})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone:`} the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this mind: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for on WhatsApp. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It may ring anyone; it answers only ${numbers}.`,
+      functions: ["call", "hangup", "status", "lines"],
     }),
   };
 }
