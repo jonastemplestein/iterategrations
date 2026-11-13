@@ -77,6 +77,12 @@ it starts and checks it every five minutes (it exits when it changed, and the le
 again). This needs a NAT that keeps a socket's port (most home routers do); `PHONE_SIP_EXTERNAL_HOST`
 sets the address by hand.
 
+A home router also forgets a quiet UDP mapping, often within a minute: then the line's calls stop
+at "183 Session progress" and never arrive. So while it is registered, `serve` sends a keepalive
+(CRLF CRLF, RFC 5626) from its SIP port to every IPv4 address of the registrar every 15 seconds,
+between the REGISTERs. `PHONE_SIP_KEEPALIVE_SECONDS` sets the interval; `0` turns the keepalives
+off.
+
 ## What the mind gets
 
 ```js

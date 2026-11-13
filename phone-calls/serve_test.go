@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -365,5 +366,74 @@ func TestPlacedCallRefused(t *testing.T) {
 	h.server.handle(serveInput{Call: "+447700900001", Ring: 5})
 	if failed := h.expect("failed"); failed["reason"] != "busy" {
 		t.Fatalf("failed %v", failed)
+	}
+}
+
+// keepaliveServer starts a bridge whose registrar is a bare UDP socket on loopback, keepalives on
+// at `every`; it answers the bridge's SIP port and the registrar's socket.
+func keepaliveServer(t *testing.T, every time.Duration, unregistered bool) (int, *net.UDPConn) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx = zerolog.New(zerolog.NewTestWriter(t)).Level(zerolog.WarnLevel).WithContext(ctx)
+	registrar, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registrar.Close() })
+	port := int(nextPort.Add(2))
+	conf := lineConfig{
+		Number: "+447700900000", Domain: "127.0.0.1", Proxy: registrar.LocalAddr().String(),
+		BindIP: "127.0.0.1", Port: port, RingLimit: time.Second,
+		Keepalive: every, KeepaliveUnregistered: unregistered,
+	}
+	if _, err := newServer(ctx, conf, func(map[string]any) {}); err != nil {
+		t.Fatal(err)
+	}
+	return port, registrar
+}
+
+// keepalives reads what reaches the registrar for `during`: each datagram's source port and bytes.
+func keepalives(t *testing.T, registrar *net.UDPConn, during time.Duration) (ports []int, payloads []string) {
+	t.Helper()
+	buf := make([]byte, 2048)
+	_ = registrar.SetReadDeadline(time.Now().Add(during))
+	for {
+		n, from, err := registrar.ReadFromUDP(buf)
+		if err != nil {
+			return ports, payloads
+		}
+		ports = append(ports, from.Port)
+		payloads = append(payloads, string(buf[:n]))
+	}
+}
+
+func TestKeepalivesLeaveTheSIPPort(t *testing.T) {
+	port, registrar := keepaliveServer(t, 30*time.Millisecond, true)
+	ports, payloads := keepalives(t, registrar, 400*time.Millisecond)
+	if len(ports) < 4 {
+		t.Fatalf("%d keepalives in 400 ms at one every 30 ms", len(ports))
+	}
+	for i := range ports {
+		if ports[i] != port || payloads[i] != "\r\n\r\n" {
+			t.Fatalf("got %q from port %d, want CRLF CRLF from the SIP port %d", payloads[i], ports[i], port)
+		}
+	}
+}
+
+func TestNoKeepalives(t *testing.T) {
+	for name, conf := range map[string]struct {
+		every        time.Duration
+		unregistered bool
+	}{
+		"0 turns them off": {0, true},
+		"not registered":   {30 * time.Millisecond, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, registrar := keepaliveServer(t, conf.every, conf.unregistered)
+			if ports, _ := keepalives(t, registrar, 200*time.Millisecond); len(ports) != 0 {
+				t.Fatalf("%d keepalives arrived", len(ports))
+			}
+		})
 	}
 }
