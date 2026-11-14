@@ -41,7 +41,6 @@
 // `call-received`, `call-answered` (with the caller's agent path) and `call-ended` (with what was
 // said), the WhatsApp lend's payloads.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -107,7 +106,35 @@ const STRANGER_MAIL_TO = (process.env.PHONE_CALLS_STRANGER_MAIL_TO || "").trim()
 /** HARDENING, unset for now: caller ID can be forged, so with PHONE_CALLS_MEMBER_WORD set a member's
  *  call counts as the member's only once the caller says this word; until then it is a stranger's. */
 const MEMBER_WORD = (process.env.PHONE_CALLS_MEMBER_WORD || "").trim();
-const SALES_LINE = (process.env.PHONE_CALLS_SALES_LINE || "").replace(/\D/g, "");
+// WHICH LINE DOES WHAT is the mind's choice, not this lend's: at each incoming call the lend passes
+// the facts, `line` (the mind's number that rang) and `from` (the caller's number), to
+// `itx.config.routeCall`, the mind's own code (its config repo's call-lines.ts), and answers the
+// call as that says. "sales": an isolated relay per call with the route's instructions and opening.
+// "default": the caller's own voice agent, a member as themselves and anyone else as an outside
+// person. A route that cannot be had or is not valid turns the call away.
+const SalesRoute = z.object({
+  mode: z.literal("sales"),
+  profile: z.string(),
+  client: z.string().regex(/^phone-sales-[0-9a-f-]{36}$/),
+  instructions: z.string().min(1).includes("https://cloud.iterate.com"),
+  opening: z.string().min(1),
+  source: z.string().optional(),
+});
+const DefaultRoute = z.object({
+  mode: z.literal("default"),
+  profile: z.string(),
+  client: z
+    .string()
+    .regex(/^phone-\d+$/)
+    .nullable(),
+  opening: z.string().min(1).nullable(),
+});
+const CallRoute = z.discriminatedUnion("mode", [SalesRoute, DefaultRoute]);
+type CallRoute = z.infer<typeof CallRoute>;
+/** The mind's answer for a call to `line` from `from` (`itx.config.routeCall`), checked. */
+async function routeFor(mind: Mind, line: Line, from: string): Promise<CallRoute> {
+  return CallRoute.parse(await mind.config.routeCall({ line: line.number, from }));
+}
 const SALES_MAX_MS = 600_000;
 const SalesWords = z.string().max(24_000);
 /** For a test only: the exact caller (the bridge's `from`, e.g. "?phonetest") of a test call that
@@ -134,7 +161,10 @@ const BUSY_KEY = "calls/busy";
 
 /** The mind, as `iterate provide` hands it over: the parts this file uses. */
 type Mind = Parameters<typeof connectVoiceDevice>[0] & {
-  config: { sendSms(input: { from: string; to: string; text: string }): Promise<unknown> };
+  config: {
+    sendSms(input: { from: string; to: string; text: string }): Promise<unknown>;
+    routeCall(input: { line: string; from: string }): Promise<unknown>;
+  };
   repos: {
     get(path: string): {
       tip(): Promise<string>;
@@ -207,6 +237,10 @@ type ActiveCall = {
   answeredAt: number | null;
   opening: string | undefined;
   brief: string | undefined;
+  /** How the mind said to answer this call (routeFor); "default" for a call the mind placed. */
+  mode: "sales" | "default";
+  /** The caller's voice device, as the mind named it; null: `phone-<their digits>`. */
+  client: string | null;
   sales: {
     client: string;
     prompt: string;
@@ -283,10 +317,9 @@ function deviceFor(mind: Mind, client: string): Promise<VoiceDevice<VoiceContext
   }
   return device;
 }
-const isSales = (current: ActiveCall) =>
-  Boolean(SALES_LINE) && current.direction === "in" && current.line.digits === SALES_LINE;
+const isSales = (current: ActiveCall) => current.direction === "in" && current.mode === "sales";
 const clientFor = (current: ActiveCall) =>
-  current.sales?.client ?? `phone-${current.number || "test"}`;
+  current.sales?.client ?? current.client ?? `phone-${current.number || "test"}`;
 
 /** A sales relay has no general agent. Only the fixed signup SMS action can have an external effect. */
 async function salesDevice(mind: Mind, current: ActiveCall): Promise<VoiceDevice<VoiceContext>> {
@@ -344,39 +377,47 @@ async function salesDevice(mind: Mind, current: ActiveCall): Promise<VoiceDevice
   return device;
 }
 
-async function prepareSales(mind: Mind, current: ActiveCall): Promise<void> {
-  const repo = mind.repos.get("/repos/config");
-  const commitOid = await repo.tip();
-  const prompt = await repo.readFile("sales-calls.md", { commitOid });
-  const opening = /^## Opening\r?\n\r?\n> (.+)$/m.exec(prompt)?.[1];
-  if (!opening || !prompt.includes("https://cloud.iterate.com"))
-    throw new Error("sales-calls.md must contain an Opening blockquote and the signup URL.");
+async function prepareSales(
+  mind: Mind,
+  current: ActiveCall,
+  route: z.infer<typeof SalesRoute>,
+): Promise<void> {
+  // the config tip when the call came in, for the record: the route came from the code it published
+  const commitOid = await mind.repos.get("/repos/config").tip();
   current.sales = {
-    client: `phone-sales-${randomUUID()}`,
-    prompt,
+    client: route.client,
+    prompt: route.instructions,
     commitOid,
     smsConsent: { state: "not-offered", at: 0 },
     smsAttempt: { started: false },
   };
-  current.opening = opening;
-  current.brief = prompt;
+  current.opening = route.opening;
+  current.brief = route.instructions;
 }
 
-const signupSms = new SignupSms({
-  from: `+${SALES_LINE}`,
-  ownNumbers: (process.env.PHONE_SIP_NUMBERS || process.env.PHONE_SIP_NUMBER || "")
-    .split(",")
-    .map((number) => `+${number.replace(/\D/g, "")}`),
-  stateFile:
-    process.env.PHONE_CALLS_SIGNUP_SMS_STATE_FILE ||
-    join(homedir(), ".local/state/iterate-mind-phone-calls/signup-sms.json"),
-  now: () => Date.now(),
-  timeoutMs: 20_000,
-  send: async (input) => {
-    if (!itx) throw new Error("Phone bridge is disconnected.");
-    return await itx.config.sendSms(input);
-  },
-});
+/** The fixed signup SMS goes from the sales line the caller rang: one sender per line. */
+const signupSmsByLine = new Map<string, SignupSms>();
+const signupSmsFor = (line: Line): SignupSms => {
+  let sender = signupSmsByLine.get(line.digits);
+  if (!sender) signupSmsByLine.set(line.digits, (sender = newSignupSms(line.number)));
+  return sender;
+};
+const newSignupSms = (from: string) =>
+  new SignupSms({
+    from,
+    ownNumbers: (process.env.PHONE_SIP_NUMBERS || process.env.PHONE_SIP_NUMBER || "")
+      .split(",")
+      .map((number) => `+${number.replace(/\D/g, "")}`),
+    stateFile:
+      process.env.PHONE_CALLS_SIGNUP_SMS_STATE_FILE ||
+      join(homedir(), ".local/state/iterate-mind-phone-calls/signup-sms.json"),
+    now: () => Date.now(),
+    timeoutMs: 20_000,
+    send: async (input) => {
+      if (!itx) throw new Error("Phone bridge is disconnected.");
+      return await itx.config.sendSms(input);
+    },
+  });
 
 /** Delegation text is data. The only action uses consent facts and the active call's fixed destination. */
 async function salesMessage(client: string, rawWords: unknown) {
@@ -401,7 +442,7 @@ async function salesMessage(client: string, rawWords: unknown) {
       llmRequestPolicy: { behaviour: "dont-trigger-request" },
     },
   });
-  const sms = await signupSms.request({
+  const sms = await signupSmsFor(current.line).request({
     client: current.sales.client,
     number: current.number,
     untrusted: current.untrustedCaller || current.test,
@@ -663,6 +704,8 @@ const newCall = (
   answeredAt: null,
   opening: undefined,
   brief: undefined,
+  mode: "default",
+  client: null,
   sales: null,
   untrustedCaller: false,
   reportTo: undefined,
@@ -1231,13 +1274,23 @@ async function incoming(line: Line, event: BridgeEvent): Promise<void> {
     });
   };
   if (!mind) return tell(line, { reject: callId });
-  const salesLine = Boolean(SALES_LINE) && line.digits === SALES_LINE;
+  // the mind says what this line does: the lend passes the facts and nothing else
+  let route: CallRoute;
+  try {
+    route = await routeFor(mind, line, digits);
+  } catch (error) {
+    console.error(`phone-calls: the mind did not route the call${named(line)}: ${String(error)}`);
+    return turnAway(`the mind did not route the call: ${String(error).slice(0, 300)}`);
+  }
+  const salesLine = route.mode === "sales";
   if (!salesLine && !test && (event.untrusted || !digits))
     return turnAway("the line does not vouch for the caller's number");
   if (!salesLine && !test && !ALLOWED.has(digits) && !isMember(digits) && !ANSWER_STRANGERS)
     return turnAway("not a number this lend answers");
   if (active) return turnAway(`another call is in progress (with ${active.who})`);
   const current = newCall("in", line, test ? "" : digits, who, test);
+  current.mode = route.mode;
+  if (route.mode === "default" && !test) current.client = route.client;
   current.untrustedCaller = Boolean(event.untrusted);
   current.callId = callId;
   current.ringingAt = Date.now();
@@ -1249,8 +1302,13 @@ async function incoming(line: Line, event: BridgeEvent): Promise<void> {
   }
   markBusy(mind, current);
   current.opening =
-    (test ? ANSWER_WITH.test : ANSWER_WITH[digits]) ?? ANSWER_WITH.default ?? "Hello.";
-  current.noted = salesLine ? prepareSales(mind, current) : takeNote(mind, current);
+    (test
+      ? ANSWER_WITH.test
+      : (route.mode === "default" && route.opening) || ANSWER_WITH[digits]) ??
+    ANSWER_WITH.default ??
+    "Hello.";
+  current.noted =
+    route.mode === "sales" ? prepareSales(mind, current, route) : takeNote(mind, current);
   try {
     await current.noted;
   } catch (error) {
@@ -1395,8 +1453,10 @@ function startBridge(line: Line): void {
 }
 
 export default async function provide(connection: { itx: Mind }) {
-  if (SALES_LINE && !lines.has(SALES_LINE))
-    throw new Error("PHONE_CALLS_SALES_LINE must name a configured SIP line.");
+  if (process.env.PHONE_CALLS_SALES_LINE)
+    console.error(
+      "phone-calls: PHONE_CALLS_SALES_LINE is ignored: the mind's routeCall says which line does what",
+    );
   const reconnected = itx !== undefined;
   itx = connection.itx;
   if (reconnected) carryOver(connection.itx);
@@ -1411,24 +1471,54 @@ export default async function provide(connection: { itx: Mind }) {
   bridgesStarted = true;
   const all = [...lines.values()];
   const numbers = [...ALLOWED].map((n) => `+${n}`).join(", ") || "nobody";
+  /** What each line does for a caller, as the mind's routeCall answers it, with no call: the
+   *  same question an incoming call asks. `from`: the caller to ask about (none: anonymous). */
+  const routing = async (input?: { from?: string }) => {
+    const from = String(input?.from ?? "").replace(/\D/g, "");
+    return await Promise.all(
+      all.map(async (line) => {
+        try {
+          const route = await routeFor(connection.itx, line, from);
+          return {
+            line: line.number,
+            ready: line.ready,
+            mode: route.mode,
+            profile: route.profile,
+            agentPath:
+              route.mode === "sales"
+                ? "/agents/voice/phone-sales-<new for each call>"
+                : route.client
+                  ? `/agents/voice/${route.client}`
+                  : null,
+            opening: route.opening,
+            ...(route.mode === "sales" && { source: route.source ?? null }),
+          };
+        } catch (error) {
+          return { line: line.number, ready: line.ready, error: String(error).slice(0, 300) };
+        }
+      }),
+    );
+  };
   return {
     call,
     salesMessage,
+    routing,
     async salesPolicy() {
-      if (!SALES_LINE) return null;
-      const repo = connection.itx.repos.get("/repos/config");
-      const commitOid = await repo.tip();
-      const prompt = await repo.readFile("sales-calls.md", { commitOid });
+      const sales = (await routing()).flatMap((line) =>
+        "mode" in line && line.mode === "sales" ? [line] : [],
+      );
+      if (sales.length === 0) return null;
+      const commitOid = await connection.itx.repos.get("/repos/config").tip();
       return {
-        line: `+${SALES_LINE}`,
-        source: "/repos/config/sales-calls.md",
+        lines: sales.map((line) => line.line),
+        source: sales.map((line) => line.source),
         commitOid,
-        opening: /^## Opening\r?\n\r?\n> (.+)$/m.exec(prompt)?.[1] ?? null,
+        opening: sales[0]!.opening ?? null,
         backend: "fixed signup-link SMS after recorded opt-in; no general agent or other tools",
         signupSms: {
           action: "send-signup-link",
           url: SIGNUP_URL,
-          from: `+${SALES_LINE}`,
+          from: "the sales line the caller rang",
           to: "active inbound caller only",
           consentQuestion: SIGNUP_OFFER,
           perCall: 1,
@@ -1465,8 +1555,8 @@ export default async function provide(connection: { itx: Mind }) {
       return all.map((line) => ({ number: line.number, ready: line.ready }));
     },
     __describe: () => ({
-      instructions: `${all.length > 1 ? `Phone calls on the agents' own numbers (${all.map((line, index) => `${line.number}${index ? "" : ", the default"}`).join("; ")}), over the real phone network. call({ to, from, opening, brief, reportTo }) rings a person's phone from \`from\`, one of those numbers in any spelling (the default ${defaultLine().number} unless given; lines() says which are registered):` : `Phone calls on the agents' own number${defaultLine().number ? ` (${defaultLine().number})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone:`} the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this mind: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for in writing. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It rings only members (${Object.values(MEMBERS).join(", ") || "none"}) and ${numbers}; it answers members${ANSWER_STRANGERS ? ", and anyone else as an outside person whose message is recorded (phone-calls/stranger-message) and mailed" : ` and ${numbers}`}.${SALES_LINE ? ` Inbound calls to +${SALES_LINE} instead use sales-calls.md, with no general agent or member history; only one fixed signup SMS after recorded opt-in and no email; salesPolicy() describes the live policy.` : ""}`,
-      functions: ["call", "hangup", "status", "lines", "salesPolicy"],
+      instructions: `${all.length > 1 ? `Phone calls on the agents' own numbers (${all.map((line, index) => `${line.number}${index ? "" : ", the default"}`).join("; ")}), over the real phone network. call({ to, from, opening, brief, reportTo }) rings a person's phone from \`from\`, one of those numbers in any spelling (the default ${defaultLine().number} unless given; lines() says which are registered):` : `Phone calls on the agents' own number${defaultLine().number ? ` (${defaultLine().number})` : ""}, over the real phone network. call({ to, opening, brief, reportTo }) rings a person's phone:`} the voice is connected first, then the phone rings (it answers { callId, ringing, streamPath } once it does; the ring gives up after ${String(RING_SECONDS)} s). When they answer they are talking to a voice agent of this mind: the person's own agent (streamPath, /agents/voice/phone-<their digits>), which keeps every call with them but not your conversation. It says \`opening\` first, and \`brief\` is all it knows about why you called, so put everything in it. A call FROM one of the same numbers is picked up the same way; to say something particular when a person next rings, leave a note first: await itx.kv.put('phone-calls/answer/<their digits>', JSON.stringify({ opening, brief, until })) (WhatsApp's whatsapp-calls/answer/<digits> note is read too). A caller's number can be faked on the phone network: the call's agent is told the caller is unverified, and a yes for money, deleting or messages to others is asked for in writing. One call at a time, WhatsApp calls included. hangup() ends it, status() answers the call in progress. Facts land on ${LOG_PATH} (phone-calls/call-placed or call-received, call-answered, call-ended with direction, the transcript and the call's metrics); with reportTo (your own agent path) you are messaged what was said when a call you placed ends. It rings only members (${Object.values(MEMBERS).join(", ") || "none"}) and ${numbers}; it answers members${ANSWER_STRANGERS ? ", and anyone else as an outside person whose message is recorded (phone-calls/stranger-message) and mailed" : ` and ${numbers}`}. Which line does what is the mind's own choice (its routeCall, call-lines.ts in the config repo): routing({ from }) answers it for each line with no call. A sales line has no general agent or member history; only one fixed signup SMS after recorded opt-in and no email; salesPolicy() describes it.`,
+      functions: ["call", "hangup", "status", "lines", "routing", "salesPolicy"],
     }),
   };
 }

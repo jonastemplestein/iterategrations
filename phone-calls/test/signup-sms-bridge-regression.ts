@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pretendMind, until } from "./pretend-mind.ts";
+import { pretendRoutes } from "./pretend-routes.ts";
 import { SIGNUP_OFFER, SIGNUP_CONFIRMATION, SIGNUP_TEXT } from "../signup-sms.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "signup-bridge-"));
@@ -25,7 +26,6 @@ Object.assign(process.env, {
   FAKE_BRIDGE_LOG: join(dir, "log-{line}.jsonl"),
   PHONE_SIP_NUMBERS: `+${other},+${sales}`,
   PHONE_SIP_PASSWORD_DIR: passwords,
-  PHONE_CALLS_SALES_LINE: `+${sales}`,
   PHONE_CALLS_MEMBERS: JSON.stringify({ [member]: "Sam" }),
   PHONE_CALLS_ANSWER_STRANGERS: "1",
   PHONE_CALLS_SIGNUP_SMS_STATE_FILE: join(dir, "signup-sms.json"),
@@ -52,13 +52,13 @@ try {
         sent.push(input);
         return await provider(input);
       },
+      routeCall: pretendRoutes({
+        lines: [other, sales],
+        sales: [sales],
+        instructions: () => "## Opening\n\n> Hello.\n\nhttps://cloud.iterate.com",
+      }).routeCall,
     },
-    repos: {
-      get: () => ({
-        tip: async () => "test",
-        readFile: async () => "## Opening\n\n> Hello.\n\nhttps://cloud.iterate.com",
-      }),
-    },
+    repos: { get: () => ({ tip: async () => "test" }) },
     cd: (path: string) => {
       const context = mind.itx.cd(path);
       return {

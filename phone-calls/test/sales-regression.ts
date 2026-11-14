@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pretendMind, until } from "./pretend-mind.ts";
+import { pretendRoutes } from "./pretend-routes.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "phone-sales-"));
 const passwords = join(dir, "passwords");
@@ -27,7 +28,6 @@ Object.assign(process.env, {
   PHONE_CALLS_MEMBERS: JSON.stringify({ [member]: "Sam" }),
   PHONE_CALLS_ANSWER_STRANGERS: "1",
   PHONE_CALLS_ANSWER_WITH: JSON.stringify({ [member]: "Hello Sam.", default: "Who is calling?" }),
-  PHONE_CALLS_SALES_LINE: `+${sales}`,
 });
 const lineSays = (number: string, event: Record<string, unknown>) =>
   appendFileSync(join(dir, `control-${number}.jsonl`), `${JSON.stringify(event)}\n`);
@@ -46,19 +46,19 @@ try {
   let prompt =
     "# Sales\n\n## Opening\n\n> Hello, I am the sales AI.\n\nUse https://cloud.iterate.com in your own Cloudflare account.";
   const reads: string[] = [];
+  // the mind, not the bridge, says the second line is the sales line
+  const routes = pretendRoutes({
+    lines: [first, sales],
+    sales: [sales],
+    instructions: () => prompt,
+  });
   const api = {
     ...mind.itx,
+    config: { routeCall: routes.routeCall },
     repos: {
       get: (path: string) => {
         assert.equal(path, "/repos/config");
-        return {
-          tip: async () => "test-commit",
-          readFile: async (file: string, options: unknown) => {
-            assert.equal(file, "sales-calls.md");
-            assert.deepEqual(options, { commitOid: "test-commit" });
-            return prompt;
-          },
-        };
+        return { tip: async () => "test-commit" };
       },
     },
     kv: {
@@ -98,9 +98,25 @@ try {
   };
   await until("both registered", () => bridge.lines().every((line) => line.ready));
   assert.equal((await bridge.salesPolicy())?.maxSeconds, 600);
+  assert.deepEqual((await bridge.salesPolicy())?.lines, [`+${sales}`]);
+  // the dry run: each line's route for a caller, asked of the mind, with no call
+  assert.deepEqual(
+    (await bridge.routing({ from: `+${member}` })).map((line) => [
+      line.line,
+      "mode" in line && line.mode,
+      "agentPath" in line && line.agentPath,
+    ]),
+    [
+      [`+${first}`, "default", `/agents/voice/phone-${member}`],
+      [`+${sales}`, "sales", "/agents/voice/phone-sales-<new for each call>"],
+    ],
+  );
+  routes.asked.length = 0;
 
   lineSays(first, { event: "incoming", callId: "member", number: member });
   await until("member answered", () => heard(first).some((e) => e.answer === "member"));
+  // the bridge passed the facts, the called line and the caller, and nothing else
+  assert.deepEqual(routes.asked, [{ line: `+${first}`, from: member }]);
   assert.equal(bridge.status()?.streamPath, `/agents/voice/phone-${member}`);
   await until("member opening", () =>
     mind.events.some((e) => e.payload.text === "Private member greeting"),
@@ -205,7 +221,10 @@ try {
   await until("bad prompt rejected", () => heard(sales).some((e) => e.reject === "bad-prompt"));
   await until("bad prompt ended", () => bridge.status() === null);
   assert.equal(mind.provisioned.length, priorProvisioned);
-  assert.match(ended().at(-1)!.payload.reason, /sales prompt could not be loaded/);
+  const refused = mind.events.filter((e) => e.type === "phone-calls/call-received").at(-1)!;
+  assert.equal(refused.payload.callId, "bad-prompt");
+  assert.equal(refused.payload.answering, false);
+  assert.match(refused.payload.reason, /the mind did not route the call/);
 
   const placed = await bridge.call({
     to: `+${member}`,
