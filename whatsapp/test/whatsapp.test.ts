@@ -30,7 +30,11 @@ test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messag
   assert.ok(lent.sendMessage && lent.groupMetadata && lent.downloadMedia && lent.__describe);
 
   // a send comes back as Baileys' message, as JSON, and lands as an `append`
-  const sent = await lent.sendMessage("447700900002@s.whatsapp.net", { text: "hi" });
+  const sent = await lent.sendMessage(
+    "447700900002@s.whatsapp.net",
+    { text: "hi" },
+    { from: "+447700900001" },
+  );
   assert.deepEqual(sent.key, {
     remoteJid: "447700900002@s.whatsapp.net",
     fromMe: true,
@@ -61,13 +65,19 @@ test("the pretend WhatsApp, lent: calls, events, media, refused urls, and messag
   assert.deepEqual([...(await lent.downloadMedia(received.messages[0]))], [7, 8, 9]);
 
   // media by url: data: goes through; a path or file: would be read from this computer
-  const withImage = await lent.sendMessage("447700900002@s.whatsapp.net", {
-    image: { url: "data:image/png;base64,AQID" },
-  });
+  const withImage = await lent.sendMessage(
+    "447700900002@s.whatsapp.net",
+    { image: { url: "data:image/png;base64,AQID" } },
+    { from: "+447700900001" },
+  );
   assert.deepEqual([...(await lent.downloadMedia(withImage))], [1, 2, 3]);
   for (const url of ["/etc/passwd", "file:///etc/passwd", "http://192.168.1.1/"])
     await assert.rejects(
-      lent.sendMessage("447700900002@s.whatsapp.net", { document: { url } }),
+      lent.sendMessage(
+        "447700900002@s.whatsapp.net",
+        { document: { url } },
+        { from: "+447700900001" },
+      ),
       /must be https: or data:/,
     );
 
@@ -356,7 +366,7 @@ test("with a list, only the functions it names are lent: the other ways to send,
     })({ itx: pretendMind().itx })) as Lent;
 
   const lent = await lendWith(["sendMessage", "groupMetadata", "downloadMedia", "noSuchFunction"]);
-  const names = ["__describe", "downloadMedia", "groupMetadata", "sendMessage"];
+  const names = ["__describe", "account", "downloadMedia", "groupMetadata", "sendMessage"];
   assert.deepEqual(Object.keys(lent).sort(), names);
   for (const name of ["relayMessage", "sendNode", "logout", "user", "getPNForLID", "getLIDForPN"])
     assert.equal(lent[name], undefined, `${name} is lent`);
@@ -365,7 +375,7 @@ test("with a list, only the functions it names are lent: the other ways to send,
   assert.deepEqual(described.functions, names);
   assert.match(described.instructions, /Only the functions listed under `functions` are lent/);
   // a listed function still reaches the socket
-  await lent.sendMessage!("447700900002@s.whatsapp.net", { text: "hi" });
+  await lent.sendMessage!("447700900002@s.whatsapp.net", { text: "hi" }, { from: "+447700900001" });
   assert.deepEqual(called, ["sendMessage"]);
 
   // with no list, the whole socket, as before
@@ -376,8 +386,64 @@ test("with a list, only the functions it names are lent: the other ways to send,
     (whole.__describe!() as unknown as { instructions: string }).instructions,
     /Only the functions listed/,
   );
-  // a list that names nothing lends nothing but the description
-  assert.deepEqual(Object.keys(await lendWith([])), ["__describe"]);
+  // a list that names nothing lends nothing but who the account is, and the description
+  assert.deepEqual(Object.keys(await lendWith([])).sort(), ["__describe", "account"]);
+});
+
+test("account() answers the linked number and name, and sendMessage sends only from that number", async () => {
+  const sent: unknown[][] = [];
+  const socket: Record<string, unknown> = {
+    ev: Object.assign(new EventEmitter(), { process: () => {} }),
+    user: { id: "447700900001:3@s.whatsapp.net", lid: "111:3@lid", name: "Ada" },
+    sendMessage: async (...args: unknown[]) => void sent.push(args),
+  };
+  const lent = (await lendOver({
+    logPath: "/integrations/whatsapp",
+    only: ["sendMessage"],
+    connect: async (onSocket) => onSocket(socket as unknown as Parameters<typeof onSocket>[0]),
+    downloadMedia: async () => new Uint8Array(),
+  })({ itx: pretendMind().itx })) as Lent;
+
+  assert.deepEqual(await lent.account(), {
+    number: "+447700900001",
+    jid: "447700900001@s.whatsapp.net",
+    lid: "111@lid",
+    name: "Ada",
+    account: "A WhatsApp account",
+  });
+
+  // the linked number, however it is written, sends; Baileys never sees `from`
+  const to = "447700900002@s.whatsapp.net";
+  for (const from of [
+    "+447700900001",
+    "447700900001",
+    "+44 7700 900001",
+    "447700900001@s.whatsapp.net",
+  ])
+    await lent.sendMessage(to, { text: "hi" }, { from, messageId: "M1" });
+  assert.equal(sent.length, 4);
+  assert.deepEqual(sent[0], [to, { text: "hi" }, { messageId: "M1" }]);
+
+  // no `from`, or another number: refused, and nothing reaches the socket
+  await assert.rejects(
+    lent.sendMessage(to, { text: "hi" }),
+    /needs the number it sends from.*\+447700900001/,
+  );
+  await assert.rejects(lent.sendMessage(to, { text: "hi" }, {}), /needs the number it sends from/);
+  await assert.rejects(
+    lent.sendMessage(to, { text: "hi" }, { from: "+44 7700 900999" }),
+    /linked to \+447700900001, not \+44 7700 900999/,
+  );
+  assert.equal(sent.length, 4);
+
+  // not linked yet: no account, and no send
+  socket.user = undefined;
+  assert.equal(await lent.account(), null);
+  await assert.rejects(
+    lent.sendMessage(to, { text: "hi" }, { from: "+447700900001" }),
+    /not linked yet/,
+  );
+  assert.equal(sent.length, 4);
 });
 
 test("a lend's description is one line within the mind's limit of 500 characters, whatever the account's text and the list", () => {
@@ -399,7 +465,10 @@ test("a lend's description is one line within the mind's limit of 500 characters
   const listed = describeLend(account, tenNames, "/integrations/whatsapp/personal");
   assert.ok(listed.length <= 500, `${listed.length} characters`);
   assert.ok(listed.startsWith(account), "the account's text is whole when there is room");
-  assert.match(listed, /it lends 10 named functions of it and no other; call __describe\(\) first/);
+  assert.match(
+    listed,
+    /it lends 10 named functions of it and no other, and account\(\); call __describe\(\) first/,
+  );
   assert.doesNotMatch(listed, /groupFetchAllParticipating/);
   assert.match(listed, /\(\/integrations\/whatsapp\/personal\)\.$/);
   assert.match(describeLend(account, ["sendMessage"], "/x"), /it lends 1 named function of it/);

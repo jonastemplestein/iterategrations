@@ -7,10 +7,12 @@
 // documentation is the lend's:
 //   - CALLS: every function of Baileys' socket, under its own name, as `itx.whatsapp.<name>(…)`:
 //     `sendMessage(jid, content, options)`, `groupMetadata(jid)`, `updateProfilePicture(jid, { url })`
-//     and the rest. Three are added for what is not a socket function: `downloadMedia(message)`,
-//     `user()` (the linked account, Baileys' `sock.user`), and `getPNForLID(lid)` / `getLIDForPN(pn)`
-//     (Baileys' `sock.signalRepository.lidMapping`). WHATSAPP_LEND names the functions to lend,
-//     and nothing else is lent then (`lendOnly`).
+//     and the rest. Four are added for what is not a socket function: `account()` (the linked
+//     account's number and name, lent whatever WHATSAPP_LEND says), `downloadMedia(message)`,
+//     `user()` (Baileys' `sock.user`), and `getPNForLID(lid)` / `getLIDForPN(pn)` (Baileys'
+//     `sock.signalRepository.lidMapping`). WHATSAPP_LEND names the functions to lend, and nothing
+//     else is lent then (`lendOnly`). One is changed: `sendMessage` takes the number it sends from
+//     as `options.from`, always, and sends nothing unless it is the linked account's (`checkFrom`).
 //   - EVENTS: every event the socket emits lands on the mind as `whatsapp/<Baileys' event name>`
 //     (`whatsapp/messages.upsert`, `whatsapp/messages.update`, `whatsapp/group-participants.update`,
 //     `whatsapp/presence.update`, `whatsapp/call`, …) with `payload.data` Baileys' own data. A
@@ -70,6 +72,50 @@ export function lendOnly(list: string | undefined): readonly string[] | undefine
 }
 const LEND = lendOnly(process.env.WHATSAPP_LEND);
 
+/** A phone number's digits, from a jid (`447700900001:3@s.whatsapp.net`, the device after the colon)
+ *  or a number as a person writes it (`+44 7700 900001`). */
+export function phoneDigits(id: string): string {
+  return id.split("@")[0]!.split(":")[0]!.replace(/\D/g, "");
+}
+
+/** WHO THIS ACCOUNT IS, as an agent checks it before it sends: the linked account's number and
+ *  name, from Baileys' `sock.user`, and WHATSAPP_ACCOUNT's words for it. Null until it is linked. */
+export function accountOf(
+  user:
+    | { id?: string; lid?: string; name?: string; verifiedName?: string; notify?: string }
+    | undefined,
+  account: string,
+) {
+  if (!user?.id) return null;
+  const digits = phoneDigits(user.id);
+  return {
+    number: `+${digits}`,
+    jid: `${digits}@s.whatsapp.net`,
+    lid: user.lid ? user.lid.replace(/:\d+@/, "@") : null,
+    name: user.name ?? user.verifiedName ?? user.notify ?? null,
+    account,
+  };
+}
+
+/** THE NUMBER A MESSAGE IS SENT FROM, which every `sendMessage` names (`options.from`) and which must
+ *  be the linked account's: a mind that lends two accounts, or a bridge linked to another number than
+ *  the mind believes, sends nothing it did not mean to. Throws before anything is sent. */
+export function checkFrom(from: unknown, user: { id?: string } | undefined): void {
+  if (!user?.id)
+    throw new Error(
+      "WhatsApp is not linked yet: scan the QR code the computer lending it printed. Nothing was sent.",
+    );
+  const linked = phoneDigits(user.id);
+  if (typeof from !== "string" || !phoneDigits(from))
+    throw new Error(
+      `sendMessage needs the number it sends from, as options.from (sendMessage(jid, content, { from: "+${linked}" })): account() answers it. Nothing was sent.`,
+    );
+  if (phoneDigits(from) !== linked)
+    throw new Error(
+      `This WhatsApp is linked to +${linked}, not ${from} (+${phoneDigits(from)}): nothing was sent. Give a number with its country code; account() answers the linked one.`,
+    );
+}
+
 /** A mind keeps a lend's description as one line of at most this many characters, and refuses
  *  a longer one: the lend then does not start. */
 const DESCRIPTION_LIMIT = 500;
@@ -84,8 +130,8 @@ export function describeLend(
   logPath: string,
 ): string {
   const lent = lend
-    ? `it lends ${lend.length} named function${lend.length === 1 ? "" : "s"} of it and no other; call __describe() first for their names`
-    : "every function of it under its own name (sendMessage(jid, content, options), groupMetadata(jid), onWhatsApp(...phones), …) plus downloadMedia(message), user() and getPNForLID(lid); call __describe() first";
+    ? `it lends ${lend.length} named function${lend.length === 1 ? "" : "s"} of it and no other, and account(); call __describe() first for their names`
+    : "every function of it under its own name (sendMessage(jid, content, { from }), groupMetadata(jid), onWhatsApp(...phones), …) plus account(), downloadMedia(message) and user(); call __describe() first";
   // the first sentence says what it is: the Dash's Integrations page lists a live lend by it
   const rest = `: WhatsApp messages, lent from a computer. It is Baileys' socket (https://baileys.wiki): ${lent}. Every event of the socket lands on the account's stream (${logPath}).`;
   const who = account.replace(/\s+/g, " ").trim();
@@ -450,6 +496,14 @@ export function provideWhatsApp(input: {
     };
     lent.getPNForLID = async (lid: string) => await lidMapping().getPNForLID(lid);
     lent.getLIDForPN = async (pn: string) => await lidMapping().getLIDForPN(pn);
+    // every send names the number it is from (`checkFrom`); Baileys never sees `from`
+    const send = lent.sendMessage;
+    if (send)
+      lent.sendMessage = async (jid: unknown, content: unknown, options?: unknown) => {
+        const { from, ...rest } = (options ?? {}) as { from?: unknown };
+        checkFrom(from, (current() as { user?: { id?: string } }).user);
+        return await (send as (...args: unknown[]) => Promise<unknown>)(jid, content, rest);
+      };
     const { only } = input;
     if (only) {
       // a name the socket does not have lends nothing: said here, since a typo lends less than was meant
@@ -458,10 +512,13 @@ export function provideWhatsApp(input: {
         console.error(`WhatsApp: WHATSAPP_LEND names ${unknown.join(", ")}: no such function`);
       for (const name of Object.keys(lent)) if (!only.includes(name)) delete lent[name];
     }
+    // who the account is, lent whatever the list: it reads, never sends, and sendMessage needs it
+    lent.account = async () =>
+      accountOf((current() as { user?: Parameters<typeof accountOf>[0] }).user, ACCOUNT);
     lent.__describe = () => ({
       instructions:
         ACCOUNT +
-        " through Baileys (https://baileys.wiki), a linked device on its owner's computer. Every function is Baileys' socket function of the same name, so Baileys' documentation is this API's, e.g. sendMessage(jid, { text }), sendMessage(jid, { image: { url }, caption }), sendMessage(jid, { react: { text, key } }), groupMetadata(jid), onWhatsApp(...phones), updateProfilePicture(jid, { url }). A jid is <digits>@s.whatsapp.net (a person), …@g.us (a group) or …@lid. Bytes cross as { type: 'Buffer', data: <base64> }. Media: pass { url } — an https: URL (an itx.files URL works) or a data: URL; nothing else. Added to the socket's own: downloadMedia(message) answers the bytes of a received message's media (store them with itx.files); user() answers the linked account (Baileys' sock.user); getPNForLID(lid) and getLIDForPN(pn) translate between a …@lid and a phone number's jid. Every event of the socket lands on " +
+        " through Baileys (https://baileys.wiki), a linked device on its owner's computer. Every function is Baileys' socket function of the same name, so Baileys' documentation is this API's, with one addition: sendMessage takes the number it sends from as options.from, always, and sends nothing unless it is the linked account's — call account() first ({ number, jid, lid, name, account }), then e.g. sendMessage(jid, { text }, { from: number }), sendMessage(jid, { image: { url }, caption }, { from: number }), sendMessage(jid, { react: { text, key } }, { from: number }). Also groupMetadata(jid), onWhatsApp(...phones), updateProfilePicture(jid, { url }). A jid is <digits>@s.whatsapp.net (a person), …@g.us (a group) or …@lid. Bytes cross as { type: 'Buffer', data: <base64> }. Media: pass { url } — an https: URL (an itx.files URL works) or a data: URL; nothing else. Added to the socket's own: downloadMedia(message) answers the bytes of a received message's media (store them with itx.files); user() answers the linked account (Baileys' sock.user); getPNForLID(lid) and getLIDForPN(pn) translate between a …@lid and a phone number's jid. Every event of the socket lands on " +
         input.logPath +
         " as whatsapp/<Baileys' event name> with Baileys' data in payload.data: whatsapp/messages.upsert (one event a message: payload.data.messages[0], payload.data.type), whatsapp/messages.update (delivery, read, edits), whatsapp/message-receipt.update, whatsapp/group-participants.update, whatsapp/presence.update, whatsapp/call, …; and what belongs to one chat lands again on " +
         input.logPath +

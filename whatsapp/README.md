@@ -20,6 +20,16 @@ the mind as `itx.whatsapp`. Nothing runs on iterate that is not already there
   `WHATSAPP_LOG_PATH=/integrations/whatsapp-personal` and `--name whatsappPersonal`. On that path
   the link never marks the account online by itself, so the person does not look online and their
   phone keeps its notifications; any other path keeps Baileys' defaults.
+- **Who the account is**: `account()` answers the linked account as
+  `{ number, jid, lid, name, account }`: `number` as `+<digits>`, `name` its WhatsApp name and
+  `account` the words of `WHATSAPP_ACCOUNT`; `null` before it is linked. It is lent whatever
+  `WHATSAPP_LEND` says: it reads and never sends.
+- **Every send names the number it is from**:
+  `sendMessage(jid, content, { from: "+44 7700 900000" })`. `options.from` is required, and unless
+  it is the linked account's number (in any spelling: `+44 7700 900000`, `447700900000` or the
+  jid) nothing is sent and the call says which number is linked. A mind that lends two accounts,
+  or believes the bridge is linked to another number than it is, sends nothing from the wrong one.
+  Baileys never sees `from`; the rest of `options` is Baileys'.
 - **Baileys' own socket API** is `itx.whatsapp`: `sendMessage(jid, content, options)`,
   `groupMetadata(jid)`, `onWhatsApp(...phones)`, `readMessages(keys)` and the rest, as documented at
   [baileys.wiki](https://baileys.wiki), plus `downloadMedia(message)` for a received message's
@@ -27,12 +37,12 @@ the mind as `itx.whatsapp`. Nothing runs on iterate that is not already there
   for an agent. The whole socket, `logout()` included: share only with a
   mind you trust.
 - **Or lend only some of it**: `WHATSAPP_LEND=sendMessage,groupMetadata,downloadMedia` lends those
-  functions and `__describe()`, and nothing else of the socket. Use it when the mind holds
+  functions, `account()` and `__describe()`, and nothing else of the socket. Use it when the mind holds
   `sendMessage` for a person's approval: such a rule holds a function by its name, and with the
   whole socket lent, Baileys' `relayMessage` (which `sendMessage` calls), `sendNode` and `query`
   send a message too, and `logout()` unlinks the device. With a list they are not there to call.
   Unset, the whole socket is lent. `__describe()` names what is lent.
-- **Files**: send one with its URL, `sendMessage(jid, { image: { url: await itx.files.get(path).url() } })`
+- **Files**: send one with its URL, `sendMessage(jid, { image: { url: await itx.files.get(path).url() } }, { from })`
   (only `https:` and `data:` URLs: Baileys would read anything else from this computer), and keep a
   received one with `itx.files.get(path).put({ contentType, data: await itx.whatsapp.downloadMedia(message) })`.
 
@@ -56,8 +66,12 @@ Try it from the mind:
 
 ```js
 async (itx) => {
-  const [me] = await itx.whatsapp.onWhatsApp("+44 7700 900123");
-  return await itx.whatsapp.sendMessage(me.jid, { text: "hello from iterate" });
+  const { number } = await itx.whatsapp.account(); // the linked account: the number every send names
+  return await itx.whatsapp.sendMessage(
+    "447700900123@s.whatsapp.net",
+    { text: "hello from iterate" },
+    { from: number },
+  );
 };
 ```
 
@@ -93,7 +107,7 @@ A rule whose target is `itx.builtins.rpcStubs.get('whatsapp')` is the live lend,
 shapes for `sendMessage` (text, media by `{ url }` or bytes, reactions), `onWhatsApp`,
 `groupMetadata`, `readMessages` and `sendPresenceUpdate`, plus `simulateIncomingMessage({ from,
 text?, image? })`, a contact writing to you, and `sentMessages()`. Its messages land on
-`/integrations/whatsapp-dummy`.
+`/integrations/whatsapp-dummy`. Its account is `+44 7700 900001`: send with `{ from: "+447700900001" }`.
 
 ```sh
 iterate provide whatsapp/src/dummy.ts --name whatsappDummy --mind <your mind>
