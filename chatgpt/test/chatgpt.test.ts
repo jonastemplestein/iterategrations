@@ -72,6 +72,7 @@ function fakeMind(options: { scope?: string; apiStatus?: number; slug?: string }
           id_token: ID_TOKEN,
           access_token: "access-1",
           refresh_token: "refresh-1",
+          expires_in: 3600,
           scope: options.scope ?? SCOPE,
         });
       if (origin === "https://api.openai.com") {
@@ -182,16 +183,21 @@ test("the page offers Connect, then the consent link and a paste box, then the a
   assert.deepEqual(mind.secrets, {});
   assert.deepEqual(mind.calls, [], "nothing is sent to OpenAI before the person pastes");
 
+  const pasted = Date.now();
   res = await mind.paste(callbackFor(html));
   assert.equal(res.status, 303);
   assert.doesNotMatch(res.headers.get("location")!, /error/);
 
   const secret = mind.secrets["/secrets/chatgpt"]!;
-  assert.deepEqual(secret.material, {
+  const { accessTokenExpiresAt, ...tokens } = secret.material;
+  assert.deepEqual(tokens, {
     accessToken: "access-1",
     refreshToken: "refresh-1",
     clientId: "oaiapp_issued",
   });
+  // OpenAI said the token lasts an hour: the secret keeps when that is, and the platform
+  // refreshes it by then
+  assertAnHourAfter(pasted, accessTokenExpiresAt);
   assert.deepEqual(secret.options.urls, ["https://api.openai.com", "https://auth.openai.com"]);
   assert.equal(secret.options.refresh.kind, "worker");
   assert.equal(mind.kv["chatgpt/pending"], undefined, "the sign-in is spent");
@@ -320,6 +326,44 @@ test("the exchange code trades the refresh token with OpenAI's client and keeps 
     clientId: "oaiapp_issued",
   });
 });
+
+test("the exchange code keeps when the new token ends, and forgets when the old one did", async () => {
+  const connected = {
+    accessToken: "old",
+    refreshToken: "r-old",
+    clientId: "oaiapp_issued",
+    accessTokenExpiresAt: "2026-01-01T00:00:00.000Z",
+  };
+  const asked = Date.now();
+  const { accessTokenExpiresAt, ...tokens } = await runExchange(connected, async () =>
+    Response.json({ access_token: "new", refresh_token: "r-new", expires_in: 3600 }),
+  );
+  assert.deepEqual(tokens, {
+    accessToken: "new",
+    refreshToken: "r-new",
+    clientId: "oaiapp_issued",
+  });
+  assertAnHourAfter(asked, accessTokenExpiresAt);
+
+  // an answer that does not say when its token ends: the old token's end is not the new one's
+  const unsaid = await runExchange(connected, async () =>
+    Response.json({ access_token: "new", refresh_token: "r-new" }),
+  );
+  assert.deepEqual(unsaid, {
+    accessToken: "new",
+    refreshToken: "r-new",
+    clientId: "oaiapp_issued",
+  });
+});
+
+/** `iso` is an hour after `since`, give or take the time the test itself took. */
+function assertAnHourAfter(since: number, iso: string): void {
+  const at = Date.parse(iso);
+  assert.ok(
+    at >= since + 3_600_000 && at <= Date.now() + 3_600_000,
+    `${iso} is not an hour after ${new Date(since).toISOString()}`,
+  );
+}
 
 test("a refused refresh says to connect again, naming OpenAI's code but never a token", async () => {
   await assert.rejects(

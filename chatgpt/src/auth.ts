@@ -43,7 +43,11 @@ export const RESOURCE = "https://api.openai.com/v1";
 export const SCOPE =
   "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const DIRECT_SCOPE = "chatgpt.tokens.use.direct";
-/** The secret that holds the tokens: `accessToken`, `refreshToken` and `clientId`. */
+/** The secret that holds the tokens: `accessToken`, `refreshToken` and `clientId`, and
+ *  `accessTokenExpiresAt`, the ISO time the access token ends (OpenAI's `expires_in`, an hour). The
+ *  platform reads that field: it refreshes a secret whose token has ended before it sends a
+ *  request. Without it only a 401 starts a refresh, and api.openai.com answers an ended plan token
+ *  with a bare 400 (seen from 24 November 2026), which starts none: every request then fails. */
 export const SECRET = "/secrets/chatgpt";
 /** The only origins the tokens are ever sent to. */
 export const PIN: string[] = ["https://api.openai.com", "https://auth.openai.com"];
@@ -89,9 +93,11 @@ export function accountOf(idToken: string | undefined): Account {
 }
 
 /** The exchange code the secret refreshes itself with (the platform runs it in a jail whose only
- *  egress is the secret's pin): on a 401 from OpenAI, trade the refresh token for new tokens with the
- *  client OpenAI registered. OpenAI rotates the refresh token, so the answer's is kept; the platform
- *  keeps what this returns. */
+ *  egress is the secret's pin): when the token has ended, or OpenAI answers 401, trade the refresh
+ *  token for new tokens with the client OpenAI registered. OpenAI rotates the refresh token, so the
+ *  answer's is kept, and so is the new token's end (`SECRET`); the platform keeps what this
+ *  returns. The secret holds this source from the day it was connected: a connection made with an
+ *  older build keeps that build's code until the person connects again. */
 export const EXCHANGE_SOURCE: string = `const TOKEN_URL = ${JSON.stringify(TOKEN_URL)};
 const RESOURCE = ${JSON.stringify(RESOURCE)};
 export async function exchange(material, fetch) {
@@ -117,10 +123,15 @@ export async function exchange(material, fetch) {
   }
   const tokens = await response.json();
   if (!tokens.access_token) throw new Error("ChatGPT's refresh answered with no access token");
+  // the old token's end goes: the answer says when the new token ends, or nothing does
+  const { accessTokenExpiresAt: ended, ...kept } = material;
   return {
-    ...material,
+    ...kept,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token || material.refreshToken,
+    ...(typeof tokens.expires_in === "number" && tokens.expires_in > 0 && {
+      accessTokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+    }),
   };
 }
 `;
@@ -244,6 +255,7 @@ export async function finishLogin(itx: ChatgptItx, pasted: string): Promise<Acco
     refresh_token?: string;
     id_token?: string;
     scope?: string;
+    expires_in?: number;
   };
   if (!tokens.access_token || !tokens.refresh_token)
     throw new Error("OpenAI's answer holds no access or refresh token. Start again.");
@@ -254,7 +266,16 @@ export async function finishLogin(itx: ChatgptItx, pasted: string): Promise<Acco
   const account = accountOf(tokens.id_token);
   await itx.secrets.set(
     SECRET,
-    { accessToken: tokens.access_token, refreshToken: tokens.refresh_token, clientId },
+    {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      clientId,
+      // as the exchange code keeps it at each refresh
+      ...(typeof tokens.expires_in === "number" &&
+        tokens.expires_in > 0 && {
+          accessTokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+        }),
+    },
     { urls: PIN, refresh: { kind: "worker", source: EXCHANGE_SOURCE } },
   );
   await itx.kv.put(ACCOUNT_KEY, JSON.stringify(account));

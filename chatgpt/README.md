@@ -11,8 +11,9 @@ registers a public client for that person during the consent. The tokens are one
 `/secrets/chatgpt`, pinned to `api.openai.com` and `auth.openai.com`. The package ships no API
 client: mind code and agents call OpenAI with plain `fetch` and a placeholder for the token, and
 iterate's egress swaps in the real token ([Calling the Responses API](#calling-the-responses-api)).
-When OpenAI answers 401, the platform runs the secret's exchange code (in `src/auth.ts`), which
-trades the refresh token for a new token and keeps the rotated refresh token.
+The secret keeps when its token ends (`accessTokenExpiresAt`, an hour after OpenAI issued it). When
+that time has come, or OpenAI answers 401, the platform runs the secret's exchange code (in
+`src/auth.ts`), which trades the refresh token for a new token and keeps the rotated refresh token.
 
 - **The page** (members only, at the mind's `chatgpt` address): a Connect button, the consent
   link and a box for the address OpenAI sends the browser to, who is connected and their plan, a
@@ -108,9 +109,14 @@ mind's config worker, a `run` script) the global `fetch` is the mind's egress.
   the placeholder for the real token on the way out.
 - **Origins:** the secret is pinned to `https://api.openai.com` and `https://auth.openai.com` (where
   the platform refreshes it). Egress sends the token nowhere else.
-- **Expiry:** do nothing. When OpenAI answers 401, the platform refreshes the token and sends the
-  request again, once. A 401 that reaches you means the refresh failed: the person connects ChatGPT
-  again.
+- **Expiry:** do nothing. The token lasts an hour. The secret keeps when it ends, and the platform
+  refreshes it a minute before that, so no request is sent with an ended token. On a 401 it
+  refreshes too, and sends the request again, once. A 401 that reaches you means the refresh
+  failed: the person connects ChatGPT again.
+- **A bare 400 on every request** means an ended token that nothing refreshed: OpenAI answers an
+  ended plan token `400 Bad Request` (since 24 November 2026), not 401. A connection made before
+  this package kept the token's end has no time to refresh by, and the secret holds its exchange
+  code from the day it was connected: the person connects ChatGPT again, once.
 
 A plan's token differs from api.openai.com's own docs
 ([OpenAI's preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)):
